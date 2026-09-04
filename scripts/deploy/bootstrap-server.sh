@@ -14,6 +14,7 @@ if [ ! -f /etc/7grecorder/master.key ]; then
   umask 077
   openssl rand -base64 32 > /etc/7grecorder/master.key
 fi
+chown root:root /etc/7grecorder/master.key
 chmod 0600 /etc/7grecorder/master.key
 
 if [ ! -f /etc/7grecorder/app.env ]; then
@@ -43,7 +44,7 @@ EOF
   chmod 0640 /etc/7grecorder/recorder.env
 fi
 
-docker version >/dev/null
+docker version >/dev/null || sudo docker version >/dev/null
 df -h /data/7grecorder
 
 echo "7GRecorder server bootstrap complete."

@@ -55,6 +55,8 @@ sudo test -d /data/7grecorder/db
 sudo test -d /opt/7grecorder/deploy
 ```
 
+If the deploy user was just added to the `docker` group, log out of SSH and log in again before running deploy checks. The current shell does not receive the new group automatically.
+
 ## First Production Deploy
 
 After `dev` CI is green:
