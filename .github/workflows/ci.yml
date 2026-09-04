@@ -19,6 +19,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.6"
+          cache: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -30,6 +31,9 @@ jobs:
 
       - name: Backend format
         run: cd backend && test -z "$(gofmt -l .)"
+
+      - name: Backend download modules
+        run: cd backend && go mod download
 
       - name: Backend vet
         run: cd backend && go vet ./...
