@@ -75,16 +75,37 @@ Docker Compose
 - [外部集成边界](docs/INTEGRATIONS.md)
 - [CI/CD 与生产部署](docs/DEPLOYMENT.md)
 - [运行配置、运维与恢复](docs/OPERATIONS.md)
+- [生产初始化清单](docs/PRODUCTION_SETUP.md)
 - [AI Coding 开发流程](docs/AI_DEVELOPMENT_WORKFLOW.md)
 - [Coding Agent 入口规则](AGENTS.md)
 
 ## 当前阶段
 
-当前仓库处于 Pre-v1 **设计已基本定稿、可进入工程初始化与 AI Coding** 阶段，尚未初始化正式 GoFrame / React 工程。
+当前仓库处于 Pre-v1 **Phase 0 工程初始化** 阶段，已具备 GoFrame Backend、React/Vite Frontend、SQLite migration、Docker Compose、GitHub Actions CI 与 main-only Production Deploy 的基础骨架。
 
 架构、模块自治、Recording 生命周期、SQLite Job Queue、本地/COS 滚动存储、API 约定、外部集成、CI/CD、生产部署、备份/恢复和运行安全边界均已确定。
 
-开发阶段仍需基于仓库固定的 BililiveRecorder/biliup 版本制作真实脱敏 fixture，并把文档中的目标 Schema/API 落成 migration 和 DTO；这些属于实现验证，不再是大的架构决策。
+开发阶段仍需基于仓库固定的 BililiveRecorder/biliup 版本制作真实脱敏 fixture，并继续把 `DATABASE.md` / `API_DESIGN.md` 落成 DAO、DTO、OpenAPI 和业务实现；这些属于实现验证，不再是大的架构决策。
+
+## 工程入口
+
+```text
+backend/                 GoFrame Backend
+frontend/                React + TypeScript + Vite Frontend
+backend/migrations/      Goose SQLite migrations
+deploy/                  Compose 与 Nginx 示例
+scripts/deploy/          生产部署 / 回滚脚本
+.github/workflows/       CI 与 main-only 生产部署
+testdata/                外部工具脱敏 fixture 目录
+```
+
+CI 当前负责：
+
+```text
+Backend: gofmt / vet / test / build
+Frontend: lint / typecheck / test / build
+System: docker compose config
+```
 
 
 ## 开发前设计结论

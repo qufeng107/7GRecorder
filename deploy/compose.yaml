@@ -1,0 +1,45 @@
+services:
+  7grecorder:
+    image: 7grecorder:${GIT_SHA:?GIT_SHA must be set}
+    container_name: 7grecorder
+    restart: unless-stopped
+    env_file:
+      - path: /etc/7grecorder/app.env
+        required: false
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    volumes:
+      - /data/7grecorder:/data/7grecorder
+      - /etc/7grecorder/master.key:/etc/7grecorder/master.key:ro
+    networks:
+      - 7grecorder
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  bililiverecorder:
+    image: ${BILILIVE_RECORDER_IMAGE:?set a pinned BililiveRecorder image tag}
+    container_name: bililiverecorder
+    restart: unless-stopped
+    env_file:
+      - path: /etc/7grecorder/recorder.env
+        required: false
+    volumes:
+      - /data/7grecorder:/data/7grecorder
+      - bililiverecorder-workdir:/app
+    networks:
+      - 7grecorder
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  7grecorder:
+    name: 7grecorder
+
+volumes:
+  bililiverecorder-workdir:
