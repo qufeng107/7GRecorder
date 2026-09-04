@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/7grecorder/7grecorder/backend/internal/config"
+	"github.com/7grecorder/7grecorder/backend/internal/db"
 	"github.com/7grecorder/7grecorder/backend/internal/httpserver"
 	"github.com/7grecorder/7grecorder/backend/internal/version"
 	"github.com/gogf/gf/v2/os/gctx"
@@ -22,8 +23,10 @@ func main() {
 	case "all", "serve":
 		httpserver.Run(ctx, cfg)
 	case "migrate":
-		fmt.Fprintln(os.Stderr, "migrate command is reserved; use Goose migrations in backend/migrations for now")
-		os.Exit(2)
+		if err := db.Migrate(ctx, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
+			os.Exit(1)
+		}
 	case "worker":
 		fmt.Fprintln(os.Stderr, "worker command is reserved for a future split runtime; production uses all")
 		os.Exit(2)

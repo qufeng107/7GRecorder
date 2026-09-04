@@ -18,6 +18,7 @@ docker load -i "${release_root}/backend/7grecorder-image.tar"
 cp "${release_root}/deploy/compose.yaml" /opt/7grecorder/deploy/compose.yaml
 
 cd /opt/7grecorder/deploy
+GIT_SHA="${RELEASE_SHA}" docker compose run --rm --no-deps 7grecorder migrate
 GIT_SHA="${RELEASE_SHA}" docker compose up -d --no-deps 7grecorder
 
 for _ in $(seq 1 30); do

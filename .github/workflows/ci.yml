@@ -19,7 +19,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.6"
-          cache-dependency-path: backend/go.sum
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -40,6 +39,11 @@ jobs:
 
       - name: Backend build
         run: mkdir -p dist && cd backend && go build -ldflags "-X github.com/7grecorder/7grecorder/backend/internal/version.BuildSHA=${GITHUB_SHA}" -o ../dist/7grecorder ./cmd/7grecorder
+
+      - name: Migration clean DB smoke
+        run: |
+          mkdir -p /tmp/7grecorder-ci/db /tmp/7grecorder-ci/temp
+          DATA_ROOT=/tmp/7grecorder-ci SQLITE_PATH=/tmp/7grecorder-ci/db/7grecorder.db TEMP_ROOT=/tmp/7grecorder-ci/temp ./dist/7grecorder migrate
 
       - name: Frontend install
         run: cd frontend && pnpm install --no-frozen-lockfile
