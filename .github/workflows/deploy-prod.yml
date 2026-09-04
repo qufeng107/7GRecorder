@@ -20,11 +20,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+
+      - name: Setup pnpm
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          pnpm install --no-frozen-lockfile
+          pnpm build
+
       - name: Create release artifact
         run: |
           set -euo pipefail
           mkdir -p release
           git archive --format=tar --output=release/source.tar HEAD
+          mkdir -p release/frontend
+          cp -R frontend/dist release/frontend/dist
           echo "${GITHUB_SHA}" > release/RELEASE_SHA
           tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
           sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS

@@ -17,16 +17,13 @@ if [ -f "/data/7grecorder/db/7grecorder.db" ]; then
   cp "/data/7grecorder/db/7grecorder.db" "/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db"
 fi
 
-docker build --build-arg GIT_SHA="${RELEASE_SHA}" -t "7grecorder:${RELEASE_SHA}" "${release_root}/source"
+docker build \
+  --build-arg GIT_SHA="${RELEASE_SHA}" \
+  --build-arg GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
+  -t "7grecorder:${RELEASE_SHA}" \
+  "${release_root}/source"
 
-docker run --rm \
-  -v "${release_root}/source/frontend:/work" \
-  -w /work \
-  node:22.18.0-bookworm \
-  bash -lc "corepack enable && corepack prepare pnpm@10.15.0 --activate && pnpm install --no-frozen-lockfile && pnpm build"
-
-mkdir -p "${release_root}/frontend"
-cp -R "${release_root}/source/frontend/dist" "${release_root}/frontend/dist"
+test -d "${release_root}/frontend/dist" || { echo "frontend dist missing from release"; exit 1; }
 cp "${release_root}/source/deploy/compose.yaml" /opt/7grecorder/deploy/compose.yaml
 
 cd /opt/7grecorder/deploy
