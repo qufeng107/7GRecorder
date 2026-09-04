@@ -247,7 +247,7 @@ source.tar
 权限：
 
 - `/etc/7grecorder/*` 只允许运行/运维账号读取；
-- `master.key` 建议 mode `0600`；
+- `master.key` 建议 mode `0640`，owner 为 `root`，group 为部署/运行账号所在组；
 - `/data/7grecorder` 不随 Release 删除；
 - Release Artifact 不包含生产数据和 Secret。
 
