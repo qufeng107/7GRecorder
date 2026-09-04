@@ -1,0 +1,81 @@
+name: Production Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+
+      - name: Build frontend
+        run: cd frontend && pnpm install --no-frozen-lockfile && pnpm build
+
+      - name: Build backend image
+        run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t 7grecorder:${GITHUB_SHA} .
+
+      - name: Create release artifact
+        run: |
+          set -euo pipefail
+          mkdir -p release/backend release/frontend release/deploy release/scripts
+          docker save 7grecorder:${GITHUB_SHA} -o release/backend/7grecorder-image.tar
+          cp -R frontend/dist release/frontend/dist
+          cp deploy/compose.yaml release/deploy/compose.yaml
+          cp -R scripts/deploy release/scripts/deploy
+          echo "${GITHUB_SHA}" > release/RELEASE_SHA
+          tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
+          sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 7grecorder-release-${{ github.sha }}
+          path: |
+            7grecorder-release-${{ github.sha }}.tar
+            SHA256SUMS
+          retention-days: 7
+
+      - name: Install SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.PROD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Copy release to production
+        run: |
+          scp -P "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            7grecorder-release-${GITHUB_SHA}.tar SHA256SUMS scripts/deploy/deploy-release.sh \
+            "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/opt/7grecorder/deploy/"
+
+      - name: Deploy production
+        run: |
+          ssh -p "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" \
+            "cd /opt/7grecorder/deploy && RELEASE_SHA=${GITHUB_SHA} RELEASE_TAR=7grecorder-release-${GITHUB_SHA}.tar bash ./deploy-release.sh"

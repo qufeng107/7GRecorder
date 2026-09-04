@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_call:
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+          cache-dependency-path: backend/go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+
+      - name: Backend format
+        run: cd backend && test -z "$(gofmt -l .)"
+
+      - name: Backend vet
+        run: cd backend && go vet ./...
+
+      - name: Backend test
+        run: cd backend && go test ./...
+
+      - name: Backend build
+        run: mkdir -p dist && cd backend && go build -ldflags "-X github.com/7grecorder/7grecorder/backend/internal/version.BuildSHA=${GITHUB_SHA}" -o ../dist/7grecorder ./cmd/7grecorder
+
+      - name: Frontend install
+        run: cd frontend && pnpm install --no-frozen-lockfile
+
+      - name: Frontend lint
+        run: cd frontend && pnpm lint
+
+      - name: Frontend typecheck
+        run: cd frontend && pnpm typecheck
+
+      - name: Frontend test
+        run: cd frontend && pnpm test
+
+      - name: Frontend build
+        run: cd frontend && pnpm build
+
+      - name: Compose config
+        run: docker compose -f deploy/compose.yaml --env-file .env.example config >/dev/null

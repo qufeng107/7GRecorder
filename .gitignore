@@ -214,5 +214,15 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# 7GRecorder
+backend/7grecorder
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+data/
+.env.local
+.env.*.local
+
 # Streamlit
 .streamlit/secrets.toml
