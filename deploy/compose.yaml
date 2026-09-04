@@ -3,6 +3,7 @@ services:
     image: 7grecorder:${GIT_SHA:?GIT_SHA must be set}
     container_name: 7grecorder
     restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
       - path: /etc/7grecorder/app.env
         required: false

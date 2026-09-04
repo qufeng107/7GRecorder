@@ -41,10 +41,14 @@ Before the first production deploy, replace:
 APP_PUBLIC_BASE_URL
 RECORDER_BASIC_USER
 RECORDER_BASIC_PASSWORD
+APP_UID
+APP_GID
 BILILIVE_RECORDER_IMAGE
 ```
 
 `BILILIVE_RECORDER_IMAGE` must be a pinned image tag, not a floating latest tag.
+
+`APP_UID` and `APP_GID` should match the deploy user that owns `/data/7grecorder`; for the default Ubuntu cloud image this is usually `1000`.
 
 Confirm:
 
@@ -53,6 +57,8 @@ sudo test -r /etc/7grecorder/master.key
 sudo test -r /etc/7grecorder/app.env
 sudo test -d /data/7grecorder/db
 sudo test -d /opt/7grecorder/deploy
+id -u
+id -g
 ```
 
 If the deploy user was just added to the `docker` group, log out of SSH and log in again before running deploy checks. The current shell does not receive the new group automatically.
