@@ -20,34 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.6"
-          cache: false
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22.18.0"
-
-      - name: Setup pnpm
-        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
-
-      - name: Build frontend
-        run: cd frontend && pnpm install --no-frozen-lockfile && pnpm build
-
-      - name: Build backend image
-        run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t 7grecorder:${GITHUB_SHA} .
-
       - name: Create release artifact
         run: |
           set -euo pipefail
-          mkdir -p release/backend release/frontend release/deploy release/scripts
-          docker save 7grecorder:${GITHUB_SHA} -o release/backend/7grecorder-image.tar
-          cp -R frontend/dist release/frontend/dist
-          cp deploy/compose.yaml release/deploy/compose.yaml
-          cp -R scripts/deploy release/scripts/deploy
+          mkdir -p release
+          git archive --format=tar --output=release/source.tar HEAD
           echo "${GITHUB_SHA}" > release/RELEASE_SHA
           tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
           sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS
