@@ -1,8 +1,7 @@
 FROM golang:1.24.6-bookworm AS backend-builder
 WORKDIR /src/backend
-COPY backend/go.mod backend/go.sum* ./
-RUN go mod download
 COPY backend/ ./
+RUN go mod tidy
 ARG GIT_SHA=dev
 RUN go build -ldflags "-X github.com/7grecorder/7grecorder/backend/internal/version.BuildSHA=${GIT_SHA}" -o /out/7grecorder ./cmd/7grecorder
 

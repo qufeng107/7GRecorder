@@ -32,8 +32,8 @@ jobs:
       - name: Backend format
         run: cd backend && test -z "$(gofmt -l .)"
 
-      - name: Backend download modules
-        run: cd backend && go mod download
+      - name: Backend tidy modules
+        run: cd backend && go mod tidy
 
       - name: Backend vet
         run: cd backend && go vet ./...
