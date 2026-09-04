@@ -118,10 +118,10 @@ push: main
 
 ```text
 CI
-→ GitHub Runner 构建 immutable release
+→ GitHub Runner 构建源码 release
 → checksum
 → SSH/SCP 到正式服务器
-→ server install/deploy script
+→ server build/install/deploy script
 → health check
 ```
 
@@ -168,7 +168,17 @@ Bilibili/COS/网易云 Secret、master key 等保留在正式服务器，由应�
 
 ## 5. Release Artifact
 
-Build 在 GitHub-hosted Runner 完成，不在 2C4G 正式服务器上执行 Go/Node 编译。
+CI 在 GitHub-hosted Runner 完成，用于保证测试、类型检查和构建门禁通过。
+
+生产 Release 不再从 GitHub Runner 上传 Docker image。由于 GitHub 到国内轻量服务器的 SCP 链路可能极慢，第一版生产部署上传源码小包，并在正式服务器上执行 Docker build 与前端静态构建。
+
+约束：
+
+- `main` 部署仍必须先通过 GitHub CI；
+- 服务器构建只发生在 `main` 生产部署阶段；
+- Runtime 仍不包含 Node production server；
+- 构建依赖版本仍必须固定；
+- 如果服务器资源压力影响录制，再改回 registry / 压缩 image / 对象存储分发等方案。
 
 每个 Release 以 Git commit SHA 标识：
 
@@ -180,15 +190,7 @@ Release 包建议包含：
 
 ```text
 7grecorder-release-<sha>.tar
-├── backend/
-│   └── 7grecorder-image.tar.gz
-├── frontend/
-│   └── dist/...
-├── deploy/
-│   ├── compose.yaml
-│   └── nginx snippet/template
-├── scripts/
-│   └── deploy/...
+├── source.tar
 ├── RELEASE_SHA
 └── SHA256SUMS
 ```
@@ -201,11 +203,13 @@ Backend image：
 - 不包含 Node runtime；
 - 运行时不下载依赖。
 
-Frontend：
+Server deploy builds:
 
 ```text
-pnpm build
-→ dist/
+source.tar
+→ docker build 7grecorder:<sha>
+→ docker run node:22.18.0-bookworm pnpm build
+→ releases/<sha>/frontend/dist
 ```
 
 直接作为静态 release 内容。
@@ -333,16 +337,17 @@ BililiveRecorder 的升级是独立运维动作：
    - data dir writable
    - sufficient free disk
 3. install release directory
-4. load new 7GRecorder image
-5. create SQLite online backup
-6. gracefully stop only old 7GRecorder app
-7. run new image migration command
-8. start new 7GRecorder app
-9. atomically switch frontend current release
-10. health/readiness check
-11. optional nginx config test/reload when config changed
-12. mark release current
-13. cleanup old release artifacts/images
+4. build new 7GRecorder image on server
+5. build frontend static dist on server
+6. create SQLite online backup
+7. gracefully stop only old 7GRecorder app
+8. run new image migration command
+9. start new 7GRecorder app
+10. atomically switch frontend current release
+11. health/readiness check
+12. optional nginx config test/reload when config changed
+13. mark release current
+14. cleanup old release artifacts/images
 ```
 
 Backend 停止期间 BililiveRecorder 继续录制。
