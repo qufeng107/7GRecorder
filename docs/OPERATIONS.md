@@ -106,7 +106,13 @@ password_hash
 7grecorder admin bootstrap
 ```
 
-交互式输入用户名/密码，或使用明确的一次性安全参数；成功后如果已有 SUPER_ADMIN，再次 bootstrap 默认拒绝。
+使用明确的一次性安全参数；成功后如果已有 SUPER_ADMIN，再次 bootstrap 默认拒绝。
+
+```bash
+docker compose --env-file /etc/7grecorder/app.env run --rm --no-deps 7grecorder admin bootstrap \
+  --username admin \
+  --password 'replace-with-a-long-random-password'
+```
 
 建议同一个 binary 最终提供少量运维命令：
 

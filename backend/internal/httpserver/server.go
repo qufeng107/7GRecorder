@@ -24,6 +24,7 @@ type healthResponse struct {
 func Run(ctx context.Context, cfg config.Config) {
 	s := g.Server()
 	s.SetAddr(cfg.ListenAddr)
+	bindAuthHandlers(cfg, s)
 
 	s.BindHandler("/health/live", func(r *ghttp.Request) {
 		r.Response.WriteJson(healthResponse{
