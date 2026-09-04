@@ -9,6 +9,7 @@ mkdir -p "${release_root}" /opt/7grecorder/deploy /data/7grecorder/backups/db
 
 sha256sum -c SHA256SUMS
 tar -xf "${RELEASE_TAR}" -C "${release_root}"
+bash "${release_root}/scripts/deploy/preflight.sh"
 
 if [ -f "/data/7grecorder/db/7grecorder.db" ]; then
   cp "/data/7grecorder/db/7grecorder.db" "/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db"
@@ -18,8 +19,8 @@ docker load -i "${release_root}/backend/7grecorder-image.tar"
 cp "${release_root}/deploy/compose.yaml" /opt/7grecorder/deploy/compose.yaml
 
 cd /opt/7grecorder/deploy
-GIT_SHA="${RELEASE_SHA}" docker compose run --rm --no-deps 7grecorder migrate
-GIT_SHA="${RELEASE_SHA}" docker compose up -d --no-deps 7grecorder
+GIT_SHA="${RELEASE_SHA}" docker compose --env-file /etc/7grecorder/app.env run --rm --no-deps 7grecorder migrate
+GIT_SHA="${RELEASE_SHA}" docker compose --env-file /etc/7grecorder/app.env up -d --no-deps 7grecorder
 
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8080/health/ready >/dev/null; then

@@ -75,6 +75,7 @@ Docker Compose
 - [外部集成边界](docs/INTEGRATIONS.md)
 - [CI/CD 与生产部署](docs/DEPLOYMENT.md)
 - [运行配置、运维与恢复](docs/OPERATIONS.md)
+- [生产初始化清单](docs/PRODUCTION_SETUP.md)
 - [AI Coding 开发流程](docs/AI_DEVELOPMENT_WORKFLOW.md)
 - [Coding Agent 入口规则](AGENTS.md)
 
