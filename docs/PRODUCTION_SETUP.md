@@ -74,11 +74,11 @@ After `dev` CI is green:
 
 Normal deploy updates only the 7GRecorder app container and frontend release. It must not run `docker compose down` and must not restart BililiveRecorder.
 
-The production workflow uploads a small source release, not a Docker image tar. The server then builds:
+The production workflow uploads a small release, not a Docker image tar. The release includes `source.tar` and the frontend `dist` built by GitHub Actions. The server then builds:
 
 ```text
 7grecorder:<git-sha>
-frontend/dist
+uses the bundled frontend/dist
 ```
 
 This keeps SCP fast on slow GitHub-to-mainland links while preserving GitHub CI as the required quality gate.

@@ -191,6 +191,7 @@ Release 包建议包含：
 ```text
 7grecorder-release-<sha>.tar
 ├── source.tar
+├── frontend/dist/
 ├── RELEASE_SHA
 └── SHA256SUMS
 ```
@@ -208,7 +209,7 @@ Server deploy builds:
 ```text
 source.tar
 → docker build 7grecorder:<sha>
-→ docker run node:22.18.0-bookworm pnpm build
+frontend/dist
 → releases/<sha>/frontend/dist
 ```
 
