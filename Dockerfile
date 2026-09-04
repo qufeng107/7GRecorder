@@ -3,7 +3,7 @@ WORKDIR /src/backend
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 COPY backend/ ./
-RUN go mod download
+RUN go mod tidy
 ARG GIT_SHA=dev
 RUN go build -ldflags "-X github.com/7grecorder/7grecorder/backend/internal/version.BuildSHA=${GIT_SHA}" -o /out/7grecorder ./cmd/7grecorder
 
