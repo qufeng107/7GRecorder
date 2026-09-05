@@ -341,8 +341,8 @@ func TestUpsertLocalStorageSettingsUpdatesPolicyPreview(t *testing.T) {
 
 	settings, err := store.UpsertLocalStorageSettings(ctx, actor, LocalStorageSettingsUpsert{
 		MaxRecordingBytes:          1,
-		MinSystemFreeBytes:        1,
-		CleanupTargetRatio:        0.5,
+		MinSystemFreeBytes:         1,
+		CleanupTargetRatio:         0.5,
 		AbsoluteEmergencyFreeBytes: 1,
 	})
 	if err != nil {
