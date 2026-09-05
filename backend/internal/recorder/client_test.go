@@ -14,7 +14,7 @@ import (
 func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
-	var configPayload map[string]map[string]interface{}
+	var configPayload map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch r.Method + " " + r.URL.Path {
@@ -73,11 +73,11 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 			t.Fatalf("expected calls %v, got %v", wantCalls, calls)
 		}
 	}
-	if configPayload["AutoRecord"]["Value"] != true {
-		t.Fatalf("expected AutoRecord true, got %#v", configPayload["AutoRecord"]["Value"])
+	if configPayload["AutoRecord"] != true {
+		t.Fatalf("expected AutoRecord true, got %#v", configPayload["AutoRecord"])
 	}
-	if configPayload["CuttingNumber"]["Value"] != float64(30) {
-		t.Fatalf("expected 30 minute segments, got %#v", configPayload["CuttingNumber"]["Value"])
+	if configPayload["CuttingNumber"] != float64(30) {
+		t.Fatalf("expected 30 minute segments, got %#v", configPayload["CuttingNumber"])
 	}
 }
 
