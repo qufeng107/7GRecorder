@@ -41,34 +41,34 @@ type Runtime struct {
 }
 
 type RecordingProfile struct {
-	ID           int64              `json:"id"`
-	OwnerUserID  int64              `json:"owner_user_id"`
-	Name         string             `json:"name"`
-	Platform     string             `json:"platform"`
-	RoomID       string             `json:"room_id"`
-	StreamerName string             `json:"streamer_name"`
-	StreamerUID  string             `json:"streamer_uid,omitempty"`
-	Timezone     string             `json:"timezone"`
-	Enabled      bool               `json:"enabled"`
+	ID            int64             `json:"id"`
+	OwnerUserID   int64             `json:"owner_user_id"`
+	Name          string            `json:"name"`
+	Platform      string            `json:"platform"`
+	RoomID        string            `json:"room_id"`
+	StreamerName  string            `json:"streamer_name"`
+	StreamerUID   string            `json:"streamer_uid,omitempty"`
+	Timezone      string            `json:"timezone"`
+	Enabled       bool              `json:"enabled"`
 	PublicEnabled bool              `json:"public_enabled"`
 	PublicSlug    string            `json:"public_slug,omitempty"`
-	ArchivedAt   string            `json:"archived_at,omitempty"`
-	CreatedAt    string            `json:"created_at"`
-	UpdatedAt    string            `json:"updated_at"`
-	Settings     RecordingSettings `json:"recording_settings"`
-	Runtime      Runtime            `json:"runtime"`
+	ArchivedAt    string            `json:"archived_at,omitempty"`
+	CreatedAt     string            `json:"created_at"`
+	UpdatedAt     string            `json:"updated_at"`
+	Settings      RecordingSettings `json:"recording_settings"`
+	Runtime       Runtime           `json:"runtime"`
 }
 
 type CreateRequest struct {
-	Name          string             `json:"name"`
-	RoomID        string             `json:"room_id"`
-	StreamerName  string             `json:"streamer_name"`
-	StreamerUID   string             `json:"streamer_uid"`
-	Timezone      string             `json:"timezone"`
-	Enabled       *bool              `json:"enabled"`
-	PublicEnabled *bool              `json:"public_enabled"`
-	PublicSlug    string             `json:"public_slug"`
-	Settings      *SettingsUpsert    `json:"recording_settings"`
+	Name          string          `json:"name"`
+	RoomID        string          `json:"room_id"`
+	StreamerName  string          `json:"streamer_name"`
+	StreamerUID   string          `json:"streamer_uid"`
+	Timezone      string          `json:"timezone"`
+	Enabled       *bool           `json:"enabled"`
+	PublicEnabled *bool           `json:"public_enabled"`
+	PublicSlug    string          `json:"public_slug"`
+	Settings      *SettingsUpsert `json:"recording_settings"`
 }
 
 type UpdateRequest struct {
