@@ -8,6 +8,7 @@ import {
   Download,
   FileVideo,
   HardDrive,
+  LayoutDashboard,
   Lock,
   LogIn,
   LogOut,
@@ -17,6 +18,7 @@ import {
   Settings,
   ShieldCheck,
   Unlock,
+  UserCircle,
   X
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -169,6 +171,8 @@ type ProfileForm = {
   finalize_grace_period_sec: number;
 };
 
+type AdminPage = "overview" | "profiles" | "recordings" | "system";
+
 const emptyProfileForm: ProfileForm = {
   name: "",
   room_id: "",
@@ -249,6 +253,7 @@ export function AdminDashboard() {
   const queryClient = useQueryClient();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [activePage, setActivePage] = useState<AdminPage>("overview");
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
@@ -264,6 +269,8 @@ export function AdminDashboard() {
     queryFn: () => requestJson<MeResponse>("/api/v1/me"),
     retry: false
   });
+  const user = meQuery.data?.user;
+  const canManageSystemSettings = user?.role === "SUPER_ADMIN";
 
   const healthQuery = useQuery({
     queryKey: ["system-health"],
@@ -291,7 +298,7 @@ export function AdminDashboard() {
   const localStorageQuery = useQuery({
     queryKey: ["local-storage"],
     queryFn: () => requestJson<LocalStorageStatus>("/api/v1/storage/local"),
-    enabled: Boolean(meQuery.data?.user),
+    enabled: Boolean(canManageSystemSettings),
     retry: false,
     refetchInterval: 30000
   });
@@ -299,7 +306,7 @@ export function AdminDashboard() {
   const cleanupCandidatesQuery = useQuery({
     queryKey: ["cleanup-candidates"],
     queryFn: () => requestJson<CleanupCandidateListResponse>("/api/v1/storage/local/cleanup-candidates?limit=5"),
-    enabled: Boolean(meQuery.data?.user),
+    enabled: Boolean(canManageSystemSettings),
     retry: false,
     refetchInterval: 30000
   });
@@ -309,6 +316,12 @@ export function AdminDashboard() {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const recordings = recordingsQuery.data?.items ?? [];
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
+
+  useEffect(() => {
+    if (activePage === "system" && user && !canManageSystemSettings) {
+      setActivePage("overview");
+    }
+  }, [activePage, canManageSystemSettings, user]);
 
   useEffect(() => {
     const selected = profiles.find((profile) => profile.id === selectedProfileId);
@@ -350,6 +363,7 @@ export function AdminDashboard() {
   const logoutMutation = useMutation({
     mutationFn: () => requestJson<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
     onSuccess: () => {
+      setActivePage("overview");
       setSelectedProfileId(null);
       setProfileEditorOpen(false);
       setProfileForm(emptyProfileForm);
@@ -476,38 +490,33 @@ export function AdminDashboard() {
     saveProfileMutation.mutate();
   };
 
-  const user = meQuery.data?.user;
-
   return (
     <main className="min-h-screen bg-[#f7f8f5] text-ink">
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-2 border-b border-border pb-5">
-          <p className="text-sm font-medium text-accent">7GRecorder Admin</p>
-          <h1 className="text-3xl font-semibold tracking-normal">Recorder Console</h1>
+        <header className="border-b border-border pb-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm font-medium text-accent">7GRecorder Admin</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-normal">Recorder Console</h1>
+            </div>
+            {user ? (
+              <AccountMenu
+                logoutPending={logoutMutation.isPending}
+                user={user}
+                onLogout={() => logoutMutation.mutate()}
+              />
+            ) : null}
+          </div>
           {user ? (
-            <nav className="mt-3 flex flex-wrap gap-2">
-              <QuickLink href="#profiles" icon={Activity} label="Profiles" />
-              <QuickLink href="#storage" icon={Settings} label="Storage Settings" />
-              <QuickLink href="#recordings" icon={FileVideo} label="Recordings" />
-            </nav>
+            <AdminNav
+              activePage={activePage}
+              canManageSystemSettings={Boolean(canManageSystemSettings)}
+              onChange={setActivePage}
+            />
           ) : null}
         </header>
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {statusRows.map(({ label, value, icon: Icon }) => (
-              <article key={label} className="rounded-md border border-border bg-panel p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold">{label}</h2>
-                    <p className="mt-2 text-sm leading-5 text-muted">{value}</p>
-                  </div>
-                  <Icon className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
-                </div>
-              </article>
-            ))}
-          </div>
-
+        {user ? null : (
           <SessionPanel
             loginError={loginMutation.isError}
             logoutPending={logoutMutation.isPending}
@@ -519,11 +528,13 @@ export function AdminDashboard() {
             onPasswordChange={setPassword}
             onUsernameChange={setUsername}
           />
-        </section>
+        )}
 
         {user ? (
           <>
-            <section id="profiles">
+            {activePage === "overview" ? <OverviewPanel statusRows={statusRows} /> : null}
+
+            {activePage === "profiles" ? (
               <ProfileListPanel
                 profiles={profiles}
                 selectedProfileId={selectedProfileId}
@@ -539,7 +550,7 @@ export function AdminDashboard() {
                   setProfileEditorOpen(true);
                 }}
               />
-            </section>
+            ) : null}
 
             {profileEditorOpen ? (
               <ProfileEditorDialog
@@ -562,31 +573,35 @@ export function AdminDashboard() {
               />
             ) : null}
 
-            <StoragePanel
-              candidates={cleanupCandidatesQuery.data?.items ?? []}
-              previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
-              form={storageForm}
-              isLoading={localStorageQuery.isLoading}
-              isSaving={saveStorageSettingsMutation.isPending}
-              saveError={saveStorageSettingsMutation.isError}
-              status={localStorageQuery.data}
-              onFormChange={setStorageForm}
-              onSave={() => saveStorageSettingsMutation.mutate()}
-            />
+            {activePage === "system" && canManageSystemSettings ? (
+              <StoragePanel
+                candidates={cleanupCandidatesQuery.data?.items ?? []}
+                previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
+                form={storageForm}
+                isLoading={localStorageQuery.isLoading}
+                isSaving={saveStorageSettingsMutation.isPending}
+                saveError={saveStorageSettingsMutation.isError}
+                status={localStorageQuery.data}
+                onFormChange={setStorageForm}
+                onSave={() => saveStorageSettingsMutation.mutate()}
+              />
+            ) : null}
 
-            <RecordingsPanel
-              isLoading={recordingsQuery.isLoading}
-              protectPending={protectRecordingMutation.isPending}
-              reconcileError={reconcileMutation.isError}
-              reconcilePending={reconcileMutation.isPending}
-              reconcileResult={reconcileMutation.data}
-              recordings={recordings}
-              total={recordingTotal}
-              onReconcile={() => reconcileMutation.mutate()}
-              onToggleProtect={(recording) =>
-                protectRecordingMutation.mutate({ id: recording.id, protected: !recording.local_protected })
-              }
-            />
+            {activePage === "recordings" ? (
+              <RecordingsPanel
+                isLoading={recordingsQuery.isLoading}
+                protectPending={protectRecordingMutation.isPending}
+                reconcileError={reconcileMutation.isError}
+                reconcilePending={reconcileMutation.isPending}
+                reconcileResult={reconcileMutation.data}
+                recordings={recordings}
+                total={recordingTotal}
+                onReconcile={() => reconcileMutation.mutate()}
+                onToggleProtect={(recording) =>
+                  protectRecordingMutation.mutate({ id: recording.id, protected: !recording.local_protected })
+                }
+              />
+            ) : null}
           </>
         ) : null}
 
@@ -596,6 +611,84 @@ export function AdminDashboard() {
         </section>
       </div>
     </main>
+  );
+}
+
+function AdminNav(props: {
+  activePage: AdminPage;
+  canManageSystemSettings: boolean;
+  onChange: (page: AdminPage) => void;
+}) {
+  const items: Array<{ page: AdminPage; label: string; icon: typeof Activity }> = [
+    { page: "overview", label: "Overview", icon: LayoutDashboard },
+    { page: "profiles", label: "Profiles", icon: Activity },
+    { page: "recordings", label: "Recordings", icon: FileVideo }
+  ];
+
+  if (props.canManageSystemSettings) {
+    items.push({ page: "system", label: "System Settings", icon: Settings });
+  }
+
+  return (
+    <nav className="mt-5 flex flex-wrap gap-2" aria-label="Admin sections">
+      {items.map(({ page, label, icon: Icon }) => {
+        const isActive = props.activePage === page;
+        return (
+          <button
+            key={page}
+            className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium shadow-sm ${
+              isActive
+                ? "border-accent bg-accent text-white"
+                : "border-border bg-panel text-ink hover:border-accent hover:text-accent"
+            }`}
+            type="button"
+            onClick={() => props.onChange(page)}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            {label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function AccountMenu(props: { logoutPending: boolean; user: User; onLogout: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-panel px-3 py-2 shadow-sm">
+      <UserCircle className="h-5 w-5 text-accent" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold">{props.user.username}</p>
+        <p className="text-xs text-muted">{props.user.role}</p>
+      </div>
+      <button
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-medium text-white disabled:opacity-60"
+        disabled={props.logoutPending}
+        type="button"
+        onClick={props.onLogout}
+      >
+        <LogOut className="h-4 w-4" aria-hidden="true" />
+        Sign out
+      </button>
+    </div>
+  );
+}
+
+function OverviewPanel(props: { statusRows: typeof statusRows }) {
+  return (
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {props.statusRows.map(({ label, value, icon: Icon }) => (
+        <article key={label} className="rounded-md border border-border bg-panel p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">{label}</h2>
+              <p className="mt-2 text-sm leading-5 text-muted">{value}</p>
+            </div>
+            <Icon className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
+          </div>
+        </article>
+      ))}
+    </section>
   );
 }
 
@@ -659,19 +752,6 @@ function SessionPanel(props: {
         </button>
       </form>
     </aside>
-  );
-}
-
-function QuickLink(props: { href: string; icon: typeof Activity; label: string }) {
-  const Icon = props.icon;
-  return (
-    <a
-      className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-ink shadow-sm hover:border-accent hover:text-accent"
-      href={props.href}
-    >
-      <Icon className="h-4 w-4" aria-hidden="true" />
-      {props.label}
-    </a>
   );
 }
 

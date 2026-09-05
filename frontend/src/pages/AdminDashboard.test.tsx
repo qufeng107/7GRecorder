@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminDashboard } from "./AdminDashboard";
 
@@ -36,7 +36,7 @@ describe("AdminDashboard", () => {
   it("renders the admin sign in shell", () => {
     renderWithClient();
     expect(screen.getByText("Recorder Console")).toBeInTheDocument();
-    expect(screen.getByText("Local Storage")).toBeInTheDocument();
+    expect(screen.getByText("Session")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
   });
 
@@ -68,6 +68,7 @@ describe("AdminDashboard", () => {
 
     renderWithClient();
 
+    fireEvent.click(await screen.findByRole("button", { name: /profiles/i }));
     expect(await screen.findByText("Recording Profiles")).toBeInTheDocument();
     expect(await screen.findByText("No profiles yet.")).toBeInTheDocument();
   });
