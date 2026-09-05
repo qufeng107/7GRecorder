@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/7grecorder/7grecorder/backend/internal/config"
@@ -122,5 +123,39 @@ func TestHTTPClientSyncProfileFallsBackWhenPutConfigIsNotAllowed(t *testing.T) {
 		if calls[i] != wantCalls[i] {
 			t.Fatalf("expected calls %v, got %v", wantCalls, calls)
 		}
+	}
+}
+
+func TestHTTPClientSyncProfileIncludesConfigErrorDetails(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/room/1741048619":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"roomId":1741048619,"streaming":false,"recording":false}`))
+		case "PUT /api/room/1741048619/config":
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case "PATCH /api/room/1741048619/config":
+			http.Error(w, "bad config field", http.StatusBadRequest)
+		default:
+			t.Fatalf("unexpected recorder request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(config.Config{RecorderBaseURL: server.URL})
+	_, err := client.SyncProfile(ctx, DesiredProfile{
+		RoomID:             "1741048619",
+		Enabled:            true,
+		AutoRecord:         true,
+		RecordDanmaku:      true,
+		SegmentDurationSec: 1800,
+	})
+	if err == nil {
+		t.Fatal("expected SyncProfile error")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "via PATCH returned status 400") || !strings.Contains(message, "bad config field") {
+		t.Fatalf("expected method and body in error, got %q", message)
 	}
 }
