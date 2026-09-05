@@ -30,7 +30,18 @@ jobs:
         run: corepack enable && corepack prepare pnpm@10.15.0 --activate
 
       - name: Backend format
-        run: cd backend && test -z "$(gofmt -l .)"
+        run: |
+          cd backend
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            gofmt -w .
+            while IFS= read -r file; do
+              patch="$(git diff -- "$file" | base64 -w 0)"
+              echo "::error file=backend/${file}::gofmt required; patch_base64=${patch}"
+            done <<< "$files"
+            printf '%s\n' "$files"
+            exit 1
+          fi
 
       - name: Backend tidy modules
         run: cd backend && go mod tidy

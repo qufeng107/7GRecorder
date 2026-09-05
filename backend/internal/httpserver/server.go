@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/7grecorder/7grecorder/backend/internal/config"
+	"github.com/7grecorder/7grecorder/backend/internal/db"
+	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 	"github.com/7grecorder/7grecorder/backend/internal/version"
+	"github.com/7grecorder/7grecorder/backend/internal/worker"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	_ "github.com/mattn/go-sqlite3"
@@ -26,6 +29,7 @@ func Run(ctx context.Context, cfg config.Config) {
 	s.SetAddr(cfg.ListenAddr)
 	bindAuthHandlers(cfg, s)
 	bindProfileHandlers(cfg, s)
+	startWorker(ctx, cfg)
 
 	s.BindHandler("/health/live", func(r *ghttp.Request) {
 		r.Response.WriteJson(healthResponse{
@@ -72,6 +76,19 @@ func Run(ctx context.Context, cfg config.Config) {
 	})
 
 	s.Run()
+}
+
+func startWorker(ctx context.Context, cfg config.Config) {
+	database, err := db.Open(ctx, cfg)
+	if err != nil {
+		g.Log().Warningf(ctx, "worker disabled: %v", err)
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		_ = database.Close()
+	}()
+	go worker.New(database, recorder.NewHTTPClient(cfg)).Run(ctx)
 }
 
 func readiness(ctx context.Context, cfg config.Config) error {
