@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
+	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 )
 
 var (
@@ -90,20 +91,6 @@ type SettingsUpsert struct {
 	RecordDanmaku          *bool   `json:"record_danmaku"`
 	SegmentDurationSec     *int64  `json:"segment_duration_sec"`
 	FinalizeGracePeriodSec *int64  `json:"finalize_grace_period_sec"`
-}
-
-type RecorderSyncPayload struct {
-	ProfileID              int64  `json:"profile_id"`
-	RoomID                 string `json:"room_id"`
-	LiveURL                string `json:"live_url"`
-	Enabled                bool   `json:"enabled"`
-	AutoRecord             bool   `json:"auto_record"`
-	Quality                string `json:"quality"`
-	RecordDanmaku          bool   `json:"record_danmaku"`
-	SegmentDurationSec     int64  `json:"segment_duration_sec"`
-	FinalizeGracePeriodSec int64  `json:"finalize_grace_period_sec"`
-	OutputRelativeDir      string `json:"output_relative_dir"`
-	WebhookPath            string `json:"webhook_path"`
 }
 
 type Store struct {
@@ -515,7 +502,7 @@ func markRecorderSyncPending(ctx context.Context, exec txExecutor, profileID int
 	return nil
 }
 
-func enqueueRecorderSync(ctx context.Context, exec txExecutor, payload RecorderSyncPayload) error {
+func enqueueRecorderSync(ctx context.Context, exec txExecutor, payload recorder.DesiredProfile) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal recorder sync payload: %w", err)
@@ -544,9 +531,9 @@ func enqueueRecorderSync(ctx context.Context, exec txExecutor, payload RecorderS
 	return nil
 }
 
-func recorderSyncPayload(profileID int64, roomID string, enabled bool, archivedAt string, settings RecordingSettings) RecorderSyncPayload {
+func recorderSyncPayload(profileID int64, roomID string, enabled bool, archivedAt string, settings RecordingSettings) recorder.DesiredProfile {
 	shouldRecord := enabled && archivedAt == ""
-	return RecorderSyncPayload{
+	return recorder.DesiredProfile{
 		ProfileID:              profileID,
 		RoomID:                 roomID,
 		LiveURL:                "https://live.bilibili.com/" + roomID,

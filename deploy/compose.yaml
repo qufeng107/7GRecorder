@@ -27,9 +27,14 @@ services:
     env_file:
       - path: /etc/7grecorder/recorder.env
         required: false
+    environment:
+      BREC_HTTP_BASIC_USER: ${RECORDER_BASIC_USER:?set RECORDER_BASIC_USER in app.env}
+      BREC_HTTP_BASIC_PASS: ${RECORDER_BASIC_PASSWORD:?set RECORDER_BASIC_PASSWORD in app.env}
+      PUID: ${APP_UID:-1000}
+      PGID: ${APP_GID:-1000}
+      UMASK: "002"
     volumes:
-      - /data/7grecorder:/data/7grecorder
-      - bililiverecorder-workdir:/app
+      - /data/7grecorder/recordings:/rec
     networks:
       - 7grecorder
     logging:
@@ -41,6 +46,3 @@ services:
 networks:
   7grecorder:
     name: 7grecorder
-
-volumes:
-  bililiverecorder-workdir:

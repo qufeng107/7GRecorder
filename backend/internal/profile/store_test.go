@@ -11,6 +11,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/db"
+	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 )
 
 func TestCreateProfileCreatesDefaults(t *testing.T) {
@@ -78,7 +79,7 @@ func TestCreateProfileEnqueuesRecorderSyncForBilibiliRoom(t *testing.T) {
 		t.Fatalf("expected stable recorder sync business key, got %q", businessKey)
 	}
 
-	var payload RecorderSyncPayload
+	var payload recorder.DesiredProfile
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
 		t.Fatalf("unmarshal recorder sync payload returned error: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestUpdateSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query sync job returned error: %v", err)
 	}
-	var payload RecorderSyncPayload
+	var payload recorder.DesiredProfile
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
 		t.Fatalf("unmarshal recorder sync payload returned error: %v", err)
 	}

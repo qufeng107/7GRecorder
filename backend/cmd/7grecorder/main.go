@@ -11,7 +11,9 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/db"
 	"github.com/7grecorder/7grecorder/backend/internal/httpserver"
+	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 	"github.com/7grecorder/7grecorder/backend/internal/version"
+	"github.com/7grecorder/7grecorder/backend/internal/worker"
 	"github.com/gogf/gf/v2/os/gctx"
 )
 
@@ -37,8 +39,17 @@ func main() {
 			os.Exit(1)
 		}
 	case "worker":
-		fmt.Fprintln(os.Stderr, "worker command is reserved for a future split runtime; production uses all")
-		os.Exit(2)
+		if err := db.Migrate(ctx, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
+			os.Exit(1)
+		}
+		database, err := db.Open(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "open database failed: %v\n", err)
+			os.Exit(1)
+		}
+		defer database.Close()
+		worker.New(database, recorder.NewHTTPClient(cfg)).Run(ctx)
 	case "version":
 		fmt.Println(version.Info())
 	default:
