@@ -122,7 +122,6 @@ func requireMethod(r *ghttp.Request, method string) bool {
 		return true
 	}
 	r.Response.Status = http.StatusMethodNotAllowed
-	r.Response.Header().Set("Allow", method)
 	r.Response.WriteJson(g.Map{
 		"error": g.Map{
 			"code":       "METHOD_NOT_ALLOWED",

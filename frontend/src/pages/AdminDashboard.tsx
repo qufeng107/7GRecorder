@@ -1,4 +1,5 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
+import type { FormEvent } from "react";
 import { Activity, Archive, Database, HardDrive, LogIn, LogOut, ShieldCheck } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
