@@ -315,6 +315,10 @@ relative_path metadata 保留
 
 用于历史审计和 UI。
 
+Early production bootstrap may estimate `recordings.duration_ms` and `recording_files.duration_ms` from the
+recording filename timestamp plus the local file mtime. This is UI metadata for spotting unusually short
+segments; precise media duration can replace it later through an FFmpeg/ffprobe metadata scan.
+
 ### recorder_events
 
 ```text

@@ -36,7 +36,7 @@ func TestReconcileLocalImportsRecordingFiles(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	oldTime := time.Now().Add(-10 * time.Minute)
+	oldTime := closedTestTime()
 	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
 		t.Fatalf("Chtimes returned error: %v", err)
 	}
@@ -62,6 +62,9 @@ func TestReconcileLocalImportsRecordingFiles(t *testing.T) {
 	if len(items[0].Files) != 1 || items[0].Files[0].RelativePath != "recordings/1741048619-Streamer/record-1741048619-20260905-224258-164-title.flv" {
 		t.Fatalf("unexpected recording files: %#v", items[0].Files)
 	}
+	if items[0].DurationMs <= 0 || items[0].Files[0].DurationMs <= 0 {
+		t.Fatalf("expected duration metadata, got recording=%d file=%d", items[0].DurationMs, items[0].Files[0].DurationMs)
+	}
 }
 
 func TestReconcileLocalUpdatesExistingRecordingFiles(t *testing.T) {
@@ -85,7 +88,7 @@ func TestReconcileLocalUpdatesExistingRecordingFiles(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	oldTime := time.Now().Add(-10 * time.Minute)
+	oldTime := closedTestTime()
 	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
 		t.Fatalf("Chtimes returned error: %v", err)
 	}
@@ -130,7 +133,7 @@ func TestFileForDownloadReturnsClosedVideoFile(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	oldTime := time.Now().Add(-10 * time.Minute)
+	oldTime := closedTestTime()
 	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
 		t.Fatalf("Chtimes returned error: %v", err)
 	}
@@ -211,4 +214,8 @@ func bootstrapTestAdmin(t *testing.T, ctx context.Context, database *sql.DB) acc
 		t.Fatalf("BootstrapSuperAdmin returned error: %v", err)
 	}
 	return user
+}
+
+func closedTestTime() time.Time {
+	return time.Date(2026, 9, 5, 15, 12, 58, 0, time.UTC)
 }

@@ -31,6 +31,7 @@ type Recording struct {
 	Title              string `json:"title,omitempty"`
 	StartedAt          string `json:"started_at"`
 	CompletedAt        string `json:"completed_at,omitempty"`
+	DurationMs         int64  `json:"duration_ms"`
 	RecordingStatus    string `json:"recording_status"`
 	LocalStorageStatus string `json:"local_storage_status"`
 	Files              []File `json:"files"`
@@ -44,6 +45,7 @@ type File struct {
 	Kind         string `json:"kind"`
 	FileStatus   string `json:"file_status"`
 	SizeBytes    int64  `json:"size_bytes"`
+	DurationMs   int64  `json:"duration_ms"`
 	ClosedAt     string `json:"closed_at,omitempty"`
 	UpdatedAt    string `json:"updated_at"`
 }
@@ -68,7 +70,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 	query := `
 		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
-			rec.recording_status, rec.local_storage_status
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status
 		FROM recordings rec
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
 	`
@@ -97,6 +99,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 			&item.Title,
 			&item.StartedAt,
 			&item.CompletedAt,
+			&item.DurationMs,
 			&item.RecordingStatus,
 			&item.LocalStorageStatus,
 		); err != nil {
@@ -163,7 +166,7 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID int64) (File, error) {
 	query := `
 		SELECT f.id, f.recording_id, f.relative_path, f.original_name, f.kind, f.file_status,
-			COALESCE(f.size_bytes, 0), COALESCE(f.closed_at, ''), f.updated_at
+			COALESCE(f.size_bytes, 0), COALESCE(f.duration_ms, 0), COALESCE(f.closed_at, ''), f.updated_at
 		FROM recording_files f
 		JOIN recordings rec ON rec.id = f.recording_id
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
@@ -184,6 +187,7 @@ func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID i
 		&item.Kind,
 		&item.FileStatus,
 		&item.SizeBytes,
+		&item.DurationMs,
 		&item.ClosedAt,
 		&item.UpdatedAt,
 	)
@@ -202,7 +206,7 @@ func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID i
 func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, recording_id, relative_path, original_name, kind, file_status,
-			COALESCE(size_bytes, 0), COALESCE(closed_at, ''), updated_at
+			COALESCE(size_bytes, 0), COALESCE(duration_ms, 0), COALESCE(closed_at, ''), updated_at
 		FROM recording_files
 		WHERE recording_id = ?
 		ORDER BY id ASC
@@ -223,6 +227,7 @@ func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {
 			&item.Kind,
 			&item.FileStatus,
 			&item.SizeBytes,
+			&item.DurationMs,
 			&item.ClosedAt,
 			&item.UpdatedAt,
 		); err != nil {
@@ -299,6 +304,7 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 		completedAt = ""
 	}
 	startedAt, title := recordingInfoFromName(filepath.Base(path), info.ModTime())
+	durationMs := durationMillis(startedAt, completedAt)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -316,16 +322,16 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 	if err == nil {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE recording_files
-			SET file_status = ?, size_bytes = ?, closed_at = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP
+			SET file_status = ?, size_bytes = ?, duration_ms = ?, closed_at = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, fileStatus, info.Size(), completedAt, fileID); err != nil {
+		`, fileStatus, info.Size(), durationMs, completedAt, fileID); err != nil {
 			return false, false, fmt.Errorf("update recording file: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE recordings
-			SET recording_status = ?, completed_at = NULLIF(?, ''), local_storage_status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
+			SET recording_status = ?, completed_at = NULLIF(?, ''), duration_ms = ?, local_storage_status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, recordingStatus, completedAt, existingRecordingID); err != nil {
+		`, recordingStatus, completedAt, durationMs, existingRecordingID); err != nil {
 			return false, false, fmt.Errorf("update recording: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -339,10 +345,10 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO recordings
-			(recording_profile_id, title, started_at, completed_at, recording_status,
+			(recording_profile_id, title, started_at, completed_at, duration_ms, recording_status,
 				local_storage_status, source_room_id, streamer_name_snapshot)
-		VALUES (?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, 'AVAILABLE', ?, ?)
-	`, profile.ID, title, startedAt, completedAt, recordingStatus, profile.RoomID, profile.StreamerName)
+		VALUES (?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, 'AVAILABLE', ?, ?)
+	`, profile.ID, title, startedAt, completedAt, durationMs, recordingStatus, profile.RoomID, profile.StreamerName)
 	if err != nil {
 		return false, false, fmt.Errorf("insert recording: %w", err)
 	}
@@ -352,9 +358,9 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO recording_files
-			(recording_id, relative_path, original_name, kind, file_status, size_bytes, closed_at)
-		VALUES (?, ?, ?, 'video', ?, ?, NULLIF(?, ''))
-	`, recordingID, relativePath, filepath.Base(path), fileStatus, info.Size(), completedAt); err != nil {
+			(recording_id, relative_path, original_name, kind, file_status, size_bytes, duration_ms, closed_at)
+		VALUES (?, ?, ?, 'video', ?, ?, ?, NULLIF(?, ''))
+	`, recordingID, relativePath, filepath.Base(path), fileStatus, info.Size(), durationMs, completedAt); err != nil {
 		return false, false, fmt.Errorf("insert recording file: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -375,6 +381,25 @@ func recordingInfoFromName(name string, modTime time.Time) (string, string) {
 		return modTime.UTC().Format(time.RFC3339), strings.TrimSuffix(name, filepath.Ext(name))
 	}
 	return parsed.UTC().Format(time.RFC3339), strings.TrimSpace(result[4])
+}
+
+func durationMillis(startedAt string, completedAt string) interface{} {
+	if startedAt == "" || completedAt == "" {
+		return nil
+	}
+	started, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return nil
+	}
+	completed, err := time.Parse(time.RFC3339, completedAt)
+	if err != nil {
+		return nil
+	}
+	duration := completed.Sub(started)
+	if duration <= 0 {
+		return nil
+	}
+	return duration.Milliseconds()
 }
 
 func roomIDFromPath(root string, path string) string {
