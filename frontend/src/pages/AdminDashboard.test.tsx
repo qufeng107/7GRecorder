@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminDashboard } from "./AdminDashboard";
 
 beforeEach(() => {
@@ -12,6 +12,10 @@ beforeEach(() => {
       json: async () => ({ error: { code: "NOT_AUTHENTICATED" } })
     })
   );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 function renderWithClient() {
@@ -34,5 +38,37 @@ describe("AdminDashboard", () => {
     expect(screen.getByText("Recorder Console")).toBeInTheDocument();
     expect(screen.getByText("Local Storage")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+  });
+
+  it("renders an empty profile table when the API returns null items", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = input instanceof Request ? input.url : input.toString();
+        if (path.endsWith("/api/v1/me")) {
+          return {
+            ok: true,
+            json: async () => ({
+              user: { id: 1, username: "admin", role: "SUPER_ADMIN", enabled: true }
+            })
+          } as Response;
+        }
+        if (path.endsWith("/api/v1/recording-profiles")) {
+          return {
+            ok: true,
+            json: async () => ({ items: null, total: 0 })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ status: "ok", release_sha: "test" })
+        } as Response;
+      })
+    );
+
+    renderWithClient();
+
+    expect(await screen.findByText("Recording Profiles")).toBeInTheDocument();
+    expect(await screen.findByText("No profiles yet.")).toBeInTheDocument();
   });
 });
