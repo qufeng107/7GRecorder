@@ -73,6 +73,7 @@ type RecordingFile = {
   kind: string;
   file_status: string;
   size_bytes: number;
+  duration_ms: number;
   closed_at?: string;
 };
 
@@ -85,6 +86,7 @@ type RecordingItem = {
   title?: string;
   started_at: string;
   completed_at?: string;
+  duration_ms: number;
   recording_status: string;
   local_storage_status: string;
   files: RecordingFile[] | null;
@@ -688,6 +690,7 @@ function RecordingsPanel(props: {
               <th className="px-3 py-2 font-semibold">Recording</th>
               <th className="px-3 py-2 font-semibold">Profile</th>
               <th className="px-3 py-2 font-semibold">Status</th>
+              <th className="px-3 py-2 font-semibold">Duration</th>
               <th className="px-3 py-2 font-semibold">Size</th>
               <th className="px-3 py-2 font-semibold">Path</th>
               <th className="px-3 py-2 font-semibold">Actions</th>
@@ -703,7 +706,10 @@ function RecordingsPanel(props: {
                       <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                       <div>
                         <p className="font-semibold text-ink">{recording.title || file?.original_name || "Untitled"}</p>
-                        <p className="mt-1 text-xs text-muted">{formatDateTime(recording.started_at)}</p>
+                        <p className="mt-1 text-xs text-muted">Start: {formatDateTime(recording.started_at)}</p>
+                        <p className="mt-1 text-xs text-muted">
+                          Closed: {formatDateTime(recording.completed_at || file?.closed_at || "")}
+                        </p>
                       </div>
                     </div>
                   </td>
@@ -714,6 +720,9 @@ function RecordingsPanel(props: {
                   <td className="px-3 py-3 text-muted">
                     <p>{recording.recording_status}</p>
                     <p className="mt-1 text-xs">{file?.file_status ?? "NO_FILE"}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    {formatDuration(recording.duration_ms || file?.duration_ms || 0)}
                   </td>
                   <td className="px-3 py-3 text-muted">{formatBytes(file?.size_bytes ?? 0)}</td>
                   <td className="max-w-md px-3 py-3 text-xs text-muted">
@@ -737,7 +746,7 @@ function RecordingsPanel(props: {
             })}
             {props.recordings.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={6}>
+                <td className="px-3 py-8 text-center text-muted" colSpan={7}>
                   {props.isLoading ? "Loading recordings." : "No recordings indexed yet."}
                 </td>
               </tr>
@@ -782,6 +791,23 @@ function formatBytes(value: number): string {
     unit += 1;
   }
   return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatDuration(value: number): string {
+  if (!value) {
+    return "-";
+  }
+  const totalSeconds = Math.round(value / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
 }
 
 function formatDateTime(value: string): string {
