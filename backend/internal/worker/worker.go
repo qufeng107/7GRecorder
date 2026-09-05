@@ -169,10 +169,11 @@ func (w Worker) failJob(ctx context.Context, job syncJob, errorClass string, cau
 	defer tx.Rollback()
 
 	nextStatus := "PENDING"
-	runAfter := "datetime('now', '+30 seconds')"
+	runAfter := "CURRENT_TIMESTAMP"
 	if job.Attempts >= job.MaxAttempts || errorClass == "PERMANENT" {
 		nextStatus = "FAILED"
-		runAfter = "CURRENT_TIMESTAMP"
+	} else {
+		runAfter = fmt.Sprintf("datetime('now', '+%d seconds')", retryDelaySeconds(job.Attempts))
 	}
 	message := truncateError(cause)
 	if _, err := tx.ExecContext(ctx, `
@@ -215,4 +216,19 @@ func truncateError(err error) string {
 		return message[:1000]
 	}
 	return message
+}
+
+func retryDelaySeconds(attempts int) int {
+	switch attempts {
+	case 0, 1:
+		return 5
+	case 2:
+		return 30
+	case 3:
+		return 60
+	case 4:
+		return 300
+	default:
+		return 900
+	}
 }
