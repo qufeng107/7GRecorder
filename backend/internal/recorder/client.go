@@ -164,7 +164,7 @@ func (c HTTPClient) do(ctx context.Context, method string, path string, payload 
 		return 0, nil, fmt.Errorf("call recorder %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64 * 1024))
 	if err != nil {
 		return 0, nil, fmt.Errorf("read recorder response: %w", err)
 	}
