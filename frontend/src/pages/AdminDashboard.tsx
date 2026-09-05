@@ -118,6 +118,24 @@ type LocalStorageStatus = {
   completed_recordings: number;
 };
 
+type CleanupCandidate = {
+  recording_id: number;
+  profile_name: string;
+  room_id: string;
+  streamer_name: string;
+  title?: string;
+  started_at: string;
+  completed_at?: string;
+  duration_ms: number;
+  file_count: number;
+  reclaimable_bytes: number;
+};
+
+type CleanupCandidateListResponse = {
+  items: CleanupCandidate[] | null;
+  total?: number;
+};
+
 type ProfileForm = {
   name: string;
   room_id: string;
@@ -254,6 +272,14 @@ export function AdminDashboard() {
     refetchInterval: 30000
   });
 
+  const cleanupCandidatesQuery = useQuery({
+    queryKey: ["cleanup-candidates"],
+    queryFn: () => requestJson<CleanupCandidateListResponse>("/api/v1/storage/local/cleanup-candidates?limit=5"),
+    enabled: Boolean(meQuery.data?.user),
+    retry: false,
+    refetchInterval: 30000
+  });
+
   const profiles = profilesQuery.data?.items ?? [];
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
   const recordings = recordingsQuery.data?.items ?? [];
@@ -286,6 +312,7 @@ export function AdminDashboard() {
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
       queryClient.removeQueries({ queryKey: ["local-storage"] });
+      queryClient.removeQueries({ queryKey: ["cleanup-candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
     }
   });
@@ -329,6 +356,7 @@ export function AdminDashboard() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+      void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
   });
 
@@ -344,6 +372,7 @@ export function AdminDashboard() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+      void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
   });
 
@@ -434,7 +463,11 @@ export function AdminDashboard() {
               />
             </section>
 
-            <StoragePanel isLoading={localStorageQuery.isLoading} status={localStorageQuery.data} />
+            <StoragePanel
+              candidates={cleanupCandidatesQuery.data?.items ?? []}
+              isLoading={localStorageQuery.isLoading}
+              status={localStorageQuery.data}
+            />
 
             <RecordingsPanel
               isLoading={recordingsQuery.isLoading}
@@ -691,7 +724,7 @@ function ProfileListPanel(props: {
   );
 }
 
-function StoragePanel(props: { isLoading: boolean; status?: LocalStorageStatus }) {
+function StoragePanel(props: { candidates: CleanupCandidate[]; isLoading: boolean; status?: LocalStorageStatus }) {
   const usedPercent =
     props.status && props.status.disk_total_bytes > 0
       ? Math.round(((props.status.disk_total_bytes - props.status.disk_available_bytes) / props.status.disk_total_bytes) * 100)
@@ -721,6 +754,47 @@ function StoragePanel(props: { isLoading: boolean; status?: LocalStorageStatus }
         Disk used: {usedPercent}% of {formatBytes(props.status?.disk_total_bytes ?? 0)}. Completed recordings:{" "}
         {props.status?.completed_recordings ?? 0}.
       </p>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold">Cleanup Preview</h3>
+          <span className="text-xs text-muted">Oldest unprotected completed recordings</span>
+        </div>
+        <div className="mt-3 overflow-hidden rounded-md border border-border">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
+              <tr>
+                <th className="px-3 py-2 font-semibold">Recording</th>
+                <th className="px-3 py-2 font-semibold">Closed</th>
+                <th className="px-3 py-2 font-semibold">Files</th>
+                <th className="px-3 py-2 font-semibold">Reclaimable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.candidates.map((candidate) => (
+                <tr key={candidate.recording_id} className="bg-white">
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-ink">{candidate.title || candidate.streamer_name || "Untitled"}</p>
+                    <p className="mt-1 text-xs text-muted">
+                      {candidate.profile_name} - {candidate.room_id}
+                    </p>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(candidate.completed_at || "")}</td>
+                  <td className="px-3 py-3 text-muted">{candidate.file_count}</td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(candidate.reclaimable_bytes)}</td>
+                </tr>
+              ))}
+              {props.candidates.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-6 text-center text-muted" colSpan={4}>
+                    No cleanup candidates.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   );
 }

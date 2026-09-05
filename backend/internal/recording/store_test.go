@@ -280,6 +280,56 @@ func TestSetLocalProtectedTogglesRecording(t *testing.T) {
 	}
 }
 
+func TestCleanupCandidatesExcludeProtectedRecordings(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	_, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+	if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	filePath := filepath.Join(recordingDir, "record-1741048619-20260905-224258-164-title.flv")
+	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	oldTime := closedTestTime()
+	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes returned error: %v", err)
+	}
+
+	store := NewStore(database, cfg)
+	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
+		t.Fatalf("ReconcileLocal returned error: %v", err)
+	}
+	candidates, err := store.CleanupCandidates(ctx, actor, 10)
+	if err != nil {
+		t.Fatalf("CleanupCandidates returned error: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ReclaimableBytes != 5 {
+		t.Fatalf("unexpected cleanup candidates: %#v", candidates)
+	}
+
+	if _, err := store.SetLocalProtected(ctx, actor, candidates[0].RecordingID, true); err != nil {
+		t.Fatalf("SetLocalProtected returned error: %v", err)
+	}
+	candidates, err = store.CleanupCandidates(ctx, actor, 10)
+	if err != nil {
+		t.Fatalf("second CleanupCandidates returned error: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("expected protected recording to be excluded, got %#v", candidates)
+	}
+}
+
 func openTestDB(t *testing.T, ctx context.Context) (config.Config, *sql.DB) {
 	t.Helper()
 	root := t.TempDir()

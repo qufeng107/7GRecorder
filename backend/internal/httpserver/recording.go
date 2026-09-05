@@ -31,6 +31,20 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/storage/local/cleanup-candidates", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			items, err := store.CleanupCandidates(r.Context(), actor, r.Get("limit").Int())
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(g.Map{"items": items, "total": len(items)})
+		})
+	})
+
 	s.BindHandler("/api/v1/recordings", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return
