@@ -17,6 +17,20 @@ import (
 )
 
 func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
+	s.BindHandler("/api/v1/storage/local", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			status, err := store.LocalStorageStatus(r.Context(), actor)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(status)
+		})
+	})
+
 	s.BindHandler("/api/v1/recordings", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return
@@ -42,6 +56,36 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 				return
 			}
 			r.Response.WriteJson(result)
+		})
+	})
+
+	s.BindHandler("/api/v1/recordings/{id}/actions/protect-local", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			item, err := store.SetLocalProtected(r.Context(), actor, id, true)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
+		})
+	})
+
+	s.BindHandler("/api/v1/recordings/{id}/actions/unprotect-local", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			item, err := store.SetLocalProtected(r.Context(), actor, id, false)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
 		})
 	})
 

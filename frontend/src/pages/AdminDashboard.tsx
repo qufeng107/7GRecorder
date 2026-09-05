@@ -7,12 +7,14 @@ import {
   Download,
   FileVideo,
   HardDrive,
+  Lock,
   LogIn,
   LogOut,
   Plus,
   RefreshCw,
   Save,
-  ShieldCheck
+  ShieldCheck,
+  Unlock
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -89,6 +91,7 @@ type RecordingItem = {
   duration_ms: number;
   recording_status: string;
   local_storage_status: string;
+  local_protected: boolean;
   files: RecordingFile[] | null;
 };
 
@@ -102,6 +105,17 @@ type ReconcileResult = {
   imported: number;
   updated: number;
   skipped: number;
+};
+
+type LocalStorageStatus = {
+  data_root: string;
+  disk_total_bytes: number;
+  disk_free_bytes: number;
+  disk_available_bytes: number;
+  indexed_video_bytes: number;
+  indexed_video_files: number;
+  protected_recordings: number;
+  completed_recordings: number;
 };
 
 type ProfileForm = {
@@ -232,6 +246,14 @@ export function AdminDashboard() {
     refetchInterval: 15000
   });
 
+  const localStorageQuery = useQuery({
+    queryKey: ["local-storage"],
+    queryFn: () => requestJson<LocalStorageStatus>("/api/v1/storage/local"),
+    enabled: Boolean(meQuery.data?.user),
+    retry: false,
+    refetchInterval: 30000
+  });
+
   const profiles = profilesQuery.data?.items ?? [];
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
   const recordings = recordingsQuery.data?.items ?? [];
@@ -263,6 +285,7 @@ export function AdminDashboard() {
       setProfileForm(emptyProfileForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
+      queryClient.removeQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
     }
   });
@@ -305,6 +328,22 @@ export function AdminDashboard() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+    }
+  });
+
+  const protectRecordingMutation = useMutation({
+    mutationFn: (request: { id: number; protected: boolean }) =>
+      requestJson<RecordingItem>(
+        `/api/v1/recordings/${request.id}/actions/${request.protected ? "protect-local" : "unprotect-local"}`,
+        {
+          method: "POST",
+          body: "{}"
+        }
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
     }
   });
 
@@ -395,14 +434,20 @@ export function AdminDashboard() {
               />
             </section>
 
+            <StoragePanel isLoading={localStorageQuery.isLoading} status={localStorageQuery.data} />
+
             <RecordingsPanel
               isLoading={recordingsQuery.isLoading}
+              protectPending={protectRecordingMutation.isPending}
               reconcileError={reconcileMutation.isError}
               reconcilePending={reconcileMutation.isPending}
               reconcileResult={reconcileMutation.data}
               recordings={recordings}
               total={recordingTotal}
               onReconcile={() => reconcileMutation.mutate()}
+              onToggleProtect={(recording) =>
+                protectRecordingMutation.mutate({ id: recording.id, protected: !recording.local_protected })
+              }
             />
           </>
         ) : null}
@@ -646,14 +691,59 @@ function ProfileListPanel(props: {
   );
 }
 
+function StoragePanel(props: { isLoading: boolean; status?: LocalStorageStatus }) {
+  const usedPercent =
+    props.status && props.status.disk_total_bytes > 0
+      ? Math.round(((props.status.disk_total_bytes - props.status.disk_available_bytes) / props.status.disk_total_bytes) * 100)
+      : 0;
+
+  return (
+    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Local Storage</h2>
+          <p className="mt-1 text-sm text-muted">{props.status?.data_root ?? "Checking storage."}</p>
+        </div>
+        <HardDrive className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Indexed Videos" value={props.isLoading ? "..." : String(props.status?.indexed_video_files ?? 0)} />
+        <Metric label="Indexed Size" value={formatBytes(props.status?.indexed_video_bytes ?? 0)} />
+        <Metric label="Disk Available" value={formatBytes(props.status?.disk_available_bytes ?? 0)} />
+        <Metric label="Protected" value={String(props.status?.protected_recordings ?? 0)} />
+      </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e6ebe4]">
+        <div className="h-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, usedPercent))}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-muted">
+        Disk used: {usedPercent}% of {formatBytes(props.status?.disk_total_bytes ?? 0)}. Completed recordings:{" "}
+        {props.status?.completed_recordings ?? 0}.
+      </p>
+    </section>
+  );
+}
+
+function Metric(props: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs uppercase text-muted">{props.label}</p>
+      <p className="mt-1 text-sm font-semibold text-ink">{props.value}</p>
+    </div>
+  );
+}
+
 function RecordingsPanel(props: {
   isLoading: boolean;
+  protectPending: boolean;
   reconcileError: boolean;
   reconcilePending: boolean;
   reconcileResult?: ReconcileResult;
   recordings: RecordingItem[];
   total: number;
   onReconcile: () => void;
+  onToggleProtect: (recording: RecordingItem) => void;
 }) {
   return (
     <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
@@ -676,7 +766,7 @@ function RecordingsPanel(props: {
       {props.reconcileResult ? (
         <p className="mt-3 text-sm text-muted">
           Scan: {props.reconcileResult.imported} imported, {props.reconcileResult.updated} updated,{" "}
-          {props.reconcileResult.skipped} skipped.
+          {props.reconcileResult.skipped} ignored.
         </p>
       ) : null}
       {props.reconcileError ? (
@@ -720,6 +810,7 @@ function RecordingsPanel(props: {
                   <td className="px-3 py-3 text-muted">
                     <p>{recording.recording_status}</p>
                     <p className="mt-1 text-xs">{file?.file_status ?? "NO_FILE"}</p>
+                    {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">PROTECTED</p> : null}
                   </td>
                   <td className="px-3 py-3 text-muted">
                     {formatDuration(recording.duration_ms || file?.duration_ms || 0)}
@@ -729,17 +820,30 @@ function RecordingsPanel(props: {
                     <span className="break-all">{file?.relative_path ?? "-"}</span>
                   </td>
                   <td className="px-3 py-3">
-                    {file && file.file_status !== "WRITING" ? (
-                      <a
-                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                        href={`/api/v1/recording-files/${file.id}/download`}
+                    <div className="flex flex-col items-start gap-2">
+                      <button
+                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                        disabled={props.protectPending}
+                        type="button"
+                        onClick={() => props.onToggleProtect(recording)}
                       >
-                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                        Download
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted">-</span>
-                    )}
+                        {recording.local_protected ? (
+                          <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
+                        ) : (
+                          <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                        )}
+                        {recording.local_protected ? "Unprotect" : "Protect"}
+                      </button>
+                      {file && file.file_status !== "WRITING" ? (
+                        <a
+                          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                          href={`/api/v1/recording-files/${file.id}/download`}
+                        >
+                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                          Download
+                        </a>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               );

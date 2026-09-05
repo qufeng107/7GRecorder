@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
@@ -34,6 +35,7 @@ type Recording struct {
 	DurationMs         int64  `json:"duration_ms"`
 	RecordingStatus    string `json:"recording_status"`
 	LocalStorageStatus string `json:"local_storage_status"`
+	LocalProtected     bool   `json:"local_protected"`
 	Files              []File `json:"files"`
 }
 
@@ -57,6 +59,17 @@ type ReconcileResult struct {
 	Skipped      int `json:"skipped"`
 }
 
+type LocalStorageStatus struct {
+	DataRoot            string `json:"data_root"`
+	DiskTotalBytes      int64  `json:"disk_total_bytes"`
+	DiskFreeBytes       int64  `json:"disk_free_bytes"`
+	DiskAvailableBytes  int64  `json:"disk_available_bytes"`
+	IndexedVideoBytes   int64  `json:"indexed_video_bytes"`
+	IndexedVideoFiles   int64  `json:"indexed_video_files"`
+	ProtectedRecordings int64  `json:"protected_recordings"`
+	CompletedRecordings int64  `json:"completed_recordings"`
+}
+
 type Store struct {
 	db  *sql.DB
 	cfg config.Config
@@ -70,7 +83,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 	query := `
 		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
-			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected
 		FROM recordings rec
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
 	`
@@ -102,6 +115,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 			&item.DurationMs,
 			&item.RecordingStatus,
 			&item.LocalStorageStatus,
+			&item.LocalProtected,
 		); err != nil {
 			return nil, fmt.Errorf("scan recording: %w", err)
 		}
@@ -115,6 +129,122 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 		return nil, fmt.Errorf("iterate recordings: %w", err)
 	}
 	return items, nil
+}
+
+func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (LocalStorageStatus, error) {
+	if actor.Role != account.RoleSuperAdmin {
+		return LocalStorageStatus{}, ErrForbidden
+	}
+	if err := os.MkdirAll(s.cfg.DataRoot, 0o755); err != nil {
+		return LocalStorageStatus{}, fmt.Errorf("ensure data root: %w", err)
+	}
+
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(s.cfg.DataRoot, &stat); err != nil {
+		return LocalStorageStatus{}, fmt.Errorf("stat data root filesystem: %w", err)
+	}
+
+	status := LocalStorageStatus{
+		DataRoot:           s.cfg.DataRoot,
+		DiskTotalBytes:     int64(stat.Blocks) * int64(stat.Bsize),
+		DiskFreeBytes:      int64(stat.Bfree) * int64(stat.Bsize),
+		DiskAvailableBytes: int64(stat.Bavail) * int64(stat.Bsize),
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(COALESCE(size_bytes, 0)), 0), COUNT(*)
+		FROM recording_files
+		WHERE kind = 'video' AND file_status != 'DELETED' AND deleted_at IS NULL
+	`).Scan(&status.IndexedVideoBytes, &status.IndexedVideoFiles); err != nil {
+		return LocalStorageStatus{}, fmt.Errorf("summarize recording files: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM recordings
+		WHERE local_protected = 1 AND local_deleted_at IS NULL
+	`).Scan(&status.ProtectedRecordings); err != nil {
+		return LocalStorageStatus{}, fmt.Errorf("count protected recordings: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM recordings
+		WHERE recording_status = 'COMPLETED' AND local_deleted_at IS NULL
+	`).Scan(&status.CompletedRecordings); err != nil {
+		return LocalStorageStatus{}, fmt.Errorf("count completed recordings: %w", err)
+	}
+	return status, nil
+}
+
+func (s Store) SetLocalProtected(ctx context.Context, actor account.User, recordingID int64, protected bool) (Recording, error) {
+	query := `
+		UPDATE recordings
+		SET local_protected = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+			AND local_deleted_at IS NULL
+	`
+	args := []interface{}{protected, recordingID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += `
+			AND recording_profile_id IN (
+				SELECT id FROM recording_profiles WHERE owner_user_id = ?
+			)
+		`
+		args = append(args, actor.ID)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return Recording{}, fmt.Errorf("set local protected: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Recording{}, fmt.Errorf("read local protected update count: %w", err)
+	}
+	if affected == 0 {
+		return Recording{}, ErrNotFound
+	}
+	return s.get(ctx, actor, recordingID)
+}
+
+func (s Store) get(ctx context.Context, actor account.User, recordingID int64) (Recording, error) {
+	query := `
+		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
+			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected
+		FROM recordings rec
+		JOIN recording_profiles p ON p.id = rec.recording_profile_id
+		WHERE rec.id = ?
+	`
+	args := []interface{}{recordingID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += " AND p.owner_user_id = ?"
+		args = append(args, actor.ID)
+	}
+
+	var item Recording
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+		&item.ID,
+		&item.RecordingProfileID,
+		&item.ProfileName,
+		&item.RoomID,
+		&item.StreamerName,
+		&item.Title,
+		&item.StartedAt,
+		&item.CompletedAt,
+		&item.DurationMs,
+		&item.RecordingStatus,
+		&item.LocalStorageStatus,
+		&item.LocalProtected,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Recording{}, ErrNotFound
+	}
+	if err != nil {
+		return Recording{}, fmt.Errorf("get recording: %w", err)
+	}
+	item.Files, err = s.files(ctx, item.ID)
+	if err != nil {
+		return Recording{}, err
+	}
+	return item, nil
 }
 
 func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (ReconcileResult, error) {
