@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import {
   Activity,
   Archive,
+  ArchiveRestore,
   Database,
   Download,
   FileVideo,
@@ -13,8 +14,10 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Settings,
   ShieldCheck,
-  Unlock
+  Unlock,
+  X
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -247,6 +250,7 @@ export function AdminDashboard() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
   const [storageForm, setStorageForm] = useState({
     maxRecordingGB: 0,
@@ -302,6 +306,7 @@ export function AdminDashboard() {
 
   const profiles = profilesQuery.data?.items ?? [];
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const recordings = recordingsQuery.data?.items ?? [];
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
 
@@ -346,6 +351,7 @@ export function AdminDashboard() {
     mutationFn: () => requestJson<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
     onSuccess: () => {
       setSelectedProfileId(null);
+      setProfileEditorOpen(false);
       setProfileForm(emptyProfileForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
@@ -381,6 +387,7 @@ export function AdminDashboard() {
     },
     onSuccess: (profile) => {
       setSelectedProfileId(profile.id);
+      setProfileEditorOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
     }
   });
@@ -439,7 +446,22 @@ export function AdminDashboard() {
       }),
     onSuccess: () => {
       setSelectedProfileId(null);
+      setProfileEditorOpen(false);
       setProfileForm(emptyProfileForm);
+      void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
+    }
+  });
+
+  const restoreProfileMutation = useMutation({
+    mutationFn: (profileId: number) =>
+      requestJson<RecordingProfile>(`/api/v1/recording-profiles/${profileId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: false, enabled: true })
+      }),
+    onSuccess: (profile) => {
+      setSelectedProfileId(profile.id);
+      setProfileEditorOpen(false);
+      setProfileForm(profileToForm(profile));
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
     }
   });
@@ -462,6 +484,13 @@ export function AdminDashboard() {
         <header className="flex flex-col gap-2 border-b border-border pb-5">
           <p className="text-sm font-medium text-accent">7GRecorder Admin</p>
           <h1 className="text-3xl font-semibold tracking-normal">Recorder Console</h1>
+          {user ? (
+            <nav className="mt-3 flex flex-wrap gap-2">
+              <QuickLink href="#profiles" icon={Activity} label="Profiles" />
+              <QuickLink href="#storage" icon={Settings} label="Storage Settings" />
+              <QuickLink href="#recordings" icon={FileVideo} label="Recordings" />
+            </nav>
+          ) : null}
         </header>
 
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -494,29 +523,44 @@ export function AdminDashboard() {
 
         {user ? (
           <>
-            <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-              <ProfileFormPanel
+            <section id="profiles">
+              <ProfileListPanel
+                profiles={profiles}
+                selectedProfileId={selectedProfileId}
+                total={profileTotal}
+                onCreate={() => {
+                  setSelectedProfileId(null);
+                  setProfileForm(emptyProfileForm);
+                  setProfileEditorOpen(true);
+                }}
+                onSelect={(profile) => {
+                  setSelectedProfileId(profile.id);
+                  setProfileForm(profileToForm(profile));
+                  setProfileEditorOpen(true);
+                }}
+              />
+            </section>
+
+            {profileEditorOpen ? (
+              <ProfileEditorDialog
+                archivePending={archiveProfileMutation.isPending}
                 form={profileForm}
                 isEditing={Boolean(selectedProfileId)}
                 isSaving={saveProfileMutation.isPending}
+                profile={selectedProfile}
+                restorePending={restoreProfileMutation.isPending}
                 saveError={saveProfileMutation.isError}
+                onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
                 onCancel={() => {
+                  setProfileEditorOpen(false);
                   setSelectedProfileId(null);
                   setProfileForm(emptyProfileForm);
                 }}
                 onChange={setProfileForm}
+                onRestore={(profileId) => restoreProfileMutation.mutate(profileId)}
                 onSubmit={onProfileSubmit}
               />
-
-              <ProfileListPanel
-                archivePending={archiveProfileMutation.isPending}
-                profiles={profiles}
-                selectedProfileId={selectedProfileId}
-                total={profileTotal}
-                onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
-                onSelect={(profile) => setSelectedProfileId(profile.id)}
-              />
-            </section>
+            ) : null}
 
             <StoragePanel
               candidates={cleanupCandidatesQuery.data?.items ?? []}
@@ -618,116 +662,215 @@ function SessionPanel(props: {
   );
 }
 
-function ProfileFormPanel(props: {
+function QuickLink(props: { href: string; icon: typeof Activity; label: string }) {
+  const Icon = props.icon;
+  return (
+    <a
+      className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-ink shadow-sm hover:border-accent hover:text-accent"
+      href={props.href}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      {props.label}
+    </a>
+  );
+}
+
+function ProfileEditorDialog(props: {
+  archivePending: boolean;
   form: ProfileForm;
   isEditing: boolean;
   isSaving: boolean;
+  profile?: RecordingProfile;
+  restorePending: boolean;
   saveError: boolean;
+  onArchive: (profileId: number) => void;
   onCancel: () => void;
   onChange: (form: ProfileForm) => void;
+  onRestore: (profileId: number) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const update = <K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) => {
     props.onChange({ ...props.form, [key]: value });
   };
+  const isArchived = Boolean(props.profile?.archived_at);
 
   return (
-    <form className="rounded-md border border-border bg-panel p-4 shadow-sm" onSubmit={props.onSubmit}>
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{props.isEditing ? "Edit Profile" : "New Profile"}</h2>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-          disabled={props.isSaving}
-          type="submit"
-        >
-          {props.isEditing ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {props.isEditing ? "Save" : "Create"}
-        </button>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
+      <form
+        className="w-full max-w-xl rounded-md border border-border bg-panel p-4 shadow-xl"
+        onSubmit={props.onSubmit}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
+          <div>
+            <h2 className="text-base font-semibold">{props.isEditing ? "Edit Profile" : "New Profile"}</h2>
+            {isArchived ? <p className="mt-1 text-xs font-medium text-muted">Archived profile</p> : null}
+          </div>
+          <button
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
+            type="button"
+            onClick={props.onCancel}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+            <span className="sr-only">Close</span>
+          </button>
+        </div>
 
-      <div className="mt-4 grid gap-3">
-        <TextField label="Name" value={props.form.name} onChange={(value) => update("name", value)} />
-        <TextField
-          label="Room ID"
-          value={props.form.room_id}
-          onChange={(value) => update("room_id", value)}
-        />
-        <TextField
-          label="Streamer"
-          value={props.form.streamer_name}
-          onChange={(value) => update("streamer_name", value)}
-        />
-        <TextField
-          label="Streamer UID"
-          value={props.form.streamer_uid}
-          onChange={(value) => update("streamer_uid", value)}
-        />
-        <TextField
-          label="Timezone"
-          value={props.form.timezone}
-          onChange={(value) => update("timezone", value)}
-        />
-        <TextField
-          label="Public Slug"
-          value={props.form.public_slug}
-          onChange={(value) => update("public_slug", value)}
-        />
-        <SelectField label="Quality" value={props.form.quality} onChange={(value) => update("quality", value)} />
-        <NumberField
-          label="Segment Seconds"
-          min={60}
-          value={props.form.segment_duration_sec}
-          onChange={(value) => update("segment_duration_sec", value)}
-        />
-        <NumberField
-          label="Finalize Grace Seconds"
-          min={0}
-          value={props.form.finalize_grace_period_sec}
-          onChange={(value) => update("finalize_grace_period_sec", value)}
-        />
-        <ToggleField label="Enabled" checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
-        <ToggleField
-          label="Auto Record"
-          checked={props.form.auto_record}
-          onChange={(value) => update("auto_record", value)}
-        />
-        <ToggleField
-          label="Record Danmaku"
-          checked={props.form.record_danmaku}
-          onChange={(value) => update("record_danmaku", value)}
-        />
-        <ToggleField
-          label="Public Page"
-          checked={props.form.public_enabled}
-          onChange={(value) => update("public_enabled", value)}
-        />
-      </div>
+        <div className="mt-4 grid gap-3">
+          <TextField label="Name" value={props.form.name} onChange={(value) => update("name", value)} />
+          <TextField
+            label="Room ID"
+            value={props.form.room_id}
+            onChange={(value) => update("room_id", value)}
+          />
+          <TextField
+            label="Streamer"
+            value={props.form.streamer_name}
+            onChange={(value) => update("streamer_name", value)}
+          />
+          <TextField
+            label="Streamer UID"
+            value={props.form.streamer_uid}
+            onChange={(value) => update("streamer_uid", value)}
+          />
+          <TextField
+            label="Timezone"
+            value={props.form.timezone}
+            onChange={(value) => update("timezone", value)}
+          />
+          <TextField
+            label="Public Slug"
+            value={props.form.public_slug}
+            onChange={(value) => update("public_slug", value)}
+          />
+          <SelectField label="Quality" value={props.form.quality} onChange={(value) => update("quality", value)} />
+          <NumberField
+            label="Segment Seconds"
+            min={60}
+            value={props.form.segment_duration_sec}
+            onChange={(value) => update("segment_duration_sec", value)}
+          />
+          <NumberField
+            label="Finalize Grace Seconds"
+            min={0}
+            value={props.form.finalize_grace_period_sec}
+            onChange={(value) => update("finalize_grace_period_sec", value)}
+          />
+          <ToggleField label="Enabled" checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
+          <ToggleField
+            label="Auto Record"
+            checked={props.form.auto_record}
+            onChange={(value) => update("auto_record", value)}
+          />
+          <ToggleField
+            label="Record Danmaku"
+            checked={props.form.record_danmaku}
+            onChange={(value) => update("record_danmaku", value)}
+          />
+          <ToggleField
+            label="Public Page"
+            checked={props.form.public_enabled}
+            onChange={(value) => update("public_enabled", value)}
+          />
+        </div>
 
-      {props.saveError ? (
-        <p className="mt-3 text-sm text-red-700">Profile save failed. Check unique room and required fields.</p>
-      ) : null}
-      {props.isEditing ? (
-        <button className="mt-3 text-sm font-medium text-muted hover:text-ink" type="button" onClick={props.onCancel}>
-          Clear selection
-        </button>
-      ) : null}
-    </form>
+        {props.saveError ? (
+          <p className="mt-3 text-sm text-red-700">Profile save failed. Check unique room and required fields.</p>
+        ) : null}
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <div>
+            {props.profile && isArchived ? (
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                disabled={props.restorePending}
+                type="button"
+                onClick={() => props.onRestore(props.profile!.id)}
+              >
+                <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
+                Restore profile
+              </button>
+            ) : null}
+            {props.profile && !isArchived ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {confirmArchive ? (
+                  <>
+                    <button
+                      className="inline-flex h-9 items-center justify-center rounded-md bg-red-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
+                      disabled={props.archivePending}
+                      type="button"
+                      onClick={() => props.onArchive(props.profile!.id)}
+                    >
+                      Confirm archive
+                    </button>
+                    <button
+                      className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
+                      type="button"
+                      onClick={() => setConfirmArchive(false)}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:border-red-700 disabled:opacity-60"
+                    disabled={props.archivePending}
+                    type="button"
+                    onClick={() => setConfirmArchive(true)}
+                  >
+                    <Archive className="h-4 w-4" aria-hidden="true" />
+                    Archive profile
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
+              type="button"
+              onClick={props.onCancel}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+              disabled={props.isSaving}
+              type="submit"
+            >
+              {props.isEditing ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {props.isEditing ? "Save" : "Create"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
   );
 }
 
 function ProfileListPanel(props: {
-  archivePending: boolean;
   profiles: RecordingProfile[];
   selectedProfileId: number | null;
   total: number;
-  onArchive: (profileId: number) => void;
+  onCreate: () => void;
   onSelect: (profile: RecordingProfile) => void;
 }) {
   return (
     <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">Recording Profiles</h2>
-        <span className="text-sm text-muted">{props.total} total</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted">{props.total} total</span>
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white"
+            type="button"
+            onClick={props.onCreate}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            New
+          </button>
+        </div>
       </div>
       <div className="mt-4 overflow-hidden rounded-md border border-border">
         <table className="w-full border-collapse text-left text-sm">
@@ -757,15 +900,16 @@ function ProfileListPanel(props: {
                 <td className="px-3 py-3 text-muted">{profile.runtime.sync_status}</td>
                 <td className="px-3 py-3">
                   {profile.archived_at ? (
-                    <span className="text-xs text-muted">Archived</span>
+                    <span className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted">
+                      Archived
+                    </span>
                   ) : (
                     <button
-                      className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-60"
-                      disabled={props.archivePending}
+                      className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink hover:border-accent hover:text-accent"
                       type="button"
-                      onClick={() => props.onArchive(profile.id)}
+                      onClick={() => props.onSelect(profile)}
                     >
-                      Archive
+                      Edit
                     </button>
                   )}
                 </td>
@@ -815,7 +959,7 @@ function StoragePanel(props: {
   };
 
   return (
-    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+    <section id="storage" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">Local Storage</h2>
@@ -955,7 +1099,7 @@ function RecordingsPanel(props: {
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
   return (
-    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+    <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">Recordings</h2>

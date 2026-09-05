@@ -175,6 +175,8 @@ Recorder 暂时不可用不能阻止管理网站保存配置。
 - segment_duration；
 - record_danmaku 等会改变底层录制行为的核心参数。
 
+`archived=true` 表示可恢复的软归档：Profile 会被停用、清除 active room 占用并触发 Recorder 同步停止该 room 的 desired recording；历史 Recording/File metadata 与本地录像不删除。恢复时使用 `archived=false`，需要继续录制时同时保存 `enabled=true`。
+
 ### Credentials / Module Config
 
 ```text

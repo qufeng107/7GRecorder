@@ -113,6 +113,47 @@ func TestCreateProfileRejectsDuplicateActiveRoom(t *testing.T) {
 	}
 }
 
+func TestUpdateCanArchiveAndRestoreProfile(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	store := NewStore(database)
+	actor := bootstrapTestAdmin(t, ctx, database)
+
+	created, err := store.Create(ctx, actor, CreateRequest{
+		Name:         "Main room",
+		RoomID:       "123456",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	archive := true
+	archived, err := store.Update(ctx, actor, created.ID, UpdateRequest{Archived: &archive})
+	if err != nil {
+		t.Fatalf("archive Update returned error: %v", err)
+	}
+	if archived.ArchivedAt == "" {
+		t.Fatal("expected archived_at to be set")
+	}
+	if archived.Enabled {
+		t.Fatal("expected archived profile to be disabled")
+	}
+
+	restore := false
+	enable := true
+	restored, err := store.Update(ctx, actor, created.ID, UpdateRequest{Archived: &restore, Enabled: &enable})
+	if err != nil {
+		t.Fatalf("restore Update returned error: %v", err)
+	}
+	if restored.ArchivedAt != "" {
+		t.Fatalf("expected archived_at to be cleared, got %q", restored.ArchivedAt)
+	}
+	if !restored.Enabled {
+		t.Fatal("expected restored profile to be enabled")
+	}
+}
+
 func TestManagerPolicyBlocksProfileCreate(t *testing.T) {
 	ctx := context.Background()
 	database := openTestDB(t, ctx)
