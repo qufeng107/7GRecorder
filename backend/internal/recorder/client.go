@@ -117,13 +117,13 @@ func (c HTTPClient) addRoom(ctx context.Context, roomID int64, autoRecord bool) 
 
 func (c HTTPClient) setRoomConfig(ctx context.Context, roomID int64, desired DesiredProfile) error {
 	payload := map[string]interface{}{
-		"RoomId":           settingValue(roomID),
-		"AutoRecord":       settingValue(desired.AutoRecord),
-		"RecordMode":       settingValue(0),
-		"RecordDanmaku":    settingValue(desired.RecordDanmaku),
-		"CuttingMode":      settingValue(1),
-		"CuttingNumber":    settingValue(segmentMinutes(desired.SegmentDurationSec)),
-		"RecordingQuality": settingValue(qualityQN(desired.Quality)),
+		"RoomId":           roomID,
+		"AutoRecord":       desired.AutoRecord,
+		"RecordMode":       0,
+		"RecordDanmaku":    desired.RecordDanmaku,
+		"CuttingMode":      1,
+		"CuttingNumber":    segmentMinutes(desired.SegmentDurationSec),
+		"RecordingQuality": qualityQN(desired.Quality),
 	}
 	path := fmt.Sprintf("/api/room/%d/config", roomID)
 	var status int
@@ -199,13 +199,6 @@ func runtimeStatus(room roomResponse) RuntimeStatus {
 		status.RecorderStatus = "RECORDING"
 	}
 	return status
-}
-
-func settingValue(value interface{}) map[string]interface{} {
-	return map[string]interface{}{
-		"HasValue": true,
-		"Value":    value,
-	}
 }
 
 func segmentMinutes(seconds int64) int64 {
