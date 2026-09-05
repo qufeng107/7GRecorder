@@ -11,19 +11,29 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func Migrate(ctx context.Context, cfg config.Config) error {
+func Open(ctx context.Context, cfg config.Config) (*sql.DB, error) {
 	database, err := sql.Open("sqlite3", cfg.SQLitePath+"?_foreign_keys=on&_busy_timeout=5000")
 	if err != nil {
-		return fmt.Errorf("open sqlite: %w", err)
+		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	defer database.Close()
 
 	if _, err := database.ExecContext(ctx, "PRAGMA journal_mode=WAL;"); err != nil {
-		return fmt.Errorf("set sqlite wal: %w", err)
+		database.Close()
+		return nil, fmt.Errorf("set sqlite wal: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON;"); err != nil {
-		return fmt.Errorf("enable sqlite foreign keys: %w", err)
+		database.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
+	return database, nil
+}
+
+func Migrate(ctx context.Context, cfg config.Config) error {
+	database, err := Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
