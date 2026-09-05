@@ -119,7 +119,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]RecordingProfile
 	}
 	defer rows.Close()
 
-	var profiles []RecordingProfile
+	profiles := make([]RecordingProfile, 0)
 	for rows.Next() {
 		profile, err := scanProfileRow(rows)
 		if err != nil {

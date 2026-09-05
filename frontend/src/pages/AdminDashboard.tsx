@@ -58,8 +58,8 @@ type RecordingProfile = {
 };
 
 type ProfileListResponse = {
-  items: RecordingProfile[];
-  total: number;
+  items: RecordingProfile[] | null;
+  total?: number;
 };
 
 type ProfileForm = {
@@ -181,12 +181,15 @@ export function AdminDashboard() {
     retry: false
   });
 
+  const profiles = profilesQuery.data?.items ?? [];
+  const profileTotal = profilesQuery.data?.total ?? profiles.length;
+
   useEffect(() => {
-    const selected = profilesQuery.data?.items.find((profile) => profile.id === selectedProfileId);
+    const selected = profiles.find((profile) => profile.id === selectedProfileId);
     if (selected) {
       setProfileForm(profileToForm(selected));
     }
-  }, [profilesQuery.data?.items, selectedProfileId]);
+  }, [profiles, selectedProfileId]);
 
   const loginMutation = useMutation({
     mutationFn: () =>
@@ -264,7 +267,6 @@ export function AdminDashboard() {
   };
 
   const user = meQuery.data?.user;
-  const profiles = profilesQuery.data?.items ?? [];
 
   return (
     <main className="min-h-screen bg-[#f7f8f5] text-ink">
@@ -321,7 +323,7 @@ export function AdminDashboard() {
               archivePending={archiveProfileMutation.isPending}
               profiles={profiles}
               selectedProfileId={selectedProfileId}
-              total={profilesQuery.data?.total ?? 0}
+              total={profileTotal}
               onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
               onSelect={(profile) => setSelectedProfileId(profile.id)}
             />
