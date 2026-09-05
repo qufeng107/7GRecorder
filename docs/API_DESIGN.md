@@ -237,6 +237,16 @@ GET /api/v1/recording-files/{id}/download?source=local
 GET /api/v1/recording-files/{id}/download?source=cos
 ```
 
+Early production bootstrap implements local file download as:
+
+```text
+GET /api/v1/recording-files/{id}/download
+```
+
+This first version only serves local, closed video files. The backend must authenticate the session, check
+profile visibility, resolve the DB `relative_path` under `DATA_ROOT`, and return `X-Accel-Redirect` for the
+Nginx internal media location. COS downloads remain a later module.
+
 下载行为见第 9 节。
 
 ### Publications
