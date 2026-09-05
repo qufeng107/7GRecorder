@@ -3,6 +3,7 @@ package profile
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -89,6 +90,20 @@ type SettingsUpsert struct {
 	RecordDanmaku          *bool   `json:"record_danmaku"`
 	SegmentDurationSec     *int64  `json:"segment_duration_sec"`
 	FinalizeGracePeriodSec *int64  `json:"finalize_grace_period_sec"`
+}
+
+type RecorderSyncPayload struct {
+	ProfileID              int64  `json:"profile_id"`
+	RoomID                 string `json:"room_id"`
+	LiveURL                string `json:"live_url"`
+	Enabled                bool   `json:"enabled"`
+	AutoRecord             bool   `json:"auto_record"`
+	Quality                string `json:"quality"`
+	RecordDanmaku          bool   `json:"record_danmaku"`
+	SegmentDurationSec     int64  `json:"segment_duration_sec"`
+	FinalizeGracePeriodSec int64  `json:"finalize_grace_period_sec"`
+	OutputRelativeDir      string `json:"output_relative_dir"`
+	WebhookPath            string `json:"webhook_path"`
 }
 
 type Store struct {
@@ -209,6 +224,9 @@ func (s Store) Create(ctx context.Context, actor account.User, req CreateRequest
 	`, profileID); err != nil {
 		return RecordingProfile{}, fmt.Errorf("insert profile runtime: %w", err)
 	}
+	if err := enqueueRecorderSync(ctx, tx, recorderSyncPayload(profileID, roomID, enabled, "", settings)); err != nil {
+		return RecordingProfile{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO audit_logs (actor_user_id, action, resource_type, resource_id, summary)
 		VALUES (?, 'PROFILE_CREATE', 'recording_profile', ?, ?)
@@ -306,7 +324,13 @@ func (s Store) Update(ctx context.Context, actor account.User, id int64, req Upd
 		return RecordingProfile{}, ErrValidation
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordingProfile{}, fmt.Errorf("begin profile update: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE recording_profiles
 		SET name = ?, room_id = ?, streamer_name = ?, streamer_uid = NULLIF(?, ''), timezone = ?,
 			enabled = ?, public_enabled = ?, public_slug = NULLIF(?, ''), archived_at = NULLIF(?, ''),
@@ -318,6 +342,16 @@ func (s Store) Update(ctx context.Context, actor account.User, id int64, req Upd
 	}
 	if err != nil {
 		return RecordingProfile{}, fmt.Errorf("update profile: %w", err)
+	}
+	settings := current.Settings
+	if err := markRecorderSyncPending(ctx, tx, id); err != nil {
+		return RecordingProfile{}, err
+	}
+	if err := enqueueRecorderSync(ctx, tx, recorderSyncPayload(id, roomID, enabled, archivedAt, settings)); err != nil {
+		return RecordingProfile{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RecordingProfile{}, fmt.Errorf("commit profile update: %w", err)
 	}
 	return s.Get(ctx, actor, id)
 }
@@ -331,14 +365,31 @@ func (s Store) UpsertSettings(ctx context.Context, actor account.User, profileID
 	if err != nil {
 		return RecordingSettings{}, err
 	}
-	if _, err := s.Get(ctx, actor, profileID); err != nil {
+	profile, err := s.Get(ctx, actor, profileID)
+	if err != nil {
 		return RecordingSettings{}, err
+	}
+	if coreSettingsChanging(settings, req) {
+		active, err := s.hasActiveRecording(ctx, profileID)
+		if err != nil {
+			return RecordingSettings{}, err
+		}
+		if active {
+			return RecordingSettings{}, ErrRecordingActive
+		}
 	}
 	settings = mergeSettings(settings, req)
 	if err := validateSettings(settings); err != nil {
 		return RecordingSettings{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordingSettings{}, fmt.Errorf("begin profile settings update: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE recording_settings
 		SET auto_record = ?, quality = ?, record_danmaku = ?, segment_duration_sec = ?,
 			finalize_grace_period_sec = ?, updated_at = CURRENT_TIMESTAMP
@@ -346,6 +397,15 @@ func (s Store) UpsertSettings(ctx context.Context, actor account.User, profileID
 	`, boolInt(settings.AutoRecord), settings.Quality, boolInt(settings.RecordDanmaku), settings.SegmentDurationSec, settings.FinalizeGracePeriodSec, profileID)
 	if err != nil {
 		return RecordingSettings{}, fmt.Errorf("update profile settings: %w", err)
+	}
+	if err := markRecorderSyncPending(ctx, tx, profileID); err != nil {
+		return RecordingSettings{}, err
+	}
+	if err := enqueueRecorderSync(ctx, tx, recorderSyncPayload(profileID, profile.RoomID, profile.Enabled, profile.ArchivedAt, settings)); err != nil {
+		return RecordingSettings{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RecordingSettings{}, fmt.Errorf("commit profile settings update: %w", err)
 	}
 	return s.settings(ctx, profileID)
 }
@@ -440,6 +500,67 @@ func (s Store) ensureCanEditRecordingProfile(ctx context.Context, actor account.
 	return nil
 }
 
+type txExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
+func markRecorderSyncPending(ctx context.Context, exec txExecutor, profileID int64) error {
+	if _, err := exec.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET sync_status = 'PENDING', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE recording_profile_id = ?
+	`, profileID); err != nil {
+		return fmt.Errorf("mark recorder sync pending: %w", err)
+	}
+	return nil
+}
+
+func enqueueRecorderSync(ctx context.Context, exec txExecutor, payload RecorderSyncPayload) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal recorder sync payload: %w", err)
+	}
+	businessKey := fmt.Sprintf("profile:%d:recorder:sync", payload.ProfileID)
+	if _, err := exec.ExecContext(ctx, `
+		INSERT INTO jobs
+			(recording_profile_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		VALUES (?, 'SYNC_RECORDER_PROFILE', 'LIGHT', ?, ?, 'PENDING', 20, 5)
+		ON CONFLICT(business_key) WHERE business_key IS NOT NULL DO UPDATE SET
+			payload_json = excluded.payload_json,
+			status = 'PENDING',
+			priority = excluded.priority,
+			attempts = 0,
+			max_attempts = excluded.max_attempts,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+	`, payload.ProfileID, businessKey, string(body)); err != nil {
+		return fmt.Errorf("enqueue recorder sync: %w", err)
+	}
+	return nil
+}
+
+func recorderSyncPayload(profileID int64, roomID string, enabled bool, archivedAt string, settings RecordingSettings) RecorderSyncPayload {
+	shouldRecord := enabled && archivedAt == ""
+	return RecorderSyncPayload{
+		ProfileID:              profileID,
+		RoomID:                 roomID,
+		LiveURL:                "https://live.bilibili.com/" + roomID,
+		Enabled:                shouldRecord,
+		AutoRecord:             shouldRecord && settings.AutoRecord,
+		Quality:                settings.Quality,
+		RecordDanmaku:          settings.RecordDanmaku,
+		SegmentDurationSec:     settings.SegmentDurationSec,
+		FinalizeGracePeriodSec: settings.FinalizeGracePeriodSec,
+		OutputRelativeDir:      fmt.Sprintf("recordings/%d", profileID),
+		WebhookPath:            "/internal/v1/recorder/webhook",
+	}
+}
+
 type profileScanner interface {
 	Scan(dest ...interface{}) error
 }
@@ -506,6 +627,25 @@ func validateSettings(settings RecordingSettings) error {
 		return ErrValidation
 	}
 	return nil
+}
+
+func coreSettingsChanging(current RecordingSettings, req SettingsUpsert) bool {
+	if req.AutoRecord != nil && *req.AutoRecord != current.AutoRecord {
+		return true
+	}
+	if req.Quality != nil && strings.TrimSpace(*req.Quality) != current.Quality {
+		return true
+	}
+	if req.RecordDanmaku != nil && *req.RecordDanmaku != current.RecordDanmaku {
+		return true
+	}
+	if req.SegmentDurationSec != nil && *req.SegmentDurationSec != current.SegmentDurationSec {
+		return true
+	}
+	if req.FinalizeGracePeriodSec != nil && *req.FinalizeGracePeriodSec != current.FinalizeGracePeriodSec {
+		return true
+	}
+	return false
 }
 
 func boolDefault(value *bool, fallback bool) bool {

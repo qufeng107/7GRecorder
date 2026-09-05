@@ -3,6 +3,7 @@ package profile
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -41,6 +42,57 @@ func TestCreateProfileCreatesDefaults(t *testing.T) {
 	}
 	if created.Runtime.SyncStatus != "PENDING" {
 		t.Fatalf("expected pending sync status, got %q", created.Runtime.SyncStatus)
+	}
+}
+
+func TestCreateProfileEnqueuesRecorderSyncForBilibiliRoom(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	store := NewStore(database)
+	actor := bootstrapTestAdmin(t, ctx, database)
+
+	created, err := store.Create(ctx, actor, CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	var jobType string
+	var businessKey string
+	var payloadJSON string
+	err = database.QueryRowContext(ctx, `
+		SELECT type, business_key, payload_json
+		FROM jobs
+		WHERE recording_profile_id = ?
+	`, created.ID).Scan(&jobType, &businessKey, &payloadJSON)
+	if err != nil {
+		t.Fatalf("query sync job returned error: %v", err)
+	}
+	if jobType != "SYNC_RECORDER_PROFILE" {
+		t.Fatalf("expected SYNC_RECORDER_PROFILE job, got %q", jobType)
+	}
+	if businessKey != "profile:1:recorder:sync" {
+		t.Fatalf("expected stable recorder sync business key, got %q", businessKey)
+	}
+
+	var payload RecorderSyncPayload
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		t.Fatalf("unmarshal recorder sync payload returned error: %v", err)
+	}
+	if payload.RoomID != "1741048619" {
+		t.Fatalf("expected room 1741048619, got %q", payload.RoomID)
+	}
+	if payload.LiveURL != "https://live.bilibili.com/1741048619" {
+		t.Fatalf("expected Bilibili live URL, got %q", payload.LiveURL)
+	}
+	if !payload.Enabled || !payload.AutoRecord {
+		t.Fatal("expected enabled auto-record payload")
+	}
+	if payload.OutputRelativeDir != "recordings/1" {
+		t.Fatalf("expected stable output directory, got %q", payload.OutputRelativeDir)
 	}
 }
 
@@ -110,6 +162,49 @@ func TestUpdateSettings(t *testing.T) {
 	}
 	if settings.SegmentDurationSec != 600 {
 		t.Fatalf("expected segment duration 600, got %d", settings.SegmentDurationSec)
+	}
+
+	var payloadJSON string
+	err = database.QueryRowContext(ctx, `
+		SELECT payload_json
+		FROM jobs
+		WHERE business_key = ?
+	`, "profile:1:recorder:sync").Scan(&payloadJSON)
+	if err != nil {
+		t.Fatalf("query sync job returned error: %v", err)
+	}
+	var payload RecorderSyncPayload
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		t.Fatalf("unmarshal recorder sync payload returned error: %v", err)
+	}
+	if payload.Quality != "high" || payload.SegmentDurationSec != 600 {
+		t.Fatalf("expected updated sync payload, got quality=%q segment=%d", payload.Quality, payload.SegmentDurationSec)
+	}
+}
+
+func TestUpdateSettingsRejectsCoreChangesDuringActiveRecording(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	store := NewStore(database)
+	actor := bootstrapTestAdmin(t, ctx, database)
+
+	created, err := store.Create(ctx, actor, CreateRequest{Name: "Main room", RoomID: "123456", StreamerName: "Streamer"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO recordings
+			(recording_profile_id, started_at, recording_status, source_room_id, streamer_name_snapshot)
+		VALUES (?, CURRENT_TIMESTAMP, 'ACTIVE', ?, ?)
+	`, created.ID, created.RoomID, created.StreamerName)
+	if err != nil {
+		t.Fatalf("insert active recording returned error: %v", err)
+	}
+
+	quality := "high"
+	_, err = store.UpsertSettings(ctx, actor, created.ID, SettingsUpsert{Quality: &quality})
+	if !errors.Is(err, ErrRecordingActive) {
+		t.Fatalf("expected ErrRecordingActive, got %v", err)
 	}
 }
 
