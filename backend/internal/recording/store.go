@@ -79,7 +79,7 @@ type LocalStorageStatus struct {
 }
 
 type LocalStorageSettings struct {
-	MaxRecordingBytes            int64   `json:"max_recording_bytes"`
+	MaxRecordingBytes          int64   `json:"max_recording_bytes"`
 	MinSystemFreeBytes         int64   `json:"min_system_free_bytes"`
 	CleanupTargetRatio         float64 `json:"cleanup_target_ratio"`
 	AbsoluteEmergencyFreeBytes int64   `json:"absolute_emergency_free_bytes"`
@@ -87,7 +87,7 @@ type LocalStorageSettings struct {
 }
 
 type LocalStorageSettingsUpsert struct {
-	MaxRecordingBytes            int64   `json:"max_recording_bytes"`
+	MaxRecordingBytes          int64   `json:"max_recording_bytes"`
 	MinSystemFreeBytes         int64   `json:"min_system_free_bytes"`
 	CleanupTargetRatio         float64 `json:"cleanup_target_ratio"`
 	AbsoluteEmergencyFreeBytes int64   `json:"absolute_emergency_free_bytes"`
@@ -359,7 +359,7 @@ func defaultLocalStorageSettings(diskTotalBytes int64) LocalStorageSettings {
 		emergencyFree = 2 * gibibyte
 	}
 	return LocalStorageSettings{
-		MaxRecordingBytes:           diskTotalBytes * 70 / 100,
+		MaxRecordingBytes:          diskTotalBytes * 70 / 100,
 		MinSystemFreeBytes:         minFree,
 		CleanupTargetRatio:         0.85,
 		AbsoluteEmergencyFreeBytes: emergencyFree,
