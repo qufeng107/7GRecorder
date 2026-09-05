@@ -542,6 +542,14 @@ TanStack Query
 - 最近错误；
 - Storage Warning/Critical。
 
+后台信息架构：
+
+- Overview 显示系统健康、模块状态和发布版本等只读概览；
+- Recording Profiles 是账号作用域内的直播间与录制配置入口，普通 Manager 只能维护自己的 Profile，SUPER_ADMIN 可以跨账号管理；
+- Recordings 是账号作用域内的录像索引、下载和本地保护入口；
+- System Settings 是全局共享配置入口，只允许 SUPER_ADMIN 使用，包含本地存储配额、磁盘安全线和清理预览等会影响所有账号的设置；
+- 账号会话入口放在后台右上角，后续账号管理页面仍然遵守 SUPER_ADMIN-only 边界。
+
 ### Recording 详情
 
 至少显示：
