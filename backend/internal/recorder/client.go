@@ -127,9 +127,12 @@ func (c HTTPClient) setRoomConfig(ctx context.Context, roomID int64, desired Des
 	}
 	path := fmt.Sprintf("/api/room/%d/config", roomID)
 	var status int
+	var responseBody []byte
 	var err error
+	var attempted []string
 	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodPost} {
-		status, _, err = c.do(ctx, method, path, payload)
+		attempted = append(attempted, method)
+		status, responseBody, err = c.do(ctx, method, path, payload)
 		if err != nil {
 			return err
 		}
@@ -137,10 +140,10 @@ func (c HTTPClient) setRoomConfig(ctx context.Context, roomID int64, desired Des
 			return nil
 		}
 		if status != http.StatusMethodNotAllowed {
-			return fmt.Errorf("set recorder room %d config returned status %d", roomID, status)
+			return fmt.Errorf("set recorder room %d config via %s returned status %d: %s", roomID, method, status, trimBody(responseBody))
 		}
 	}
-	return fmt.Errorf("set recorder room %d config returned status %d", roomID, status)
+	return fmt.Errorf("set recorder room %d config returned status %d after methods %s: %s", roomID, status, strings.Join(attempted, ","), trimBody(responseBody))
 }
 
 func (c HTTPClient) do(ctx context.Context, method string, path string, payload interface{}) (int, []byte, error) {
@@ -229,4 +232,15 @@ func qualityQN(quality string) string {
 	default:
 		return "10000"
 	}
+}
+
+func trimBody(body []byte) string {
+	message := strings.TrimSpace(string(body))
+	if message == "" {
+		return "<empty body>"
+	}
+	if len(message) > 500 {
+		return message[:500]
+	}
+	return message
 }
