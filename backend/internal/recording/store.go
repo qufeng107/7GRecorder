@@ -70,6 +70,19 @@ type LocalStorageStatus struct {
 	CompletedRecordings int64  `json:"completed_recordings"`
 }
 
+type CleanupCandidate struct {
+	RecordingID      int64  `json:"recording_id"`
+	ProfileName      string `json:"profile_name"`
+	RoomID           string `json:"room_id"`
+	StreamerName     string `json:"streamer_name"`
+	Title            string `json:"title,omitempty"`
+	StartedAt        string `json:"started_at"`
+	CompletedAt      string `json:"completed_at,omitempty"`
+	DurationMs       int64  `json:"duration_ms"`
+	FileCount        int64  `json:"file_count"`
+	ReclaimableBytes int64  `json:"reclaimable_bytes"`
+}
+
 type Store struct {
 	db  *sql.DB
 	cfg config.Config
@@ -103,6 +116,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 	items := make([]Recording, 0)
 	for rows.Next() {
 		var item Recording
+		var localProtected int
 		if err := rows.Scan(
 			&item.ID,
 			&item.RecordingProfileID,
@@ -115,10 +129,11 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 			&item.DurationMs,
 			&item.RecordingStatus,
 			&item.LocalStorageStatus,
-			&item.LocalProtected,
+			&localProtected,
 		); err != nil {
 			return nil, fmt.Errorf("scan recording: %w", err)
 		}
+		item.LocalProtected = localProtected == 1
 		item.Files, err = s.files(ctx, item.ID)
 		if err != nil {
 			return nil, err
@@ -174,6 +189,72 @@ func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (Loca
 	return status, nil
 }
 
+func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit int) ([]CleanupCandidate, error) {
+	if actor.Role != account.RoleSuperAdmin {
+		return nil, ErrForbidden
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rec.id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
+			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
+			COALESCE(rec.duration_ms, 0),
+			COUNT(CASE WHEN f.kind = 'video' AND f.file_status = 'CLOSED' AND f.deleted_at IS NULL THEN 1 END),
+			COALESCE(SUM(CASE
+				WHEN f.kind = 'video' AND f.file_status = 'CLOSED' AND f.deleted_at IS NULL THEN COALESCE(f.size_bytes, 0)
+				ELSE 0
+			END), 0)
+		FROM recordings rec
+		JOIN recording_profiles p ON p.id = rec.recording_profile_id
+		LEFT JOIN recording_files f ON f.recording_id = rec.id
+		WHERE rec.recording_status = 'COMPLETED'
+			AND rec.local_storage_status != 'DELETED'
+			AND rec.local_deleted_at IS NULL
+			AND rec.local_protected = 0
+		GROUP BY rec.id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
+			rec.title, rec.started_at, rec.completed_at, rec.duration_ms
+		HAVING SUM(CASE
+			WHEN f.kind = 'video' AND f.file_status = 'CLOSED' AND f.deleted_at IS NULL THEN COALESCE(f.size_bytes, 0)
+			ELSE 0
+		END) > 0
+		ORDER BY rec.completed_at ASC, rec.started_at ASC, rec.id ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list cleanup candidates: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]CleanupCandidate, 0)
+	for rows.Next() {
+		var item CleanupCandidate
+		if err := rows.Scan(
+			&item.RecordingID,
+			&item.ProfileName,
+			&item.RoomID,
+			&item.StreamerName,
+			&item.Title,
+			&item.StartedAt,
+			&item.CompletedAt,
+			&item.DurationMs,
+			&item.FileCount,
+			&item.ReclaimableBytes,
+		); err != nil {
+			return nil, fmt.Errorf("scan cleanup candidate: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cleanup candidates: %w", err)
+	}
+	return items, nil
+}
+
 func (s Store) SetLocalProtected(ctx context.Context, actor account.User, recordingID int64, protected bool) (Recording, error) {
 	query := `
 		UPDATE recordings
@@ -181,7 +262,7 @@ func (s Store) SetLocalProtected(ctx context.Context, actor account.User, record
 		WHERE id = ?
 			AND local_deleted_at IS NULL
 	`
-	args := []interface{}{protected, recordingID}
+	args := []interface{}{boolInt(protected), recordingID}
 	if actor.Role != account.RoleSuperAdmin {
 		query += `
 			AND recording_profile_id IN (
@@ -220,6 +301,7 @@ func (s Store) get(ctx context.Context, actor account.User, recordingID int64) (
 	}
 
 	var item Recording
+	var localProtected int
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&item.ID,
 		&item.RecordingProfileID,
@@ -232,7 +314,7 @@ func (s Store) get(ctx context.Context, actor account.User, recordingID int64) (
 		&item.DurationMs,
 		&item.RecordingStatus,
 		&item.LocalStorageStatus,
-		&item.LocalProtected,
+		&localProtected,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Recording{}, ErrNotFound
@@ -240,6 +322,7 @@ func (s Store) get(ctx context.Context, actor account.User, recordingID int64) (
 	if err != nil {
 		return Recording{}, fmt.Errorf("get recording: %w", err)
 	}
+	item.LocalProtected = localProtected == 1
 	item.Files, err = s.files(ctx, item.ID)
 	if err != nil {
 		return Recording{}, err
@@ -553,4 +636,11 @@ func isVideoFile(name string) bool {
 	default:
 		return false
 	}
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

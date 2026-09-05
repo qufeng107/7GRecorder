@@ -288,6 +288,7 @@ POST /api/v1/jobs/{id}/actions/cancel
 
 ```text
 GET /api/v1/storage/local
+GET /api/v1/storage/local/cleanup-candidates
 PUT /api/v1/storage/local/settings   # SUPER_ADMIN only
 
 GET /api/v1/system/health
@@ -297,6 +298,10 @@ GET /api/v1/system/version
 Early production bootstrap implements `GET /api/v1/storage/local` for SUPER_ADMIN only. It returns data-root disk
 capacity, available bytes, indexed local video file count/bytes, completed recording count, and protected
 recording count. Storage settings and deletion actions are later Phase 3 work.
+
+`GET /api/v1/storage/local/cleanup-candidates` is a dry-run preview only. It returns the oldest unprotected
+completed recordings with closed local video files and estimated reclaimable bytes. It must not delete, move, or
+mark any files.
 
 ---
 
