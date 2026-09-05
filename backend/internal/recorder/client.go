@@ -125,14 +125,22 @@ func (c HTTPClient) setRoomConfig(ctx context.Context, roomID int64, desired Des
 		"CuttingNumber":    settingValue(segmentMinutes(desired.SegmentDurationSec)),
 		"RecordingQuality": settingValue(qualityQN(desired.Quality)),
 	}
-	status, _, err := c.do(ctx, http.MethodPut, fmt.Sprintf("/api/room/%d/config", roomID), payload)
-	if err != nil {
-		return err
+	path := fmt.Sprintf("/api/room/%d/config", roomID)
+	var status int
+	var err error
+	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodPost} {
+		status, _, err = c.do(ctx, method, path, payload)
+		if err != nil {
+			return err
+		}
+		if status == http.StatusOK || status == http.StatusNoContent {
+			return nil
+		}
+		if status != http.StatusMethodNotAllowed {
+			return fmt.Errorf("set recorder room %d config returned status %d", roomID, status)
+		}
 	}
-	if status != http.StatusOK && status != http.StatusNoContent {
-		return fmt.Errorf("set recorder room %d config returned status %d", roomID, status)
-	}
-	return nil
+	return fmt.Errorf("set recorder room %d config returned status %d", roomID, status)
 }
 
 func (c HTTPClient) do(ctx context.Context, method string, path string, payload interface{}) (int, []byte, error) {

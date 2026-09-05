@@ -79,3 +79,48 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 		t.Fatalf("expected 30 minute segments, got %#v", configPayload["CuttingNumber"]["Value"])
 	}
 }
+
+func TestHTTPClientSyncProfileFallsBackWhenPutConfigIsNotAllowed(t *testing.T) {
+	ctx := context.Background()
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/room/1741048619":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"roomId":1741048619,"streaming":false,"recording":false}`))
+		case "PUT /api/room/1741048619/config":
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case "PATCH /api/room/1741048619/config":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected recorder request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(config.Config{RecorderBaseURL: server.URL})
+	_, err := client.SyncProfile(ctx, DesiredProfile{
+		RoomID:             "1741048619",
+		Enabled:            true,
+		AutoRecord:         true,
+		RecordDanmaku:      true,
+		SegmentDurationSec: 1800,
+	})
+	if err != nil {
+		t.Fatalf("SyncProfile returned error: %v", err)
+	}
+	wantCalls := []string{
+		"GET /api/room/1741048619",
+		"PUT /api/room/1741048619/config",
+		"PATCH /api/room/1741048619/config",
+	}
+	if len(calls) != len(wantCalls) {
+		t.Fatalf("expected calls %v, got %v", wantCalls, calls)
+	}
+	for i := range wantCalls {
+		if calls[i] != wantCalls[i] {
+			t.Fatalf("expected calls %v, got %v", wantCalls, calls)
+		}
+	}
+}
