@@ -218,6 +218,15 @@ POST /api/v1/recordings/{id}/actions/unprotect-local
 POST /api/v1/recordings/{id}/actions/delete-local
 ```
 
+Early production bootstrap also exposes:
+
+```text
+POST /api/v1/recording-files/reconcile
+```
+
+This endpoint indexes existing local video files under `DATA_ROOT/recordings` into SQLite. It must not delete,
+move, upload, or otherwise mutate recording files.
+
 前端不得直接 PATCH `recording_status`、`local_storage_status` 等内部状态。
 
 ### Files / Download

@@ -4,10 +4,12 @@ import {
   Activity,
   Archive,
   Database,
+  FileVideo,
   HardDrive,
   LogIn,
   LogOut,
   Plus,
+  RefreshCw,
   Save,
   ShieldCheck
 } from "lucide-react";
@@ -60,6 +62,43 @@ type RecordingProfile = {
 type ProfileListResponse = {
   items: RecordingProfile[] | null;
   total?: number;
+};
+
+type RecordingFile = {
+  id: number;
+  recording_id: number;
+  relative_path: string;
+  original_name: string;
+  kind: string;
+  file_status: string;
+  size_bytes: number;
+  closed_at?: string;
+};
+
+type RecordingItem = {
+  id: number;
+  recording_profile_id: number;
+  profile_name: string;
+  room_id: string;
+  streamer_name: string;
+  title?: string;
+  started_at: string;
+  completed_at?: string;
+  recording_status: string;
+  local_storage_status: string;
+  files: RecordingFile[] | null;
+};
+
+type RecordingListResponse = {
+  items: RecordingItem[] | null;
+  total?: number;
+};
+
+type ReconcileResult = {
+  scanned_files: number;
+  imported: number;
+  updated: number;
+  skipped: number;
 };
 
 type ProfileForm = {
@@ -178,11 +217,22 @@ export function AdminDashboard() {
     queryKey: ["recording-profiles"],
     queryFn: () => requestJson<ProfileListResponse>("/api/v1/recording-profiles"),
     enabled: Boolean(meQuery.data?.user),
-    retry: false
+    retry: false,
+    refetchInterval: 10000
+  });
+
+  const recordingsQuery = useQuery({
+    queryKey: ["recordings"],
+    queryFn: () => requestJson<RecordingListResponse>("/api/v1/recordings"),
+    enabled: Boolean(meQuery.data?.user),
+    retry: false,
+    refetchInterval: 15000
   });
 
   const profiles = profilesQuery.data?.items ?? [];
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
+  const recordings = recordingsQuery.data?.items ?? [];
+  const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
 
   useEffect(() => {
     const selected = profiles.find((profile) => profile.id === selectedProfileId);
@@ -209,6 +259,7 @@ export function AdminDashboard() {
       setSelectedProfileId(null);
       setProfileForm(emptyProfileForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
+      queryClient.removeQueries({ queryKey: ["recordings"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
     }
   });
@@ -240,6 +291,17 @@ export function AdminDashboard() {
     onSuccess: (profile) => {
       setSelectedProfileId(profile.id);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
+    }
+  });
+
+  const reconcileMutation = useMutation({
+    mutationFn: () =>
+      requestJson<ReconcileResult>("/api/v1/recording-files/reconcile", {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["recordings"] });
     }
   });
 
@@ -328,6 +390,16 @@ export function AdminDashboard() {
               onSelect={(profile) => setSelectedProfileId(profile.id)}
             />
           </section>
+
+          <RecordingsPanel
+            isLoading={recordingsQuery.isLoading}
+            reconcileError={reconcileMutation.isError}
+            reconcilePending={reconcileMutation.isPending}
+            reconcileResult={reconcileMutation.data}
+            recordings={recordings}
+            total={recordingTotal}
+            onReconcile={() => reconcileMutation.mutate()}
+          />
         ) : null}
 
         <section className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-4 text-sm text-muted">
@@ -569,6 +641,97 @@ function ProfileListPanel(props: {
   );
 }
 
+function RecordingsPanel(props: {
+  isLoading: boolean;
+  reconcileError: boolean;
+  reconcilePending: boolean;
+  reconcileResult?: ReconcileResult;
+  recordings: RecordingItem[];
+  total: number;
+  onReconcile: () => void;
+}) {
+  return (
+    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Recordings</h2>
+          <p className="mt-1 text-sm text-muted">{props.total} total</p>
+        </div>
+        <button
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+          disabled={props.reconcilePending}
+          type="button"
+          onClick={props.onReconcile}
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          Scan
+        </button>
+      </div>
+
+      {props.reconcileResult ? (
+        <p className="mt-3 text-sm text-muted">
+          Scan: {props.reconcileResult.imported} imported, {props.reconcileResult.updated} updated,{" "}
+          {props.reconcileResult.skipped} skipped.
+        </p>
+      ) : null}
+      {props.reconcileError ? (
+        <p className="mt-3 text-sm text-red-700">Scan failed. Check server logs.</p>
+      ) : null}
+
+      <div className="mt-4 overflow-hidden rounded-md border border-border">
+        <table className="w-full border-collapse text-left text-sm">
+          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
+            <tr>
+              <th className="px-3 py-2 font-semibold">Recording</th>
+              <th className="px-3 py-2 font-semibold">Profile</th>
+              <th className="px-3 py-2 font-semibold">Status</th>
+              <th className="px-3 py-2 font-semibold">Size</th>
+              <th className="px-3 py-2 font-semibold">Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.recordings.map((recording) => {
+              const file = recording.files?.[0];
+              return (
+                <tr key={recording.id} className="bg-white">
+                  <td className="px-3 py-3">
+                    <div className="flex items-start gap-2">
+                      <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                      <div>
+                        <p className="font-semibold text-ink">{recording.title || file?.original_name || "Untitled"}</p>
+                        <p className="mt-1 text-xs text-muted">{formatDateTime(recording.started_at)}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-ink">{recording.profile_name}</p>
+                    <p className="mt-1 text-xs text-muted">{recording.room_id}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    <p>{recording.recording_status}</p>
+                    <p className="mt-1 text-xs">{file?.file_status ?? "NO_FILE"}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(file?.size_bytes ?? 0)}</td>
+                  <td className="max-w-md px-3 py-3 text-xs text-muted">
+                    <span className="break-all">{file?.relative_path ?? "-"}</span>
+                  </td>
+                </tr>
+              );
+            })}
+            {props.recordings.length === 0 ? (
+              <tr>
+                <td className="px-3 py-8 text-center text-muted" colSpan={5}>
+                  {props.isLoading ? "Loading recordings." : "No recordings indexed yet."}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function TextField(props: {
   autoComplete?: string;
   label: string;
@@ -588,6 +751,31 @@ function TextField(props: {
       />
     </label>
   );
+}
+
+function formatBytes(value: number): string {
+  if (!value) {
+    return "-";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatDateTime(value: string): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
 }
 
 function NumberField(props: { label: string; min: number; value: number; onChange: (value: number) => void }) {
