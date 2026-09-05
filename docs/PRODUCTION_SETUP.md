@@ -82,3 +82,19 @@ uses the bundled frontend/dist
 ```
 
 This keeps SCP fast on slow GitHub-to-mainland links while preserving GitHub CI as the required quality gate.
+
+## Temporary IP Access
+
+Before the domain is filed and TLS is configured, expose the production site through host Nginx on plain HTTP:
+
+```bash
+sudo bash /opt/7grecorder/current/source/scripts/deploy/install-nginx-ip-site.sh
+```
+
+Then open:
+
+```text
+http://<server-ip>/admin
+```
+
+Keep the 7GRecorder container bound to `127.0.0.1`; Nginx is the public entry point.
