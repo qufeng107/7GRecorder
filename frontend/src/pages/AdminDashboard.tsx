@@ -367,39 +367,41 @@ export function AdminDashboard() {
         </section>
 
         {user ? (
-          <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-            <ProfileFormPanel
-              form={profileForm}
-              isEditing={Boolean(selectedProfileId)}
-              isSaving={saveProfileMutation.isPending}
-              saveError={saveProfileMutation.isError}
-              onCancel={() => {
-                setSelectedProfileId(null);
-                setProfileForm(emptyProfileForm);
-              }}
-              onChange={setProfileForm}
-              onSubmit={onProfileSubmit}
-            />
+          <>
+            <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <ProfileFormPanel
+                form={profileForm}
+                isEditing={Boolean(selectedProfileId)}
+                isSaving={saveProfileMutation.isPending}
+                saveError={saveProfileMutation.isError}
+                onCancel={() => {
+                  setSelectedProfileId(null);
+                  setProfileForm(emptyProfileForm);
+                }}
+                onChange={setProfileForm}
+                onSubmit={onProfileSubmit}
+              />
 
-            <ProfileListPanel
-              archivePending={archiveProfileMutation.isPending}
-              profiles={profiles}
-              selectedProfileId={selectedProfileId}
-              total={profileTotal}
-              onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
-              onSelect={(profile) => setSelectedProfileId(profile.id)}
-            />
-          </section>
+              <ProfileListPanel
+                archivePending={archiveProfileMutation.isPending}
+                profiles={profiles}
+                selectedProfileId={selectedProfileId}
+                total={profileTotal}
+                onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
+                onSelect={(profile) => setSelectedProfileId(profile.id)}
+              />
+            </section>
 
-          <RecordingsPanel
-            isLoading={recordingsQuery.isLoading}
-            reconcileError={reconcileMutation.isError}
-            reconcilePending={reconcileMutation.isPending}
-            reconcileResult={reconcileMutation.data}
-            recordings={recordings}
-            total={recordingTotal}
-            onReconcile={() => reconcileMutation.mutate()}
-          />
+            <RecordingsPanel
+              isLoading={recordingsQuery.isLoading}
+              reconcileError={reconcileMutation.isError}
+              reconcilePending={reconcileMutation.isPending}
+              reconcileResult={reconcileMutation.data}
+              recordings={recordings}
+              total={recordingTotal}
+              onReconcile={() => reconcileMutation.mutate()}
+            />
+          </>
         ) : null}
 
         <section className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-4 text-sm text-muted">
