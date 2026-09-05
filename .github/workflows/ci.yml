@@ -34,8 +34,10 @@ jobs:
           cd backend
           files="$(gofmt -l .)"
           if [ -n "$files" ]; then
+            gofmt -w .
             while IFS= read -r file; do
-              echo "::error file=backend/${file}::gofmt required"
+              patch="$(git diff -- "$file" | base64 -w 0)"
+              echo "::error file=backend/${file}::gofmt required; patch_base64=${patch}"
             done <<< "$files"
             printf '%s\n' "$files"
             exit 1
