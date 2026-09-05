@@ -3,6 +3,10 @@ package httpserver
 import (
 	"errors"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
@@ -40,6 +44,42 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 			r.Response.WriteJson(result)
 		})
 	})
+
+	s.BindHandler("/api/v1/recording-files/{id}/download", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			file, err := store.FileForDownload(r.Context(), actor, id)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			if !strings.HasPrefix(filepath.ToSlash(file.RelativePath), "recordings/") {
+				writeAPIError(r, http.StatusNotFound, "RECORDING_FILE_NOT_FOUND", "Recording file was not found.", nil)
+				return
+			}
+			absolutePath, err := ResolveWithinRoot(cfg.DataRoot, file.RelativePath)
+			if err != nil {
+				writeAPIError(r, http.StatusNotFound, "RECORDING_FILE_NOT_FOUND", "Recording file was not found.", nil)
+				return
+			}
+			info, err := os.Stat(absolutePath)
+			if errors.Is(err, os.ErrNotExist) || (err == nil && info.IsDir()) {
+				writeAPIError(r, http.StatusNotFound, "RECORDING_FILE_NOT_FOUND", "Recording file was not found.", nil)
+				return
+			}
+			if err != nil {
+				writeAPIError(r, http.StatusInternalServerError, "RECORDING_FILE_UNAVAILABLE", "Recording file is unavailable.", nil)
+				return
+			}
+
+			r.Response.Header().Set("Content-Type", recordingContentType(file.OriginalName))
+			r.Response.Header().Set("Content-Disposition", contentDisposition(file.OriginalName))
+			r.Response.Header().Set("X-Accel-Redirect", protectedMediaPath(file.RelativePath))
+		})
+	})
 }
 
 func withRecordingStore(r *ghttp.Request, cfg config.Config, fn func(account.User, recording.Store)) {
@@ -66,7 +106,45 @@ func writeRecordingError(r *ghttp.Request, err error) {
 	switch {
 	case errors.Is(err, recording.ErrForbidden):
 		writeAPIError(r, http.StatusForbidden, "FORBIDDEN", "Recording operation is not allowed.", nil)
+	case errors.Is(err, recording.ErrNotFound):
+		writeAPIError(r, http.StatusNotFound, "RECORDING_NOT_FOUND", "Recording was not found.", nil)
+	case errors.Is(err, recording.ErrNotReady):
+		writeAPIError(r, http.StatusConflict, "RECORDING_FILE_NOT_READY", "Recording file is not ready for download.", nil)
 	default:
 		writeAPIError(r, http.StatusInternalServerError, "RECORDING_OPERATION_FAILED", "Recording operation failed.", nil)
+	}
+}
+
+func protectedMediaPath(relativePath string) string {
+	parts := strings.Split(filepath.ToSlash(relativePath), "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return "/_protected_media/" + strings.Join(parts, "/")
+}
+
+func contentDisposition(name string) string {
+	fallback := strings.Map(func(r rune) rune {
+		if r >= 0x20 && r <= 0x7e && r != '"' && r != '\\' {
+			return r
+		}
+		return -1
+	}, name)
+	if strings.TrimSpace(fallback) == "" {
+		fallback = "recording"
+	}
+	return `attachment; filename="` + fallback + `"; filename*=UTF-8''` + url.PathEscape(name)
+}
+
+func recordingContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".flv":
+		return "video/x-flv"
+	case ".mp4":
+		return "video/mp4"
+	case ".mkv":
+		return "video/x-matroska"
+	default:
+		return "application/octet-stream"
 	}
 }

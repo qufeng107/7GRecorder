@@ -4,6 +4,7 @@ import {
   Activity,
   Archive,
   Database,
+  Download,
   FileVideo,
   HardDrive,
   LogIn,
@@ -689,6 +690,7 @@ function RecordingsPanel(props: {
               <th className="px-3 py-2 font-semibold">Status</th>
               <th className="px-3 py-2 font-semibold">Size</th>
               <th className="px-3 py-2 font-semibold">Path</th>
+              <th className="px-3 py-2 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -717,12 +719,25 @@ function RecordingsPanel(props: {
                   <td className="max-w-md px-3 py-3 text-xs text-muted">
                     <span className="break-all">{file?.relative_path ?? "-"}</span>
                   </td>
+                  <td className="px-3 py-3">
+                    {file && file.file_status !== "WRITING" ? (
+                      <a
+                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                        href={`/api/v1/recording-files/${file.id}/download`}
+                      >
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        Download
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted">-</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
             {props.recordings.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={5}>
+                <td className="px-3 py-8 text-center text-muted" colSpan={6}>
                   {props.isLoading ? "Loading recordings." : "No recordings indexed yet."}
                 </td>
               </tr>
@@ -777,7 +792,16 @@ function formatDateTime(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString();
+  return `${new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(date)} 中国时间`;
 }
 
 function NumberField(props: { label: string; min: number; value: number; onChange: (value: number) => void }) {

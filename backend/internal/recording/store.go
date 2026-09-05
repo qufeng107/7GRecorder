@@ -16,7 +16,11 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 )
 
-var ErrForbidden = errors.New("recording forbidden")
+var (
+	ErrForbidden = errors.New("recording forbidden")
+	ErrNotFound  = errors.New("recording not found")
+	ErrNotReady  = errors.New("recording file not ready")
+)
 
 type Recording struct {
 	ID                 int64  `json:"id"`
@@ -154,6 +158,45 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 		return ReconcileResult{}, fmt.Errorf("reconcile local recordings: %w", err)
 	}
 	return result, nil
+}
+
+func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID int64) (File, error) {
+	query := `
+		SELECT f.id, f.recording_id, f.relative_path, f.original_name, f.kind, f.file_status,
+			COALESCE(f.size_bytes, 0), COALESCE(f.closed_at, ''), f.updated_at
+		FROM recording_files f
+		JOIN recordings rec ON rec.id = f.recording_id
+		JOIN recording_profiles p ON p.id = rec.recording_profile_id
+		WHERE f.id = ? AND f.deleted_at IS NULL
+	`
+	args := []interface{}{fileID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += " AND p.owner_user_id = ?"
+		args = append(args, actor.ID)
+	}
+
+	var item File
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+		&item.ID,
+		&item.RecordingID,
+		&item.RelativePath,
+		&item.OriginalName,
+		&item.Kind,
+		&item.FileStatus,
+		&item.SizeBytes,
+		&item.ClosedAt,
+		&item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return File{}, ErrNotFound
+	}
+	if err != nil {
+		return File{}, fmt.Errorf("lookup recording file for download: %w", err)
+	}
+	if item.Kind != "video" || item.FileStatus == "WRITING" {
+		return File{}, ErrNotReady
+	}
+	return item, nil
 }
 
 func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {

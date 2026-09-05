@@ -27,3 +27,11 @@ func TestResolveWithinRootAcceptsManagedPath(t *testing.T) {
 		t.Fatalf("expected child path, got root")
 	}
 }
+
+func TestProtectedMediaPathEscapesSegments(t *testing.T) {
+	got := protectedMediaPath("recordings/1741048619-七宫筱野/file name.flv")
+	want := "/_protected_media/recordings/1741048619-%E4%B8%83%E5%AE%AB%E7%AD%B1%E9%87%8E/file%20name.flv"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
