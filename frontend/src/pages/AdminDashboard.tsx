@@ -116,6 +116,19 @@ type LocalStorageStatus = {
   indexed_video_files: number;
   protected_recordings: number;
   completed_recordings: number;
+  settings_configured: boolean;
+  health: "HEALTHY" | "WARNING" | "CRITICAL";
+  need_reclaim_bytes: number;
+  target_video_bytes: number;
+  settings: LocalStorageSettings;
+};
+
+type LocalStorageSettings = {
+  max_recording_bytes: number;
+  min_system_free_bytes: number;
+  cleanup_target_ratio: number;
+  absolute_emergency_free_bytes: number;
+  updated_at?: string;
 };
 
 type CleanupCandidate = {
@@ -134,6 +147,7 @@ type CleanupCandidate = {
 type CleanupCandidateListResponse = {
   items: CleanupCandidate[] | null;
   total?: number;
+  preview_reclaimable_bytes: number;
 };
 
 type ProfileForm = {
@@ -234,6 +248,12 @@ export function AdminDashboard() {
   const [password, setPassword] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
+  const [storageForm, setStorageForm] = useState({
+    maxRecordingGB: 0,
+    minFreeGB: 0,
+    emergencyFreeGB: 0,
+    cleanupTargetPercent: 85
+  });
 
   const meQuery = useQuery({
     queryKey: ["me"],
@@ -291,6 +311,24 @@ export function AdminDashboard() {
       setProfileForm(profileToForm(selected));
     }
   }, [profiles, selectedProfileId]);
+
+  useEffect(() => {
+    const settings = localStorageQuery.data?.settings;
+    if (!settings) {
+      return;
+    }
+    setStorageForm({
+      maxRecordingGB: bytesToGB(settings.max_recording_bytes),
+      minFreeGB: bytesToGB(settings.min_system_free_bytes),
+      emergencyFreeGB: bytesToGB(settings.absolute_emergency_free_bytes),
+      cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100)
+    });
+  }, [
+    localStorageQuery.data?.settings?.absolute_emergency_free_bytes,
+    localStorageQuery.data?.settings?.cleanup_target_ratio,
+    localStorageQuery.data?.settings?.max_recording_bytes,
+    localStorageQuery.data?.settings?.min_system_free_bytes
+  ]);
 
   const loginMutation = useMutation({
     mutationFn: () =>
@@ -371,6 +409,23 @@ export function AdminDashboard() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+      void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
+    }
+  });
+
+  const saveStorageSettingsMutation = useMutation({
+    mutationFn: () =>
+      requestJson<LocalStorageSettings>("/api/v1/storage/local/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          max_recording_bytes: gbToBytes(storageForm.maxRecordingGB),
+          min_system_free_bytes: gbToBytes(storageForm.minFreeGB),
+          cleanup_target_ratio: storageForm.cleanupTargetPercent / 100,
+          absolute_emergency_free_bytes: gbToBytes(storageForm.emergencyFreeGB)
+        })
+      }),
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
@@ -465,8 +520,14 @@ export function AdminDashboard() {
 
             <StoragePanel
               candidates={cleanupCandidatesQuery.data?.items ?? []}
+              previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
+              form={storageForm}
               isLoading={localStorageQuery.isLoading}
+              isSaving={saveStorageSettingsMutation.isPending}
+              saveError={saveStorageSettingsMutation.isError}
               status={localStorageQuery.data}
+              onFormChange={setStorageForm}
+              onSave={() => saveStorageSettingsMutation.mutate()}
             />
 
             <RecordingsPanel
@@ -724,11 +785,34 @@ function ProfileListPanel(props: {
   );
 }
 
-function StoragePanel(props: { candidates: CleanupCandidate[]; isLoading: boolean; status?: LocalStorageStatus }) {
+function StoragePanel(props: {
+  candidates: CleanupCandidate[];
+  form: {
+    maxRecordingGB: number;
+    minFreeGB: number;
+    emergencyFreeGB: number;
+    cleanupTargetPercent: number;
+  };
+  isLoading: boolean;
+  isSaving: boolean;
+  previewReclaimableBytes: number;
+  saveError: boolean;
+  status?: LocalStorageStatus;
+  onFormChange: (form: {
+    maxRecordingGB: number;
+    minFreeGB: number;
+    emergencyFreeGB: number;
+    cleanupTargetPercent: number;
+  }) => void;
+  onSave: () => void;
+}) {
   const usedPercent =
     props.status && props.status.disk_total_bytes > 0
       ? Math.round(((props.status.disk_total_bytes - props.status.disk_available_bytes) / props.status.disk_total_bytes) * 100)
       : 0;
+  const update = <K extends keyof typeof props.form>(key: K, value: (typeof props.form)[K]) => {
+    props.onFormChange({ ...props.form, [key]: value });
+  };
 
   return (
     <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
@@ -746,14 +830,65 @@ function StoragePanel(props: { candidates: CleanupCandidate[]; isLoading: boolea
         <Metric label="Disk Available" value={formatBytes(props.status?.disk_available_bytes ?? 0)} />
         <Metric label="Protected" value={String(props.status?.protected_recordings ?? 0)} />
       </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Metric label="Health" value={props.status?.health ?? "CHECKING"} />
+        <Metric label="Need Reclaim" value={formatBytes(props.status?.need_reclaim_bytes ?? 0)} />
+        <Metric label="Preview Reclaimable" value={formatBytes(props.previewReclaimableBytes)} />
+      </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e6ebe4]">
         <div className="h-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, usedPercent))}%` }} />
       </div>
       <p className="mt-2 text-xs text-muted">
         Disk used: {usedPercent}% of {formatBytes(props.status?.disk_total_bytes ?? 0)}. Completed recordings:{" "}
-        {props.status?.completed_recordings ?? 0}.
+        {props.status?.completed_recordings ?? 0}. Settings:{" "}
+        {props.status?.settings_configured ? "configured" : "derived default"}.
       </p>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold">Storage Settings</h3>
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={props.isSaving}
+            type="button"
+            onClick={props.onSave}
+          >
+            <Save className="h-4 w-4" aria-hidden="true" />
+            Save
+          </button>
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <NumberField
+            label="Max Recording GB"
+            min={1}
+            value={props.form.maxRecordingGB}
+            onChange={(value) => update("maxRecordingGB", value)}
+          />
+          <NumberField
+            label="Min Free GB"
+            min={1}
+            value={props.form.minFreeGB}
+            onChange={(value) => update("minFreeGB", value)}
+          />
+          <NumberField
+            label="Emergency Free GB"
+            min={1}
+            value={props.form.emergencyFreeGB}
+            onChange={(value) => update("emergencyFreeGB", value)}
+          />
+          <NumberField
+            label="Cleanup Target %"
+            max={99}
+            min={1}
+            value={props.form.cleanupTargetPercent}
+            onChange={(value) => update("cleanupTargetPercent", value)}
+          />
+        </div>
+        {props.saveError ? (
+          <p className="mt-3 text-sm text-red-700">Storage settings save failed. Check the thresholds.</p>
+        ) : null}
+      </div>
 
       <div className="mt-5 border-t border-border pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -971,6 +1106,14 @@ function formatBytes(value: number): string {
   return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+function bytesToGB(value: number): number {
+  return Math.max(0, Math.round(value / 1024 / 1024 / 1024));
+}
+
+function gbToBytes(value: number): number {
+  return Math.max(0, Math.round(value * 1024 * 1024 * 1024));
+}
+
 function formatDuration(value: number): string {
   if (!value) {
     return "-";
@@ -1008,12 +1151,13 @@ function formatDateTime(value: string): string {
   }).format(date)} 中国时间`;
 }
 
-function NumberField(props: { label: string; min: number; value: number; onChange: (value: number) => void }) {
+function NumberField(props: { label: string; max?: number; min: number; value: number; onChange: (value: number) => void }) {
   return (
     <label className="flex flex-col gap-1 text-sm font-medium">
       {props.label}
       <input
         className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+        max={props.max}
         min={props.min}
         type="number"
         value={props.value}

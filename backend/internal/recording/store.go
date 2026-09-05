@@ -18,10 +18,13 @@ import (
 )
 
 var (
-	ErrForbidden = errors.New("recording forbidden")
-	ErrNotFound  = errors.New("recording not found")
-	ErrNotReady  = errors.New("recording file not ready")
+	ErrForbidden  = errors.New("recording forbidden")
+	ErrNotFound   = errors.New("recording not found")
+	ErrNotReady   = errors.New("recording file not ready")
+	ErrValidation = errors.New("recording validation failed")
 )
+
+const gibibyte int64 = 1024 * 1024 * 1024
 
 type Recording struct {
 	ID                 int64  `json:"id"`
@@ -60,14 +63,34 @@ type ReconcileResult struct {
 }
 
 type LocalStorageStatus struct {
-	DataRoot            string `json:"data_root"`
-	DiskTotalBytes      int64  `json:"disk_total_bytes"`
-	DiskFreeBytes       int64  `json:"disk_free_bytes"`
-	DiskAvailableBytes  int64  `json:"disk_available_bytes"`
-	IndexedVideoBytes   int64  `json:"indexed_video_bytes"`
-	IndexedVideoFiles   int64  `json:"indexed_video_files"`
-	ProtectedRecordings int64  `json:"protected_recordings"`
-	CompletedRecordings int64  `json:"completed_recordings"`
+	DataRoot            string               `json:"data_root"`
+	DiskTotalBytes      int64                `json:"disk_total_bytes"`
+	DiskFreeBytes       int64                `json:"disk_free_bytes"`
+	DiskAvailableBytes  int64                `json:"disk_available_bytes"`
+	IndexedVideoBytes   int64                `json:"indexed_video_bytes"`
+	IndexedVideoFiles   int64                `json:"indexed_video_files"`
+	ProtectedRecordings int64                `json:"protected_recordings"`
+	CompletedRecordings int64                `json:"completed_recordings"`
+	SettingsConfigured  bool                 `json:"settings_configured"`
+	Health              string               `json:"health"`
+	NeedReclaimBytes    int64                `json:"need_reclaim_bytes"`
+	TargetVideoBytes    int64                `json:"target_video_bytes"`
+	Settings            LocalStorageSettings `json:"settings"`
+}
+
+type LocalStorageSettings struct {
+	MaxRecordingBytes           int64   `json:"max_recording_bytes"`
+	MinSystemFreeBytes         int64   `json:"min_system_free_bytes"`
+	CleanupTargetRatio         float64 `json:"cleanup_target_ratio"`
+	AbsoluteEmergencyFreeBytes int64   `json:"absolute_emergency_free_bytes"`
+	UpdatedAt                  string  `json:"updated_at,omitempty"`
+}
+
+type LocalStorageSettingsUpsert struct {
+	MaxRecordingBytes           int64   `json:"max_recording_bytes"`
+	MinSystemFreeBytes         int64   `json:"min_system_free_bytes"`
+	CleanupTargetRatio         float64 `json:"cleanup_target_ratio"`
+	AbsoluteEmergencyFreeBytes int64   `json:"absolute_emergency_free_bytes"`
 }
 
 type CleanupCandidate struct {
@@ -81,6 +104,12 @@ type CleanupCandidate struct {
 	DurationMs       int64  `json:"duration_ms"`
 	FileCount        int64  `json:"file_count"`
 	ReclaimableBytes int64  `json:"reclaimable_bytes"`
+}
+
+type CleanupCandidateList struct {
+	Items                   []CleanupCandidate `json:"items"`
+	Total                   int                `json:"total"`
+	PreviewReclaimableBytes int64             `json:"preview_reclaimable_bytes"`
 }
 
 type Store struct {
@@ -186,12 +215,45 @@ func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (Loca
 	`).Scan(&status.CompletedRecordings); err != nil {
 		return LocalStorageStatus{}, fmt.Errorf("count completed recordings: %w", err)
 	}
+	settings, configured, err := s.localStorageSettings(ctx, status.DiskTotalBytes)
+	if err != nil {
+		return LocalStorageStatus{}, err
+	}
+	status.Settings = settings
+	status.SettingsConfigured = configured
+	status.Health, status.NeedReclaimBytes, status.TargetVideoBytes = storagePolicyPreview(status, settings)
 	return status, nil
 }
 
-func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit int) ([]CleanupCandidate, error) {
+func (s Store) UpsertLocalStorageSettings(ctx context.Context, actor account.User, req LocalStorageSettingsUpsert) (LocalStorageSettings, error) {
 	if actor.Role != account.RoleSuperAdmin {
-		return nil, ErrForbidden
+		return LocalStorageSettings{}, ErrForbidden
+	}
+	if err := validateLocalStorageSettings(req); err != nil {
+		return LocalStorageSettings{}, err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO local_storage_settings
+			(id, max_recording_bytes, min_system_free_bytes, cleanup_target_ratio, absolute_emergency_free_bytes, updated_by_user_id)
+		VALUES (1, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			max_recording_bytes = excluded.max_recording_bytes,
+			min_system_free_bytes = excluded.min_system_free_bytes,
+			cleanup_target_ratio = excluded.cleanup_target_ratio,
+			absolute_emergency_free_bytes = excluded.absolute_emergency_free_bytes,
+			updated_at = CURRENT_TIMESTAMP,
+			updated_by_user_id = excluded.updated_by_user_id
+	`, req.MaxRecordingBytes, req.MinSystemFreeBytes, req.CleanupTargetRatio, req.AbsoluteEmergencyFreeBytes, actor.ID)
+	if err != nil {
+		return LocalStorageSettings{}, fmt.Errorf("upsert local storage settings: %w", err)
+	}
+	settings, _, err := s.localStorageSettings(ctx, 0)
+	return settings, err
+}
+
+func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit int) (CleanupCandidateList, error) {
+	if actor.Role != account.RoleSuperAdmin {
+		return CleanupCandidateList{}, ErrForbidden
 	}
 	if limit <= 0 {
 		limit = 10
@@ -226,11 +288,12 @@ func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit 
 		LIMIT ?
 	`, limit)
 	if err != nil {
-		return nil, fmt.Errorf("list cleanup candidates: %w", err)
+		return CleanupCandidateList{}, fmt.Errorf("list cleanup candidates: %w", err)
 	}
 	defer rows.Close()
 
 	items := make([]CleanupCandidate, 0)
+	var previewReclaimableBytes int64
 	for rows.Next() {
 		var item CleanupCandidate
 		if err := rows.Scan(
@@ -245,14 +308,105 @@ func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit 
 			&item.FileCount,
 			&item.ReclaimableBytes,
 		); err != nil {
-			return nil, fmt.Errorf("scan cleanup candidate: %w", err)
+			return CleanupCandidateList{}, fmt.Errorf("scan cleanup candidate: %w", err)
 		}
+		previewReclaimableBytes += item.ReclaimableBytes
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cleanup candidates: %w", err)
+		return CleanupCandidateList{}, fmt.Errorf("iterate cleanup candidates: %w", err)
 	}
-	return items, nil
+	return CleanupCandidateList{
+		Items:                   items,
+		Total:                   len(items),
+		PreviewReclaimableBytes: previewReclaimableBytes,
+	}, nil
+}
+
+func (s Store) localStorageSettings(ctx context.Context, diskTotalBytes int64) (LocalStorageSettings, bool, error) {
+	var settings LocalStorageSettings
+	err := s.db.QueryRowContext(ctx, `
+		SELECT max_recording_bytes, min_system_free_bytes, cleanup_target_ratio,
+			absolute_emergency_free_bytes, updated_at
+		FROM local_storage_settings
+		WHERE id = 1
+	`).Scan(
+		&settings.MaxRecordingBytes,
+		&settings.MinSystemFreeBytes,
+		&settings.CleanupTargetRatio,
+		&settings.AbsoluteEmergencyFreeBytes,
+		&settings.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return defaultLocalStorageSettings(diskTotalBytes), false, nil
+	}
+	if err != nil {
+		return LocalStorageSettings{}, false, fmt.Errorf("load local storage settings: %w", err)
+	}
+	return settings, true, nil
+}
+
+func defaultLocalStorageSettings(diskTotalBytes int64) LocalStorageSettings {
+	if diskTotalBytes <= 0 {
+		diskTotalBytes = 50 * gibibyte
+	}
+	minFree := diskTotalBytes / 10
+	if minFree < 5*gibibyte {
+		minFree = 5 * gibibyte
+	}
+	emergencyFree := diskTotalBytes / 20
+	if emergencyFree < 2*gibibyte {
+		emergencyFree = 2 * gibibyte
+	}
+	return LocalStorageSettings{
+		MaxRecordingBytes:          diskTotalBytes * 70 / 100,
+		MinSystemFreeBytes:        minFree,
+		CleanupTargetRatio:        0.85,
+		AbsoluteEmergencyFreeBytes: emergencyFree,
+	}
+}
+
+func validateLocalStorageSettings(req LocalStorageSettingsUpsert) error {
+	if req.MaxRecordingBytes <= 0 ||
+		req.MinSystemFreeBytes <= 0 ||
+		req.AbsoluteEmergencyFreeBytes <= 0 ||
+		req.CleanupTargetRatio <= 0 ||
+		req.CleanupTargetRatio >= 1 {
+		return ErrValidation
+	}
+	if req.AbsoluteEmergencyFreeBytes > req.MinSystemFreeBytes {
+		return ErrValidation
+	}
+	return nil
+}
+
+func storagePolicyPreview(status LocalStorageStatus, settings LocalStorageSettings) (string, int64, int64) {
+	targetVideoBytes := int64(float64(settings.MaxRecordingBytes) * settings.CleanupTargetRatio)
+	recordingNeed := status.IndexedVideoBytes - targetVideoBytes
+	if status.IndexedVideoBytes <= settings.MaxRecordingBytes {
+		recordingNeed = 0
+	}
+	freeNeed := settings.MinSystemFreeBytes - status.DiskAvailableBytes
+	emergencyNeed := settings.AbsoluteEmergencyFreeBytes - status.DiskAvailableBytes
+	need := maxInt64(recordingNeed, freeNeed, emergencyNeed, 0)
+
+	health := "HEALTHY"
+	if emergencyNeed > 0 {
+		health = "CRITICAL"
+	} else if need > 0 {
+		health = "WARNING"
+	}
+	return health, need, targetVideoBytes
+}
+
+func maxInt64(values ...int64) int64 {
+	var result int64
+	for _, value := range values {
+		if value > result {
+			result = value
+		}
+	}
+	return result
 }
 
 func (s Store) SetLocalProtected(ctx context.Context, actor account.User, recordingID int64, protected bool) (Recording, error) {

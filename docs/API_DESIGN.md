@@ -297,7 +297,22 @@ GET /api/v1/system/version
 
 Early production bootstrap implements `GET /api/v1/storage/local` for SUPER_ADMIN only. It returns data-root disk
 capacity, available bytes, indexed local video file count/bytes, completed recording count, and protected
-recording count. Storage settings and deletion actions are later Phase 3 work.
+recording count, the effective storage policy, health status, target video bytes, and needed reclaim bytes.
+
+`PUT /api/v1/storage/local/settings` remains the canonical design path. Early production bootstrap accepts the
+same payload on `PUT /api/v1/storage/local` to keep the temporary admin UI simple:
+
+```json
+{
+  "max_recording_bytes": 75161927680,
+  "min_system_free_bytes": 10737418240,
+  "cleanup_target_ratio": 0.85,
+  "absolute_emergency_free_bytes": 5368709120
+}
+```
+
+All values must be positive, `cleanup_target_ratio` must be greater than 0 and less than 1, and emergency free
+bytes must not exceed the normal minimum free bytes. Saving settings must not delete or move files.
 
 `GET /api/v1/storage/local/cleanup-candidates` is a dry-run preview only. It returns the oldest unprotected
 completed recordings with closed local video files and estimated reclaimable bytes. It must not delete, move, or
