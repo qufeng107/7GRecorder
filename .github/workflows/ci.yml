@@ -64,7 +64,18 @@ jobs:
         run: cd frontend && pnpm install --no-frozen-lockfile
 
       - name: Frontend lint
-        run: cd frontend && pnpm lint
+        run: |
+          cd frontend
+          set +e
+          output="$(pnpm lint 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            message="$(printf '%s' "$output" | tail -40 | base64 -w 0)"
+            echo "::error file=frontend/src/pages/AdminDashboard.tsx::frontend lint failed; output_base64=${message}"
+            exit "$status"
+          fi
 
       - name: Frontend typecheck
         run: cd frontend && pnpm typecheck
