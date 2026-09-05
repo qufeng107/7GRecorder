@@ -218,6 +218,10 @@ POST /api/v1/recordings/{id}/actions/unprotect-local
 POST /api/v1/recordings/{id}/actions/delete-local
 ```
 
+Early production bootstrap implements `protect-local` and `unprotect-local` only. They toggle
+`recordings.local_protected` and must not delete or move files. `delete-local` remains reserved for the later
+rolling cleanup workflow.
+
 Early production bootstrap also exposes:
 
 ```text
@@ -289,6 +293,10 @@ PUT /api/v1/storage/local/settings   # SUPER_ADMIN only
 GET /api/v1/system/health
 GET /api/v1/system/version
 ```
+
+Early production bootstrap implements `GET /api/v1/storage/local` for SUPER_ADMIN only. It returns data-root disk
+capacity, available bytes, indexed local video file count/bytes, completed recording count, and protected
+recording count. Storage settings and deletion actions are later Phase 3 work.
 
 ---
 
