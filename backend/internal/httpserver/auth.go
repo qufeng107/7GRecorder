@@ -71,7 +71,7 @@ func bindAuthHandlers(cfg config.Config, s *ghttp.Server) {
 		if !requireMethod(r, http.MethodPost) {
 			return
 		}
-		token := r.Cookie.Get(sessionCookieName)
+		token := r.Cookie.Get(sessionCookieName).String()
 		database, err := db.Open(r.Context(), cfg)
 		if err != nil {
 			writeAPIError(r, http.StatusInternalServerError, "DATABASE_UNAVAILABLE", "Database is unavailable.", nil)
@@ -97,7 +97,7 @@ func bindAuthHandlers(cfg config.Config, s *ghttp.Server) {
 		if !requireMethod(r, http.MethodGet) {
 			return
 		}
-		token := r.Cookie.Get(sessionCookieName)
+		token := r.Cookie.Get(sessionCookieName).String()
 		database, err := db.Open(r.Context(), cfg)
 		if err != nil {
 			writeAPIError(r, http.StatusInternalServerError, "DATABASE_UNAVAILABLE", "Database is unavailable.", nil)
