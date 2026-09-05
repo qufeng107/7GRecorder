@@ -228,6 +228,9 @@ func TestLocalStorageStatusSummarizesIndexedVideos(t *testing.T) {
 	if status.DiskTotalBytes <= 0 || status.DiskAvailableBytes <= 0 {
 		t.Fatalf("expected disk stats, got %#v", status)
 	}
+	if status.Settings.MaxRecordingBytes <= 0 || status.Health == "" {
+		t.Fatalf("expected storage policy preview, got %#v", status)
+	}
 }
 
 func TestSetLocalProtectedTogglesRecording(t *testing.T) {
@@ -314,19 +317,47 @@ func TestCleanupCandidatesExcludeProtectedRecordings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupCandidates returned error: %v", err)
 	}
-	if len(candidates) != 1 || candidates[0].ReclaimableBytes != 5 {
+	if len(candidates.Items) != 1 || candidates.Items[0].ReclaimableBytes != 5 || candidates.PreviewReclaimableBytes != 5 {
 		t.Fatalf("unexpected cleanup candidates: %#v", candidates)
 	}
 
-	if _, err := store.SetLocalProtected(ctx, actor, candidates[0].RecordingID, true); err != nil {
+	if _, err := store.SetLocalProtected(ctx, actor, candidates.Items[0].RecordingID, true); err != nil {
 		t.Fatalf("SetLocalProtected returned error: %v", err)
 	}
 	candidates, err = store.CleanupCandidates(ctx, actor, 10)
 	if err != nil {
 		t.Fatalf("second CleanupCandidates returned error: %v", err)
 	}
-	if len(candidates) != 0 {
+	if len(candidates.Items) != 0 || candidates.PreviewReclaimableBytes != 0 {
 		t.Fatalf("expected protected recording to be excluded, got %#v", candidates)
+	}
+}
+
+func TestUpsertLocalStorageSettingsUpdatesPolicyPreview(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	store := NewStore(database, cfg)
+
+	settings, err := store.UpsertLocalStorageSettings(ctx, actor, LocalStorageSettingsUpsert{
+		MaxRecordingBytes:          1,
+		MinSystemFreeBytes:        1,
+		CleanupTargetRatio:        0.5,
+		AbsoluteEmergencyFreeBytes: 1,
+	})
+	if err != nil {
+		t.Fatalf("UpsertLocalStorageSettings returned error: %v", err)
+	}
+	if settings.MaxRecordingBytes != 1 || settings.CleanupTargetRatio != 0.5 {
+		t.Fatalf("unexpected settings: %#v", settings)
+	}
+
+	status, err := store.LocalStorageStatus(ctx, actor)
+	if err != nil {
+		t.Fatalf("LocalStorageStatus returned error: %v", err)
+	}
+	if !status.SettingsConfigured || status.Settings.MaxRecordingBytes != 1 {
+		t.Fatalf("expected configured settings, got %#v", status)
 	}
 }
 

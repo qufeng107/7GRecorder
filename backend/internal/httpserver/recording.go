@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -18,17 +19,28 @@ import (
 
 func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 	s.BindHandler("/api/v1/storage/local", func(r *ghttp.Request) {
-		if !requireMethod(r, http.MethodGet) {
+		switch r.Method {
+		case http.MethodGet:
+			withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+				status, err := store.LocalStorageStatus(r.Context(), actor)
+				if err != nil {
+					writeRecordingError(r, err)
+					return
+				}
+				r.Response.WriteJson(status)
+			})
+		case http.MethodPut:
+			writeLocalStorageSettings(r, cfg)
+		default:
+			requireMethod(r, http.MethodGet)
+		}
+	})
+
+	s.BindHandler("/api/v1/storage/local/settings", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPut) {
 			return
 		}
-		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
-			status, err := store.LocalStorageStatus(r.Context(), actor)
-			if err != nil {
-				writeRecordingError(r, err)
-				return
-			}
-			r.Response.WriteJson(status)
-		})
+		writeLocalStorageSettings(r, cfg)
 	})
 
 	s.BindHandler("/api/v1/storage/local/cleanup-candidates", func(r *ghttp.Request) {
@@ -36,12 +48,12 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 			return
 		}
 		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
-			items, err := store.CleanupCandidates(r.Context(), actor, r.Get("limit").Int())
+			result, err := store.CleanupCandidates(r.Context(), actor, r.Get("limit").Int())
 			if err != nil {
 				writeRecordingError(r, err)
 				return
 			}
-			r.Response.WriteJson(g.Map{"items": items, "total": len(items)})
+			r.Response.WriteJson(result)
 		})
 	})
 
@@ -140,6 +152,22 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 	})
 }
 
+func writeLocalStorageSettings(r *ghttp.Request, cfg config.Config) {
+	withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+		var req recording.LocalStorageSettingsUpsert
+		if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+			writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+			return
+		}
+		settings, err := store.UpsertLocalStorageSettings(r.Context(), actor, req)
+		if err != nil {
+			writeRecordingError(r, err)
+			return
+		}
+		r.Response.WriteJson(settings)
+	})
+}
+
 func withRecordingStore(r *ghttp.Request, cfg config.Config, fn func(account.User, recording.Store)) {
 	database, err := db.Open(r.Context(), cfg)
 	if err != nil {
@@ -168,6 +196,8 @@ func writeRecordingError(r *ghttp.Request, err error) {
 		writeAPIError(r, http.StatusNotFound, "RECORDING_NOT_FOUND", "Recording was not found.", nil)
 	case errors.Is(err, recording.ErrNotReady):
 		writeAPIError(r, http.StatusConflict, "RECORDING_FILE_NOT_READY", "Recording file is not ready for download.", nil)
+	case errors.Is(err, recording.ErrValidation):
+		writeAPIError(r, http.StatusBadRequest, "VALIDATION_FAILED", "Recording request is invalid.", nil)
 	default:
 		writeAPIError(r, http.StatusInternalServerError, "RECORDING_OPERATION_FAILED", "Recording operation failed.", nil)
 	}
