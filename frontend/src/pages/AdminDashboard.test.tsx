@@ -319,7 +319,8 @@ describe("AdminDashboard", () => {
     await switchToEnglish();
 
     fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
-    expect(await screen.findByText("Recording Time")).toBeInTheDocument();
+    expect(await screen.findByText("Recording Date")).toBeInTheDocument();
+    expect(await screen.findByText("Time (China Time)")).toBeInTheDocument();
     expect(await screen.findByText("test recording")).toBeInTheDocument();
     expect((await screen.findAllByText(/China Time/)).length).toBeGreaterThan(0);
   });

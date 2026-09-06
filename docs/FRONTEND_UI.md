@@ -11,11 +11,14 @@
 - Table-heavy admin pages should use the shared toolbar shape for search and sort controls.
 - Client-side search and sorting are acceptable while the dataset is small.
 - Future server-side pagination, filtering, and column sorting should reuse the same toolbar shape.
+- Wide data tables use TanStack Table for table state and column resizing while keeping the existing Tailwind UI.
+- Table action buttons should keep a stable width and stay on one line.
 
 ## Recording History
 
-- Recording start time is a first-class table column.
-- Displayed recording timestamps use `Asia/Shanghai` and include the visible China Time label.
+- Recording start date and recording start clock time are separate first-class table columns.
+- The recording time column header carries the visible China Time label; row cells should not repeat it.
+- Displayed recording timestamps use `Asia/Shanghai`.
 - Each recording row can open a details dialog with profile, streamer, China-time timestamps, duration, local status,
   all indexed files, per-file paths, protect action, and per-file download actions.
 - Completed recordings shorter than three minutes are marked as short segments. This is an observation label only;
