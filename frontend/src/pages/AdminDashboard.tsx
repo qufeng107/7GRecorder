@@ -495,6 +495,8 @@ const uiCopy = {
     jobType: "类型",
     jobSyncRecorderProfile: "同步录制配置",
     jobMergeUploadSource: "合并可上传视频",
+    jobUploadBilibili: "上传到 Bilibili",
+    jobUploadCOS: "上传到 COS",
     jobStatusPending: "待开始",
     jobStatusRunning: "运行中",
     jobStatusSucceeded: "已成功",
@@ -703,6 +705,8 @@ const uiCopy = {
     jobType: "Type",
     jobSyncRecorderProfile: "Sync recording profile",
     jobMergeUploadSource: "Merge upload source",
+    jobUploadBilibili: "Upload to Bilibili",
+    jobUploadCOS: "Upload to COS",
     jobStatusPending: "Pending",
     jobStatusRunning: "Running",
     jobStatusSucceeded: "Succeeded",
@@ -3308,6 +3312,12 @@ function formatJobType(value: string, labels: AdminCopy): string {
   }
   if (value === "MERGE_UPLOAD_SOURCE") {
     return labels.jobMergeUploadSource;
+  }
+  if (value === "UPLOAD_BILIBILI") {
+    return labels.jobUploadBilibili;
+  }
+  if (value === "UPLOAD_COS_OBJECT") {
+    return labels.jobUploadCOS;
   }
   return value;
 }

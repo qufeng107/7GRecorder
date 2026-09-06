@@ -288,8 +288,8 @@ AND valid/configured credential
 行为：
 
 ```text
-发现 COMPLETED Recording
-→ 检查所有必要视频分段均 CLOSED + Local AVAILABLE
+发现 READY_TO_UPLOAD Upload Source
+→ 检查上传源视频文件仍 Local AVAILABLE
 → 自动生成 Upload Job
 → biliup 上传
 → verify
@@ -310,7 +310,7 @@ SOURCE_MISSING
 
 要求：
 
-- 多分段作为一个稿件；
+- 多分段先按 Upload Source 合并后作为一个稿件；
 - 全局上传并发 1；
 - 重试幂等；
 - 进程中断后不得盲目重复投稿；
@@ -340,7 +340,7 @@ AND credential/bucket/region configured
 
 ### 9.1 上传
 
-COS 优先对 `CLOSED RecordingFile` 自动上传，不必等待整场直播结束。
+COS 优先对 `READY_TO_UPLOAD` Upload Source 自动上传，和 Bilibili 共享同一份可上传视频边界。
 
 需要记录：
 
@@ -378,7 +378,7 @@ max_managed_bytes
 - 不删除 Bucket 中未知文件；
 - COS 滚动删除不删除本地文件；
 - COS 失败不影响 Bilibili；
-- 本地文件已滚动删除而尚未上传时，COS 任务记 `SOURCE_MISSING`。
+- 本地 Upload Source 文件已滚动删除而尚未上传时，COS 任务记 `SOURCE_MISSING`。
 
 ---
 

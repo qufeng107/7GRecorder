@@ -241,7 +241,7 @@ Local Storage **不以 Bilibili/COS/Songs 成功作为删除前置条件**。
 职责：
 
 ```text
-扫描 COMPLETED Recording
+扫描 READY_TO_UPLOAD Upload Source
 → 确认当前仍有可读本地视频文件
 → 创建 Upload Job
 → biliup
@@ -260,13 +260,14 @@ Local Storage **不以 Bilibili/COS/Songs 成功作为删除前置条件**。
 职责：
 
 ```text
-检测 CLOSED RecordingFile
+检测 READY_TO_UPLOAD Upload Source
 → 上传 COS
 → 保存 COS object metadata
 → 按配置的 managed quota 维护 COS 滚动存储
 ```
 
-COS 可以按分段上传，不要求等待整场 Recording Finalize。
+当前 Upload Source 可以是单段原始文件，也可以是合并后的多段文件；COS 与 Bilibili 都只消费
+`READY_TO_UPLOAD`，并保存原始子视频时间轴 metadata。
 
 COS 删除只删除：
 
@@ -687,15 +688,15 @@ max_managed_bytes
 
 ### 12.2 上传单位
 
-优先以 `CLOSED RecordingFile` 为上传单位：
+优先以 `READY_TO_UPLOAD` Upload Source 为上传单位：
 
 ```text
-FileClosed
-→ COS Reconciler 发现未复制文件
+Upload Source ready
+→ COS Reconciler 发现未复制上传源
 → UPLOAD_COS_OBJECT Job
 ```
 
-这样不用等整场下播，也能降低本地文件被滚动删除前尚未上传的概率。
+这样 COS 与 Bilibili 共享同一个上传边界；多段直播先合并成一个可上传视频，单段直播可直接引用原始文件。
 
 ### 12.3 COS 配额
 
