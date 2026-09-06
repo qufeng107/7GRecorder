@@ -2658,6 +2658,16 @@ function RecordingsPanel(props: {
       }
     },
     {
+      id: "duration",
+      header: props.labels.duration,
+      size: 100,
+      minSize: 90,
+      cell: ({ row }) => {
+        const file = row.original.files?.[0];
+        return <span className="text-muted">{formatDuration(row.original.duration_ms || file?.duration_ms || 0)}</span>;
+      }
+    },
+    {
       id: "profile",
       header: props.labels.profile,
       size: 140,
@@ -2684,16 +2694,6 @@ function RecordingsPanel(props: {
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
           </div>
         );
-      }
-    },
-    {
-      id: "duration",
-      header: props.labels.duration,
-      size: 100,
-      minSize: 90,
-      cell: ({ row }) => {
-        const file = row.original.files?.[0];
-        return <span className="text-muted">{formatDuration(row.original.duration_ms || file?.duration_ms || 0)}</span>;
       }
     },
     {
@@ -2831,7 +2831,7 @@ function RecordingsPanel(props: {
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="relative px-3 py-2 font-semibold"
+                    className={`relative px-3 py-2 font-semibold ${header.column.id === "actions" ? "sticky right-0 z-20 bg-[#eef1eb] shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.6)]" : ""}`}
                     style={{ width: header.getSize() }}
                   >
                     <div className="flex min-w-0 items-center justify-between gap-2">
@@ -2857,7 +2857,11 @@ function RecordingsPanel(props: {
             {table.getRowModel().rows.map((row) => (
               <tr key={row.id} className="bg-white">
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-3" style={{ width: cell.column.getSize() }}>
+                  <td
+                    key={cell.id}
+                    className={`px-3 py-3 ${cell.column.id === "actions" ? "sticky right-0 z-10 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.6)]" : ""}`}
+                    style={{ width: cell.column.getSize() }}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}

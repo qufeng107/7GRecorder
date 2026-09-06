@@ -19,6 +19,7 @@
 - Recording start and completion timestamps are first-class table columns.
 - Timestamp headers show the China Time label on a second line. Timestamp cells show date and clock time on separate
   lines without repeating the timezone label.
+- Duration appears immediately after completion time in the recordings table.
 - Displayed recording timestamps use `Asia/Shanghai`.
 - Each recording row can open a details dialog with profile, streamer, China-time timestamps, duration, local status,
   all indexed files, per-file paths, protect action, and per-file download actions.
@@ -26,6 +27,7 @@
   it must not merge, delete, or hide files.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
   protected recording count.
+- The recordings table keeps its action column sticky on the right during horizontal scrolling.
 
 ## Jobs
 
