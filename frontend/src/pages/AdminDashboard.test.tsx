@@ -124,6 +124,58 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("manager")).toBeInTheDocument();
   });
 
+  it("opens account editor for super admins", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = input instanceof Request ? input.url : input.toString();
+        if (path.endsWith("/api/v1/me")) {
+          return {
+            ok: true,
+            json: async () => ({
+              user: { id: 1, username: "admin", role: "SUPER_ADMIN", enabled: true }
+            })
+          } as Response;
+        }
+        if (path.endsWith("/api/v1/accounts")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [
+                {
+                  id: 2,
+                  username: "manager",
+                  role: "MANAGER",
+                  enabled: true,
+                  profile_count: 1,
+                  policy: {
+                    can_edit_recording_profile: true,
+                    can_edit_bilibili_module: true,
+                    can_edit_cos_module: true,
+                    can_edit_netease_module: true,
+                    can_manage_local_files: true
+                  }
+                }
+              ],
+              total: 1
+            })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ items: [], total: 0, status: "ok", release_sha: "test" })
+        } as Response;
+      })
+    );
+
+    renderWithClient();
+
+    fireEvent.click(await screen.findByRole("button", { name: /账号管理/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    expect(await screen.findByRole("heading", { name: "编辑账号" })).toBeInTheDocument();
+    expect(await screen.findByText("留空表示不修改密码。")).toBeInTheDocument();
+  });
+
   it("renders the current manager account and policy", async () => {
     vi.stubGlobal(
       "fetch",
@@ -156,7 +208,7 @@ describe("AdminDashboard", () => {
     fireEvent.click(await screen.findByRole("button", { name: /我的账号/i }));
     expect(await screen.findByRole("heading", { name: "我的账号" })).toBeInTheDocument();
     expect(await screen.findAllByText("MANAGER")).toHaveLength(2);
-    expect(await screen.findByText("录制配置")).toBeInTheDocument();
+    expect((await screen.findAllByText("录制配置")).length).toBeGreaterThan(0);
     expect(await screen.findByText("本地文件")).toBeInTheDocument();
   });
 
