@@ -26,7 +26,7 @@ type Worker struct {
 	lockID   string
 }
 
-type job struct {
+type workerJob struct {
 	ID                 int64
 	Type               string
 	RecordingProfileID int64
@@ -100,7 +100,7 @@ func (w Worker) RunOnce(ctx context.Context) error {
 	}
 }
 
-func (w Worker) runSyncJob(ctx context.Context, job job) error {
+func (w Worker) runSyncJob(ctx context.Context, job workerJob) error {
 	var desired recorder.DesiredProfile
 	if err := json.Unmarshal([]byte(job.PayloadJSON), &desired); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode sync payload: %w", err))
@@ -112,7 +112,7 @@ func (w Worker) runSyncJob(ctx context.Context, job job) error {
 	return w.succeedJob(ctx, job, status)
 }
 
-func (w Worker) runMergeJob(ctx context.Context, job job) error {
+func (w Worker) runMergeJob(ctx context.Context, job workerJob) error {
 	var payload mergeJobPayload
 	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode merge payload: %w", err))
@@ -157,14 +157,14 @@ func (w Worker) discoverUploadSources(ctx context.Context) error {
 	return err
 }
 
-func (w Worker) claimJob(ctx context.Context) (job, error) {
+func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
-		return job{}, fmt.Errorf("begin job claim: %w", err)
+		return workerJob{}, fmt.Errorf("begin job claim: %w", err)
 	}
 	defer tx.Rollback()
 
-	var job job
+	var job workerJob
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
@@ -175,7 +175,7 @@ func (w Worker) claimJob(ctx context.Context) (job, error) {
 		LIMIT 1
 	`).Scan(&job.ID, &job.Type, &job.RecordingProfileID, &job.PayloadJSON, &job.Attempts, &job.MaxAttempts)
 	if err != nil {
-		return job{}, err
+		return workerJob{}, err
 	}
 
 	result, err := tx.ExecContext(ctx, `
@@ -189,23 +189,23 @@ func (w Worker) claimJob(ctx context.Context) (job, error) {
 		WHERE id = ? AND status = 'PENDING'
 	`, w.lockID, job.ID)
 	if err != nil {
-		return job{}, fmt.Errorf("claim job: %w", err)
+		return workerJob{}, fmt.Errorf("claim job: %w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return job{}, fmt.Errorf("read claim rows affected: %w", err)
+		return workerJob{}, fmt.Errorf("read claim rows affected: %w", err)
 	}
 	if changed != 1 {
-		return job{}, sql.ErrNoRows
+		return workerJob{}, sql.ErrNoRows
 	}
 	if err := tx.Commit(); err != nil {
-		return job{}, fmt.Errorf("commit job claim: %w", err)
+		return workerJob{}, fmt.Errorf("commit job claim: %w", err)
 	}
 	job.Attempts++
 	return job, nil
 }
 
-func (w Worker) succeedJob(ctx context.Context, job job, status recorder.RuntimeStatus) error {
+func (w Worker) succeedJob(ctx context.Context, job workerJob, status recorder.RuntimeStatus) error {
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin job success: %w", err)
@@ -245,7 +245,7 @@ func (w Worker) succeedJob(ctx context.Context, job job, status recorder.Runtime
 	return nil
 }
 
-func (w Worker) failJob(ctx context.Context, job job, errorClass string, cause error) error {
+func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, cause error) error {
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin job failure: %w", err)
