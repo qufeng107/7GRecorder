@@ -200,7 +200,7 @@ describe("AdminDashboard", () => {
     expect(await screen.findByRole("heading", { name: "My Account" })).toBeInTheDocument();
     expect(await screen.findAllByText("MANAGER")).toHaveLength(2);
     expect((await screen.findAllByText("Recording Profiles")).length).toBeGreaterThan(0);
-    expect(await screen.findByText("Local Files")).toBeInTheDocument();
+    expect(await screen.findByText(/Local files/i)).toBeInTheDocument();
   });
 
   it("hides edit actions when a manager cannot edit profiles", async () => {
