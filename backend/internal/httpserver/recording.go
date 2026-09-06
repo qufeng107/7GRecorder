@@ -109,6 +109,38 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/upload-sources", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			result, err := store.ListUploadSources(r.Context(), actor, r.Get("merge_gap_seconds").Int64())
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
+	s.BindHandler("/api/v1/upload-sources/actions/discover", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			if actor.Role != account.RoleSuperAdmin {
+				writeRecordingError(r, recording.ErrForbidden)
+				return
+			}
+			result, err := store.DiscoverUploadSources(r.Context(), r.Get("merge_gap_seconds").Int64())
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
 	s.BindHandler("/api/v1/recording-files/reconcile", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodPost) {
 			return

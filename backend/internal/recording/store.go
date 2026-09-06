@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -71,6 +72,60 @@ type RecordingGroupList struct {
 type RecordingGroupListRequest struct {
 	MaxGapSeconds         int64
 	ShortThresholdSeconds int64
+}
+
+const DefaultMergeGapThresholdSeconds int64 = 600
+
+type UploadSource struct {
+	ID                       int64                 `json:"id"`
+	RecordingProfileID       int64                 `json:"recording_profile_id"`
+	ProfileName              string                `json:"profile_name"`
+	RoomID                   string                `json:"room_id"`
+	StreamerName             string                `json:"streamer_name"`
+	Title                    string                `json:"title,omitempty"`
+	StartedAt                string                `json:"started_at"`
+	CompletedAt              string                `json:"completed_at"`
+	DurationMs               int64                 `json:"duration_ms"`
+	Status                   string                `json:"status"`
+	OutputRelativePath       string                `json:"output_relative_path,omitempty"`
+	OutputRecordingFileID    int64                 `json:"output_recording_file_id,omitempty"`
+	TotalBytes               int64                 `json:"total_bytes"`
+	LocalProtected           bool                  `json:"local_protected"`
+	RecordingCount           int                   `json:"recording_count"`
+	FileCount                int                   `json:"file_count"`
+	MaxGapSeconds            int64                 `json:"max_gap_seconds"`
+	MergeGapThresholdSeconds int64                 `json:"merge_gap_threshold_seconds"`
+	MetadataJSON             string                `json:"metadata_json,omitempty"`
+	ReadyAt                  string                `json:"ready_at,omitempty"`
+	LastError                string                `json:"last_error,omitempty"`
+	Segments                 []UploadSourceSegment `json:"segments"`
+}
+
+type UploadSourceSegment struct {
+	ID                int64  `json:"id"`
+	UploadSourceID    int64  `json:"upload_source_id"`
+	RecordingID       int64  `json:"recording_id"`
+	RecordingFileID   int64  `json:"recording_file_id"`
+	SortOrder         int    `json:"sort_order"`
+	SourceStartedAt   string `json:"source_started_at"`
+	SourceCompletedAt string `json:"source_completed_at"`
+	TimelineStartMs   int64  `json:"timeline_start_ms"`
+	TimelineEndMs     int64  `json:"timeline_end_ms"`
+	RelativePath      string `json:"relative_path"`
+	SizeBytes         int64  `json:"size_bytes"`
+	DurationMs        int64  `json:"duration_ms"`
+}
+
+type UploadSourceList struct {
+	Items                    []UploadSource `json:"items"`
+	Total                    int            `json:"total"`
+	MergeGapThresholdSeconds int64          `json:"merge_gap_threshold_seconds"`
+}
+
+type UploadSourceDiscoverResult struct {
+	Created                  int   `json:"created"`
+	Ignored                  int   `json:"ignored"`
+	MergeGapThresholdSeconds int64 `json:"merge_gap_threshold_seconds"`
 }
 
 type File struct {
@@ -218,7 +273,7 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 }
 
 func (s Store) ListGroups(ctx context.Context, actor account.User, req RecordingGroupListRequest) (RecordingGroupList, error) {
-	maxGapSeconds := normalizeGroupSeconds(req.MaxGapSeconds, 120)
+	maxGapSeconds := normalizeGroupSeconds(req.MaxGapSeconds, DefaultMergeGapThresholdSeconds)
 	shortThresholdSeconds := normalizeGroupSeconds(req.ShortThresholdSeconds, 180)
 
 	recordings, err := s.List(ctx, actor)
@@ -376,6 +431,436 @@ func normalizeGroupSeconds(value int64, fallback int64) int64 {
 		return 24 * 60 * 60
 	}
 	return value
+}
+
+func (s Store) ListUploadSources(ctx context.Context, actor account.User, thresholdSeconds int64) (UploadSourceList, error) {
+	thresholdSeconds = normalizeGroupSeconds(thresholdSeconds, DefaultMergeGapThresholdSeconds)
+	query := `
+		SELECT us.id, us.recording_profile_id, p.name, us.source_room_id, us.streamer_name_snapshot,
+			COALESCE(us.title, ''), us.started_at, us.completed_at, us.duration_ms, us.status,
+			COALESCE(us.output_relative_path, ''), COALESCE(us.output_recording_file_id, 0),
+			us.total_bytes,
+			CASE WHEN EXISTS (
+				SELECT 1 FROM upload_source_segments uss
+				JOIN recordings rec ON rec.id = uss.recording_id
+				WHERE uss.upload_source_id = us.id AND rec.local_protected = 1
+			) THEN 1 ELSE 0 END,
+			us.recording_count, us.file_count, us.max_gap_seconds, us.merge_gap_threshold_seconds,
+			COALESCE(us.metadata_json, ''), COALESCE(us.ready_at, ''), COALESCE(us.last_error, '')
+		FROM upload_sources us
+		JOIN recording_profiles p ON p.id = us.recording_profile_id
+	`
+	args := []interface{}{}
+	if actor.Role != account.RoleSuperAdmin {
+		query += " WHERE p.owner_user_id = ?"
+		args = append(args, actor.ID)
+	}
+	query += " ORDER BY us.started_at DESC, us.id DESC LIMIT 100"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return UploadSourceList{}, fmt.Errorf("list upload sources: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]UploadSource, 0)
+	for rows.Next() {
+		var item UploadSource
+		var localProtected int
+		if err := rows.Scan(
+			&item.ID,
+			&item.RecordingProfileID,
+			&item.ProfileName,
+			&item.RoomID,
+			&item.StreamerName,
+			&item.Title,
+			&item.StartedAt,
+			&item.CompletedAt,
+			&item.DurationMs,
+			&item.Status,
+			&item.OutputRelativePath,
+			&item.OutputRecordingFileID,
+			&item.TotalBytes,
+			&localProtected,
+			&item.RecordingCount,
+			&item.FileCount,
+			&item.MaxGapSeconds,
+			&item.MergeGapThresholdSeconds,
+			&item.MetadataJSON,
+			&item.ReadyAt,
+			&item.LastError,
+		); err != nil {
+			return UploadSourceList{}, fmt.Errorf("scan upload source: %w", err)
+		}
+		item.LocalProtected = localProtected == 1
+		item.Segments, err = s.uploadSourceSegments(ctx, item.ID)
+		if err != nil {
+			return UploadSourceList{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return UploadSourceList{}, fmt.Errorf("iterate upload sources: %w", err)
+	}
+	return UploadSourceList{Items: items, Total: len(items), MergeGapThresholdSeconds: thresholdSeconds}, nil
+}
+
+func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64) (UploadSourceDiscoverResult, error) {
+	thresholdSeconds = normalizeGroupSeconds(thresholdSeconds, DefaultMergeGapThresholdSeconds)
+	candidates, err := s.completedLocalRecordingsWithoutUploadSource(ctx)
+	if err != nil {
+		return UploadSourceDiscoverResult{}, err
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].RecordingProfileID != candidates[j].RecordingProfileID {
+			return candidates[i].RecordingProfileID < candidates[j].RecordingProfileID
+		}
+		return parseRecordingTimestamp(candidates[i].StartedAt).Before(parseRecordingTimestamp(candidates[j].StartedAt))
+	})
+
+	result := UploadSourceDiscoverResult{MergeGapThresholdSeconds: thresholdSeconds}
+	now := time.Now().UTC()
+	var current []Recording
+	flush := func() error {
+		if len(current) == 0 {
+			return nil
+		}
+		completed := recordingCompletedTime(current[len(current)-1])
+		if completed.IsZero() || now.Sub(completed) <= time.Duration(thresholdSeconds)*time.Second {
+			result.Ignored += len(current)
+			current = nil
+			return nil
+		}
+		created, err := s.insertUploadSource(ctx, current, thresholdSeconds)
+		if err != nil {
+			return err
+		}
+		if created {
+			result.Created++
+		} else {
+			result.Ignored += len(current)
+		}
+		current = nil
+		return nil
+	}
+
+	for _, item := range candidates {
+		if len(current) == 0 {
+			current = append(current, item)
+			continue
+		}
+		prev := current[len(current)-1]
+		if prev.RecordingProfileID != item.RecordingProfileID {
+			if err := flush(); err != nil {
+				return UploadSourceDiscoverResult{}, err
+			}
+			current = append(current, item)
+			continue
+		}
+		previousEnd := recordingCompletedTime(prev)
+		started := parseRecordingTimestamp(item.StartedAt)
+		if !previousEnd.IsZero() && !started.IsZero() && int64(started.Sub(previousEnd).Seconds()) > thresholdSeconds {
+			if err := flush(); err != nil {
+				return UploadSourceDiscoverResult{}, err
+			}
+		}
+		current = append(current, item)
+	}
+	if err := flush(); err != nil {
+		return UploadSourceDiscoverResult{}, err
+	}
+	return result, nil
+}
+
+func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) ([]Recording, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
+			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected
+		FROM recordings rec
+		JOIN recording_profiles p ON p.id = rec.recording_profile_id
+		JOIN recording_profile_runtime rt ON rt.recording_profile_id = rec.recording_profile_id
+		WHERE rec.recording_status = 'COMPLETED'
+			AND rec.local_storage_status != 'DELETED'
+			AND rec.local_deleted_at IS NULL
+			AND p.archived_at IS NULL
+			AND COALESCE(rt.stream_status, '') != 'LIVE'
+			AND COALESCE(rt.recorder_status, '') != 'RECORDING'
+			AND NOT EXISTS (
+				SELECT 1 FROM upload_source_segments uss WHERE uss.recording_id = rec.id
+			)
+			AND EXISTS (
+				SELECT 1 FROM recording_files f
+				WHERE f.recording_id = rec.id
+					AND LOWER(f.kind) = 'video'
+					AND f.file_status = 'CLOSED'
+					AND f.deleted_at IS NULL
+			)
+		ORDER BY rec.recording_profile_id ASC, rec.started_at ASC, rec.id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list upload source candidates: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Recording, 0)
+	for rows.Next() {
+		var item Recording
+		var localProtected int
+		if err := rows.Scan(
+			&item.ID,
+			&item.RecordingProfileID,
+			&item.ProfileName,
+			&item.RoomID,
+			&item.StreamerName,
+			&item.Title,
+			&item.StartedAt,
+			&item.CompletedAt,
+			&item.DurationMs,
+			&item.RecordingStatus,
+			&item.LocalStorageStatus,
+			&localProtected,
+		); err != nil {
+			return nil, fmt.Errorf("scan upload source candidate: %w", err)
+		}
+		item.LocalProtected = localProtected == 1
+		item.Files, err = s.files(ctx, item.ID)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate upload source candidates: %w", err)
+	}
+	return items, nil
+}
+
+func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, thresholdSeconds int64) (bool, error) {
+	if len(recordings) == 0 {
+		return false, nil
+	}
+	first := recordings[0]
+	last := recordings[len(recordings)-1]
+	sourceKey := fmt.Sprintf("profile:%d:%d:%d", first.RecordingProfileID, first.ID, last.ID)
+	status := "MERGE_PENDING"
+	var outputRecordingFileID interface{}
+	var outputRelativePath interface{}
+	var readyAt interface{}
+	if len(recordings) == 1 {
+		if file, ok := firstClosedVideo(first); ok {
+			status = "READY_TO_UPLOAD"
+			outputRecordingFileID = file.ID
+			outputRelativePath = file.RelativePath
+			readyAt = time.Now().UTC().Format(time.RFC3339)
+		}
+	}
+	summary := uploadSourceSummary(recordings, thresholdSeconds)
+	metadata, err := json.Marshal(summary)
+	if err != nil {
+		return false, fmt.Errorf("encode upload source metadata: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin upload source insert: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO upload_sources
+			(recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path, output_recording_file_id,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds,
+				metadata_json, ready_at)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+	`, first.RecordingProfileID, sourceKey, first.Title, first.RoomID, first.StreamerName,
+		summary.StartedAt, summary.CompletedAt, summary.DurationMs, status, outputRelativePath, outputRecordingFileID,
+		summary.TotalBytes, len(recordings), summary.FileCount, summary.MaxGapSeconds, thresholdSeconds, string(metadata), readyAt)
+	if err != nil {
+		return false, fmt.Errorf("insert upload source: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read upload source insert count: %w", err)
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	uploadSourceID, err := result.LastInsertId()
+	if err != nil {
+		return false, fmt.Errorf("read upload source id: %w", err)
+	}
+	for index, segment := range summary.Segments {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO upload_source_segments
+				(upload_source_id, recording_id, recording_file_id, sort_order, source_started_at,
+					source_completed_at, timeline_start_ms, timeline_end_ms, relative_path, size_bytes, duration_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, uploadSourceID, segment.RecordingID, segment.RecordingFileID, index, segment.SourceStartedAt,
+			segment.SourceCompletedAt, segment.TimelineStartMs, segment.TimelineEndMs, segment.RelativePath,
+			segment.SizeBytes, segment.DurationMs); err != nil {
+			return false, fmt.Errorf("insert upload source segment: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit upload source insert: %w", err)
+	}
+	return true, nil
+}
+
+type uploadSourceMetadata struct {
+	RecordingProfileID       int64                         `json:"recording_profile_id"`
+	ProfileName              string                        `json:"profile_name"`
+	RoomID                   string                        `json:"room_id"`
+	StreamerName             string                        `json:"streamer_name"`
+	StartedAt                string                        `json:"started_at"`
+	CompletedAt              string                        `json:"completed_at"`
+	StartedAtChina           string                        `json:"started_at_china"`
+	CompletedAtChina         string                        `json:"completed_at_china"`
+	DurationMs               int64                         `json:"duration_ms"`
+	TotalBytes               int64                         `json:"total_bytes"`
+	FileCount                int                           `json:"file_count"`
+	MaxGapSeconds            int64                         `json:"max_gap_seconds"`
+	MergeGapThresholdSeconds int64                         `json:"merge_gap_threshold_seconds"`
+	Segments                 []uploadSourceMetadataSegment `json:"segments"`
+}
+
+type uploadSourceMetadataSegment struct {
+	RecordingID           int64  `json:"recording_id"`
+	RecordingFileID       int64  `json:"recording_file_id"`
+	SourceStartedAt       string `json:"source_started_at"`
+	SourceCompletedAt     string `json:"source_completed_at"`
+	SourceStartedChina   string `json:"source_started_china"`
+	SourceCompletedChina string `json:"source_completed_china"`
+	TimelineStartMs       int64  `json:"timeline_start_ms"`
+	TimelineEndMs         int64  `json:"timeline_end_ms"`
+	RelativePath          string `json:"relative_path"`
+	SizeBytes             int64  `json:"size_bytes"`
+	DurationMs            int64  `json:"duration_ms"`
+}
+
+func uploadSourceSummary(recordings []Recording, thresholdSeconds int64) uploadSourceMetadata {
+	first := recordings[0]
+	summary := uploadSourceMetadata{
+		RecordingProfileID:       first.RecordingProfileID,
+		ProfileName:              first.ProfileName,
+		RoomID:                   first.RoomID,
+		StreamerName:             first.StreamerName,
+		StartedAt:                first.StartedAt,
+		MergeGapThresholdSeconds: thresholdSeconds,
+		Segments:                 make([]uploadSourceMetadataSegment, 0, len(recordings)),
+	}
+	var timeline int64
+	var previousEnd time.Time
+	for _, item := range recordings {
+		file, ok := firstClosedVideo(item)
+		if !ok {
+			continue
+		}
+		completed := recordingCompletedTime(item)
+		durationMs := item.DurationMs
+		if durationMs == 0 {
+			durationMs = file.DurationMs
+		}
+		if durationMs == 0 {
+			started := parseRecordingTimestamp(item.StartedAt)
+			if !started.IsZero() && !completed.IsZero() && completed.After(started) {
+				durationMs = completed.Sub(started).Milliseconds()
+			}
+		}
+		if !previousEnd.IsZero() {
+			started := parseRecordingTimestamp(item.StartedAt)
+			if !started.IsZero() {
+				gapSeconds := int64(started.Sub(previousEnd).Seconds())
+				if gapSeconds > summary.MaxGapSeconds {
+					summary.MaxGapSeconds = gapSeconds
+				}
+			}
+		}
+		segment := uploadSourceMetadataSegment{
+			RecordingID:           item.ID,
+			RecordingFileID:       file.ID,
+			SourceStartedAt:       item.StartedAt,
+			SourceCompletedAt:     completed.UTC().Format(time.RFC3339),
+			SourceStartedChina:   formatChinaTimestamp(item.StartedAt),
+			SourceCompletedChina: formatChinaTimestamp(completed.UTC().Format(time.RFC3339)),
+			TimelineStartMs:       timeline,
+			TimelineEndMs:         timeline + durationMs,
+			RelativePath:          file.RelativePath,
+			SizeBytes:             file.SizeBytes,
+			DurationMs:            durationMs,
+		}
+		summary.Segments = append(summary.Segments, segment)
+		summary.TotalBytes += file.SizeBytes
+		summary.DurationMs += durationMs
+		summary.FileCount++
+		summary.CompletedAt = segment.SourceCompletedAt
+		summary.StartedAtChina = formatChinaTimestamp(summary.StartedAt)
+		summary.CompletedAtChina = formatChinaTimestamp(summary.CompletedAt)
+		timeline += durationMs
+		if !completed.IsZero() {
+			previousEnd = completed
+		}
+	}
+	return summary
+}
+
+func firstClosedVideo(item Recording) (File, bool) {
+	for _, file := range item.Files {
+		if strings.EqualFold(file.Kind, "video") && file.FileStatus == "CLOSED" {
+			return file, true
+		}
+	}
+	return File{}, false
+}
+
+func formatChinaTimestamp(value string) string {
+	parsed := parseRecordingTimestamp(value)
+	if parsed.IsZero() {
+		return ""
+	}
+	return parsed.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04:05")
+}
+
+func (s Store) uploadSourceSegments(ctx context.Context, uploadSourceID int64) ([]UploadSourceSegment, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, upload_source_id, recording_id, recording_file_id, sort_order, source_started_at,
+			source_completed_at, timeline_start_ms, timeline_end_ms, relative_path, size_bytes, duration_ms
+		FROM upload_source_segments
+		WHERE upload_source_id = ?
+		ORDER BY sort_order ASC, id ASC
+	`, uploadSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list upload source segments: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]UploadSourceSegment, 0)
+	for rows.Next() {
+		var item UploadSourceSegment
+		if err := rows.Scan(
+			&item.ID,
+			&item.UploadSourceID,
+			&item.RecordingID,
+			&item.RecordingFileID,
+			&item.SortOrder,
+			&item.SourceStartedAt,
+			&item.SourceCompletedAt,
+			&item.TimelineStartMs,
+			&item.TimelineEndMs,
+			&item.RelativePath,
+			&item.SizeBytes,
+			&item.DurationMs,
+		); err != nil {
+			return nil, fmt.Errorf("scan upload source segment: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate upload source segments: %w", err)
+	}
+	return items, nil
 }
 
 func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (LocalStorageStatus, error) {

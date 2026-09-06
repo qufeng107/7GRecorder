@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Activity,
@@ -32,6 +32,8 @@ import {
   useReactTable
 } from "@tanstack/react-table";
 import type { ColumnDef, ColumnSizingState } from "@tanstack/react-table";
+
+const UPLOAD_SOURCE_MERGE_GAP_SECONDS = 600;
 
 type User = {
   id: number;
@@ -120,6 +122,9 @@ type RecordingFile = {
 
 type RecordingItem = {
   id: number;
+  upload_source_id?: number;
+  upload_source_status?: string;
+  output_recording_file_id?: number;
   recording_profile_id: number;
   profile_name: string;
   room_id: string;
@@ -131,37 +136,60 @@ type RecordingItem = {
   recording_status: string;
   local_storage_status: string;
   local_protected: boolean;
+  source_segments?: UploadSourceSegment[];
   files: RecordingFile[] | null;
 };
 
-type RecordingListResponse = {
-  items: RecordingItem[] | null;
-  total?: number;
+type UploadSourceSegment = {
+  id: number;
+  upload_source_id: number;
+  recording_id: number;
+  recording_file_id: number;
+  sort_order: number;
+  source_started_at: string;
+  source_completed_at: string;
+  timeline_start_ms: number;
+  timeline_end_ms: number;
+  relative_path: string;
+  size_bytes: number;
+  duration_ms: number;
 };
 
-type RecordingGroup = {
-  id: string;
+type UploadSourceItem = {
+  id: number;
   recording_profile_id: number;
   profile_name: string;
   room_id: string;
   streamer_name: string;
+  title?: string;
   started_at: string;
-  completed_at?: string;
+  completed_at: string;
+  duration_ms: number;
+  status: string;
+  output_relative_path?: string;
+  output_recording_file_id?: number;
+  total_bytes: number;
+  local_protected?: boolean;
   recording_count: number;
   file_count: number;
-  total_bytes: number;
-  total_duration_ms: number;
   max_gap_seconds: number;
-  has_short_segment: boolean;
-  ready_for_merge: boolean;
-  recordings: RecordingItem[] | null;
+  merge_gap_threshold_seconds: number;
+  metadata_json?: string;
+  ready_at?: string;
+  last_error?: string;
+  segments: UploadSourceSegment[] | null;
 };
 
-type RecordingGroupListResponse = {
-  items: RecordingGroup[] | null;
+type UploadSourceListResponse = {
+  items: UploadSourceItem[] | null;
   total: number;
-  max_gap_seconds: number;
-  short_threshold_seconds: number;
+  merge_gap_threshold_seconds: number;
+};
+
+type UploadSourceDiscoverResult = {
+  created: number;
+  ignored: number;
+  merge_gap_threshold_seconds: number;
 };
 
 type ReconcileResult = {
@@ -169,6 +197,11 @@ type ReconcileResult = {
   imported: number;
   updated: number;
   skipped: number;
+};
+
+type RecordingScanResult = {
+  reconcile: ReconcileResult;
+  discover: UploadSourceDiscoverResult;
 };
 
 type LocalStorageStatus = {
@@ -483,17 +516,13 @@ const uiCopy = {
     details: "详情",
     recordingDetails: "录像详情",
     shortRecording: "短片段",
-    recordingGroups: "连续片段组",
-    recordingGroupsHint: "按同一配置和相邻录像间隔自动归组，用于后续上传前合并。",
-    timeWindow: "时间范围",
-    timeRangeSeparator: "至",
-    segments: "片段",
-    totalDuration: "总时长",
-    totalSize: "总大小",
-    maxGap: "最大间隔",
-    mergeReady: "可合并",
-    includesShortSegment: "包含短片段",
-    noRecordingGroups: "暂无连续片段组。",
+    uploadSources: "可上传视频",
+    uploadSourceDiscoverResult: (created: number, ignored: number) =>
+      `生成可上传视频：新增 ${created}，等待 ${ignored}。`,
+    uploadSourcePendingMerge: "待合成",
+    uploadSourceReady: "可上传",
+    sourceSegments: "子视频",
+    timeline: "合成时间轴",
     recordingStatus: "录像状态",
     localStorageStatus: "本地状态",
     file: "文件",
@@ -685,17 +714,13 @@ const uiCopy = {
     details: "Details",
     recordingDetails: "Recording Details",
     shortRecording: "Short segment",
-    recordingGroups: "Recording Groups",
-    recordingGroupsHint: "Grouped by profile and nearby recording gaps for pre-upload merge planning.",
-    timeWindow: "Time Window",
-    timeRangeSeparator: "to",
-    segments: "Segments",
-    totalDuration: "Total Duration",
-    totalSize: "Total Size",
-    maxGap: "Max Gap",
-    mergeReady: "Merge Ready",
-    includesShortSegment: "Includes short segment",
-    noRecordingGroups: "No recording groups yet.",
+    uploadSources: "Upload Sources",
+    uploadSourceDiscoverResult: (created: number, ignored: number) =>
+      `Upload sources: ${created} created, ${ignored} waiting.`,
+    uploadSourcePendingMerge: "Pending merge",
+    uploadSourceReady: "Ready to upload",
+    sourceSegments: "Source Segments",
+    timeline: "Timeline",
     recordingStatus: "Recording Status",
     localStorageStatus: "Local Status",
     file: "File",
@@ -816,6 +841,39 @@ function includesSearch(value: string | number | undefined, search: string): boo
   return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase());
 }
 
+function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
+  const segments = source.segments ?? [];
+  return {
+    id: segments[0]?.recording_id ?? source.id,
+    upload_source_id: source.id,
+    upload_source_status: source.status,
+    output_recording_file_id: source.output_recording_file_id,
+    recording_profile_id: source.recording_profile_id,
+    profile_name: source.profile_name,
+    room_id: source.room_id,
+    streamer_name: source.streamer_name,
+    title: source.title,
+    started_at: source.started_at,
+    completed_at: source.completed_at,
+    duration_ms: source.duration_ms,
+    recording_status: source.status,
+    local_storage_status: source.output_relative_path ? "AVAILABLE" : source.status,
+    local_protected: Boolean(source.local_protected),
+    source_segments: segments,
+    files: segments.map((segment) => ({
+      id: segment.recording_file_id,
+      recording_id: segment.recording_id,
+      relative_path: segment.relative_path,
+      original_name: segment.relative_path.split("/").pop() ?? segment.relative_path,
+      kind: "video",
+      file_status: source.status === "READY_TO_UPLOAD" ? "CLOSED" : source.status,
+      size_bytes: segment.size_bytes,
+      duration_ms: segment.duration_ms,
+      closed_at: segment.source_completed_at
+    }))
+  };
+}
+
 function filterProfiles(items: RecordingProfile[], search: string, sort: ProfileSortKey): RecordingProfile[] {
   const filtered = items.filter((profile) => {
     if (!search.trim()) {
@@ -874,7 +932,7 @@ function filterRecordings(items: RecordingItem[], search: string, sort: Recordin
       return right.duration_ms - left.duration_ms;
     }
     if (sort === "size_desc") {
-      return (right.files?.[0]?.size_bytes ?? 0) - (left.files?.[0]?.size_bytes ?? 0);
+      return totalRecordingBytes(right) - totalRecordingBytes(left);
     }
     return Date.parse(right.started_at) - Date.parse(left.started_at);
   });
@@ -966,19 +1024,9 @@ export function AdminDashboard() {
   });
 
   const recordingsQuery = useQuery({
-    queryKey: ["recordings"],
-    queryFn: () => requestJson<RecordingListResponse>("/api/v1/recordings"),
-    enabled: Boolean(meQuery.data?.user),
-    retry: false,
-    refetchInterval: 15000
-  });
-
-  const recordingGroupsQuery = useQuery({
-    queryKey: ["recording-groups"],
+    queryKey: ["upload-sources"],
     queryFn: () =>
-      requestJson<RecordingGroupListResponse>(
-        "/api/v1/recording-groups?max_gap_seconds=120&short_threshold_seconds=180"
-      ),
+      requestJson<UploadSourceListResponse>(`/api/v1/upload-sources?merge_gap_seconds=${UPLOAD_SOURCE_MERGE_GAP_SECONDS}`),
     enabled: Boolean(meQuery.data?.user),
     retry: false,
     refetchInterval: 15000
@@ -1019,9 +1067,8 @@ export function AdminDashboard() {
   const profiles = profilesQuery.data?.items ?? [];
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
-  const recordings = recordingsQuery.data?.items ?? [];
+  const recordings = (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem);
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
-  const recordingGroups = recordingGroupsQuery.data?.items ?? [];
   const jobs = jobsQuery.data?.items ?? [];
   const jobTotal = jobsQuery.data?.total ?? jobs.length;
   const accounts = accountsQuery.data?.items ?? [];
@@ -1096,8 +1143,7 @@ export function AdminDashboard() {
       setAccountEditorOpen(false);
       setAccountEditForm(emptyAccountEditForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
-      queryClient.removeQueries({ queryKey: ["recordings"] });
-      queryClient.removeQueries({ queryKey: ["recording-groups"] });
+      queryClient.removeQueries({ queryKey: ["upload-sources"] });
       queryClient.removeQueries({ queryKey: ["jobs"] });
       queryClient.removeQueries({ queryKey: ["accounts"] });
       queryClient.removeQueries({ queryKey: ["local-storage"] });
@@ -1134,19 +1180,27 @@ export function AdminDashboard() {
       setSelectedProfileId(profile.id);
       setProfileEditorOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
-      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
     }
   });
 
   const reconcileMutation = useMutation({
-    mutationFn: () =>
-      requestJson<ReconcileResult>("/api/v1/recording-files/reconcile", {
+    mutationFn: async () => {
+      const reconcile = await requestJson<ReconcileResult>("/api/v1/recording-files/reconcile", {
         method: "POST",
         body: "{}"
-      }),
+      });
+      const discover = await requestJson<UploadSourceDiscoverResult>(
+        `/api/v1/upload-sources/actions/discover?merge_gap_seconds=${UPLOAD_SOURCE_MERGE_GAP_SECONDS}`,
+        {
+          method: "POST",
+          body: "{}"
+        }
+      );
+      return { reconcile, discover };
+    },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["recordings"] });
-      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
@@ -1162,8 +1216,7 @@ export function AdminDashboard() {
         }
       ),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["recordings"] });
-      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
@@ -1232,7 +1285,7 @@ export function AdminDashboard() {
       setProfileEditorOpen(false);
       setProfileForm(emptyProfileForm);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
-      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
     }
   });
 
@@ -1247,7 +1300,7 @@ export function AdminDashboard() {
       setProfileEditorOpen(false);
       setProfileForm(profileToForm(profile));
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
-      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
     }
   });
 
@@ -1512,8 +1565,6 @@ export function AdminDashboard() {
 
             {activePage === "recordings" ? (
               <RecordingsPanel
-                groups={recordingGroups}
-                groupsLoading={recordingGroupsQuery.isLoading}
                 isLoading={recordingsQuery.isLoading}
                 labels={ui}
                 canManageLocalFiles={canManageLocalFiles}
@@ -2641,94 +2692,15 @@ function TableDateTime(props: { value: string }) {
   );
 }
 
-function RecordingGroupsPanel(props: { groups: RecordingGroup[]; isLoading: boolean; labels: AdminCopy }) {
-  const visibleGroups = props.groups.filter((group) => group.recording_count > 1 || group.has_short_segment);
-  return (
-    <section className="mt-4 rounded-md border border-border bg-white p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">{props.labels.recordingGroups}</h3>
-          <p className="mt-1 text-xs text-muted">{props.labels.recordingGroupsHint}</p>
-        </div>
-        <p className="text-xs text-muted">{props.labels.total(visibleGroups.length)}</p>
-      </div>
-
-      <div className="mt-3 overflow-auto rounded-md border border-border">
-        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.profile}</th>
-              <th className="px-3 py-2 font-semibold">
-                <TableTimeHeader labels={props.labels} title={props.labels.timeWindow} />
-              </th>
-              <th className="px-3 py-2 font-semibold">{props.labels.segments}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.totalDuration}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.totalSize}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.maxGap}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleGroups.map((group) => (
-              <tr key={group.id} className="bg-white align-top">
-                <td className="px-3 py-3">
-                  <p className="font-semibold text-ink">{group.profile_name}</p>
-                  <p className="mt-1 text-xs text-muted">{group.room_id}</p>
-                </td>
-                <td className="px-3 py-3">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <TableDateTime value={group.started_at} />
-                    <span className="text-muted">{props.labels.timeRangeSeparator}</span>
-                    <TableDateTime value={group.completed_at || ""} />
-                  </div>
-                </td>
-                <td className="px-3 py-3 text-muted">
-                  {group.recording_count} / {group.file_count}
-                </td>
-                <td className="px-3 py-3 text-muted">{formatDuration(group.total_duration_ms)}</td>
-                <td className="px-3 py-3 text-muted">{formatBytes(group.total_bytes)}</td>
-                <td className="px-3 py-3 text-muted">{formatSeconds(group.max_gap_seconds)}</td>
-                <td className="px-3 py-3">
-                  <div className="flex flex-wrap gap-2">
-                    {group.ready_for_merge ? (
-                      <span className="inline-flex rounded-md border border-accent px-2 py-0.5 text-xs font-medium text-accent">
-                        {props.labels.mergeReady}
-                      </span>
-                    ) : null}
-                    {group.has_short_segment ? (
-                      <span className="inline-flex rounded-md border border-amber-300 px-2 py-0.5 text-xs font-medium text-amber-800">
-                        {props.labels.includesShortSegment}
-                      </span>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {visibleGroups.length === 0 ? (
-              <tr>
-                <td className="px-3 py-6 text-center text-muted" colSpan={7}>
-                  {props.isLoading ? props.labels.checking : props.labels.noRecordingGroups}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 function RecordingsPanel(props: {
   canManageLocalFiles: boolean;
   canScanLocalFiles: boolean;
-  groups: RecordingGroup[];
-  groupsLoading: boolean;
   isLoading: boolean;
   labels: AdminCopy;
   protectPending: boolean;
   reconcileError: boolean;
   reconcilePending: boolean;
-  reconcileResult?: ReconcileResult;
+  reconcileResult?: RecordingScanResult;
   recordings: RecordingItem[];
   search: string;
   sort: RecordingSortKey;
@@ -2739,15 +2711,13 @@ function RecordingsPanel(props: {
   onSortChange: (value: RecordingSortKey) => void;
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
-  const [selectedRecording, setSelectedRecording] = useState<RecordingItem | null>(null);
+  const [expandedSourceId, setExpandedSourceId] = useState<number | null>(null);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const visibleSizeBytes = props.recordings.reduce((total, recording) => {
-    return total + (recording.files ?? []).reduce((fileTotal, file) => fileTotal + file.size_bytes, 0);
+    return total + totalRecordingBytes(recording);
   }, 0);
   const shortSegmentCount = props.recordings.filter((recording) => {
-    const file = recording.files?.[0];
-    const durationMs = recording.duration_ms || file?.duration_ms || 0;
-    return durationMs > 0 && durationMs < 3 * 60 * 1000;
+    return hasShortSegment(recording);
   }).length;
   const protectedCount = props.recordings.filter((recording) => recording.local_protected).length;
   const columns: Array<ColumnDef<RecordingItem>> = [
@@ -2759,8 +2729,7 @@ function RecordingsPanel(props: {
       cell: ({ row }) => {
         const recording = row.original;
         const file = recording.files?.[0];
-        const durationMs = recording.duration_ms || file?.duration_ms || 0;
-        const isShortRecording = durationMs > 0 && durationMs < 3 * 60 * 1000;
+        const isShortRecording = hasShortSegment(recording);
         const completedAt = formatChinaDateParts(recording.completed_at || file?.closed_at || "");
         return (
           <div className="flex items-start gap-2">
@@ -2769,7 +2738,7 @@ function RecordingsPanel(props: {
               <button
                 className="text-left font-semibold text-ink hover:text-accent"
                 type="button"
-                onClick={() => setSelectedRecording(recording)}
+                onClick={() => setExpandedSourceId(expandedSourceId === recording.upload_source_id ? null : recording.upload_source_id ?? null)}
               >
                 {recording.title || file?.original_name || props.labels.untitled}
               </button>
@@ -2835,7 +2804,7 @@ function RecordingsPanel(props: {
         const file = recording.files?.[0];
         return (
           <div className="text-muted">
-            <p>{recording.recording_status}</p>
+            <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels)}</p>
             <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
           </div>
@@ -2847,7 +2816,7 @@ function RecordingsPanel(props: {
       header: props.labels.size,
       size: 90,
       minSize: 80,
-      cell: ({ row }) => <span className="text-muted">{formatBytes(row.original.files?.[0]?.size_bytes ?? 0)}</span>
+      cell: ({ row }) => <span className="text-muted">{formatBytes(totalRecordingBytes(row.original))}</span>
     },
     {
       id: "actions",
@@ -2859,6 +2828,7 @@ function RecordingsPanel(props: {
         const recording = row.original;
         const file = recording.files?.[0];
         const canUseLocalFile = recording.local_storage_status !== "DELETED";
+        const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
         if (!props.canManageLocalFiles) {
           return <span className="text-xs text-muted">{props.labels.noAction}</span>;
         }
@@ -2867,11 +2837,11 @@ function RecordingsPanel(props: {
             <button
               className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
               type="button"
-              onClick={() => setSelectedRecording(recording)}
+              onClick={() => setExpandedSourceId(expandedSourceId === recording.upload_source_id ? null : recording.upload_source_id ?? null)}
             >
               {props.labels.details}
             </button>
-            {canUseLocalFile ? (
+            {canUseLocalFile && isSingleSegment ? (
               <button
                 className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
                 disabled={props.protectPending}
@@ -2886,7 +2856,7 @@ function RecordingsPanel(props: {
                 {recording.local_protected ? props.labels.unprotect : props.labels.protect}
               </button>
             ) : null}
-            {file && file.file_status === "CLOSED" ? (
+            {file && file.file_status === "CLOSED" && isSingleSegment ? (
               <a
                 className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
                 href={`/api/v1/recording-files/${file.id}/download`}
@@ -2920,7 +2890,7 @@ function RecordingsPanel(props: {
     <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">{props.labels.recordings}</h2>
+          <h2 className="text-sm font-semibold">{props.labels.uploadSources}</h2>
           <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
         </div>
         {props.canScanLocalFiles ? (
@@ -2945,17 +2915,20 @@ function RecordingsPanel(props: {
       {props.reconcileResult ? (
         <p className="mt-3 text-sm text-muted">
           {props.labels.scanResult(
-            props.reconcileResult.imported,
-            props.reconcileResult.updated,
-            props.reconcileResult.skipped
+            props.reconcileResult.reconcile.imported,
+            props.reconcileResult.reconcile.updated,
+            props.reconcileResult.reconcile.skipped
+          )}
+          {" "}
+          {props.labels.uploadSourceDiscoverResult(
+            props.reconcileResult.discover.created,
+            props.reconcileResult.discover.ignored
           )}
         </p>
       ) : null}
       {props.reconcileError ? (
         <p className="mt-3 text-sm text-red-700">{props.labels.scanFailed}</p>
       ) : null}
-
-      <RecordingGroupsPanel groups={props.groups} isLoading={props.groupsLoading} labels={props.labels} />
 
       <TableToolbar
         labels={props.labels}
@@ -3002,19 +2975,32 @@ function RecordingsPanel(props: {
             ))}
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id} className="bg-white">
-                {row.getVisibleCells().map((cell) => (
-                  <td
-                    key={cell.id}
-                    className={`px-3 py-3 ${cell.column.id === "actions" ? "sticky right-0 z-10 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.6)]" : ""}`}
-                    style={{ width: cell.column.getSize() }}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {table.getRowModel().rows.map((row) => {
+              const recording = row.original;
+              const isExpanded = expandedSourceId === recording.upload_source_id;
+              return (
+                <Fragment key={row.id}>
+                  <tr key={row.id} className="bg-white">
+                    {row.getVisibleCells().map((cell) => (
+                      <td
+                        key={cell.id}
+                        className={`px-3 py-3 ${cell.column.id === "actions" ? "sticky right-0 z-10 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.6)]" : ""}`}
+                        style={{ width: cell.column.getSize() }}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                  {isExpanded ? (
+                    <tr key={`${row.id}-segments`} className="bg-[#f7f8f5]">
+                      <td className="px-3 py-3" colSpan={table.getAllLeafColumns().length}>
+                        <UploadSourceSegmentsTable labels={props.labels} segments={recording.source_segments ?? []} />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
             {table.getRowModel().rows.length === 0 ? (
               <tr>
                 <td className="px-3 py-8 text-center text-muted" colSpan={table.getAllLeafColumns().length}>
@@ -3029,158 +3015,52 @@ function RecordingsPanel(props: {
           </tbody>
         </table>
       </div>
-      {selectedRecording ? (
-        <RecordingDetailsDialog
-          canManageLocalFiles={props.canManageLocalFiles}
-          labels={props.labels}
-          recording={selectedRecording}
-          protectPending={props.protectPending}
-          onClose={() => setSelectedRecording(null)}
-          onToggleProtect={props.onToggleProtect}
-        />
-      ) : null}
     </section>
   );
 }
 
-function RecordingDetailsDialog(props: {
-  canManageLocalFiles: boolean;
-  labels: AdminCopy;
-  protectPending: boolean;
-  recording: RecordingItem;
-  onClose: () => void;
-  onToggleProtect: (recording: RecordingItem) => void;
-}) {
-  const file = props.recording.files?.[0];
-  const durationMs = props.recording.duration_ms || file?.duration_ms || 0;
-  const isShortRecording = durationMs > 0 && durationMs < 3 * 60 * 1000;
-  const canUseLocalFile = props.recording.local_storage_status !== "DELETED";
-
+function UploadSourceSegmentsTable(props: { labels: AdminCopy; segments: UploadSourceSegment[] }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
-      <section className="w-full max-w-2xl rounded-md border border-border bg-panel p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border pb-3">
-          <div>
-            <h2 className="text-base font-semibold">{props.labels.recordingDetails}</h2>
-            <p className="mt-1 text-sm font-semibold text-ink">
-              {props.recording.title || file?.original_name || props.labels.untitled}
-            </p>
-          </div>
-          <button
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
-            type="button"
-            onClick={props.onClose}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">{props.labels.close}</span>
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Metric label={props.labels.profile} value={`${props.recording.profile_name} / ${props.recording.room_id}`} />
-          <Metric label={props.labels.streamer} value={props.recording.streamer_name || "-"} />
-          <Metric label={props.labels.startTime} value={formatDateTime(props.recording.started_at, props.labels)} />
-          <Metric label={props.labels.completedAt} value={formatDateTime(props.recording.completed_at || file?.closed_at || "", props.labels)} />
-          <Metric label={props.labels.duration} value={formatDuration(durationMs)} />
-          <Metric label={props.labels.fileSize} value={formatBytes(file?.size_bytes ?? 0)} />
-          <Metric label={props.labels.recordingStatus} value={props.recording.recording_status} />
-          <Metric label={props.labels.localStorageStatus} value={props.recording.local_storage_status} />
-          <Metric label={props.labels.fileStatus} value={file?.file_status ?? props.labels.noFile} />
-          <Metric label={props.labels.fileKind} value={file?.kind ?? "-"} />
-        </div>
-
-        {isShortRecording ? (
-          <p className="mt-4 inline-flex rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-800">
-            {props.labels.shortRecording}
-          </p>
-        ) : null}
-
-        <div className="mt-4 overflow-hidden rounded-md border border-border">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-              <tr>
-                <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.fileKind}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.fileStatus}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.fileSize}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
+    <div className="rounded-md border border-border bg-white p-3">
+      <h3 className="text-sm font-semibold">{props.labels.sourceSegments}</h3>
+      <div className="mt-3 overflow-auto">
+        <table className="w-full min-w-[720px] border-collapse text-left text-xs">
+          <thead className="bg-[#eef1eb] uppercase text-muted">
+            <tr>
+              <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.startTime}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.completedAt}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.segments.map((segment) => (
+              <tr key={segment.id} className="align-top">
+                <td className="px-3 py-3">
+                  <p className="font-medium text-ink">{segment.relative_path.split("/").pop() ?? segment.relative_path}</p>
+                  <p className="mt-1 break-all text-muted">{segment.relative_path}</p>
+                </td>
+                <td className="px-3 py-3"><TableDateTime value={segment.source_started_at} /></td>
+                <td className="px-3 py-3"><TableDateTime value={segment.source_completed_at} /></td>
+                <td className="px-3 py-3 text-muted">
+                  {formatTimeline(segment.timeline_start_ms)} - {formatTimeline(segment.timeline_end_ms)}
+                </td>
+                <td className="px-3 py-3 text-muted">{formatDuration(segment.duration_ms)}</td>
+                <td className="px-3 py-3 text-muted">{formatBytes(segment.size_bytes)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {(props.recording.files ?? []).map((item) => (
-                <tr key={item.id} className="bg-white align-top">
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{item.original_name}</p>
-                    <p className="mt-1 break-all text-xs text-muted">{item.relative_path}</p>
-                  </td>
-                  <td className="px-3 py-3 text-muted">{item.kind}</td>
-                  <td className="px-3 py-3 text-muted">{item.file_status}</td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(item.size_bytes)}</td>
-                  <td className="px-3 py-3">
-                    {item.file_status === "CLOSED" ? (
-                      <a
-                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                        href={`/api/v1/recording-files/${item.id}/download`}
-                      >
-                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                        {props.labels.download}
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted">{props.labels.noAction}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {(props.recording.files ?? []).length === 0 ? (
-                <tr>
-                  <td className="px-3 py-6 text-center text-muted" colSpan={5}>
-                    {props.labels.noFile}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <div className="text-sm text-muted">
-            {props.recording.local_protected ? props.labels.protected : props.labels.localStorageStatus}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {props.canManageLocalFiles && canUseLocalFile ? (
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.protectPending}
-                type="button"
-                onClick={() => props.onToggleProtect(props.recording)}
-              >
-                {props.recording.local_protected ? (
-                  <Unlock className="h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <Lock className="h-4 w-4" aria-hidden="true" />
-                )}
-                {props.recording.local_protected ? props.labels.unprotect : props.labels.protect}
-              </button>
+            ))}
+            {props.segments.length === 0 ? (
+              <tr>
+                <td className="px-3 py-6 text-center text-muted" colSpan={6}>
+                  {props.labels.noFile}
+                </td>
+              </tr>
             ) : null}
-            {file && file.file_status === "CLOSED" ? (
-              <a
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent"
-                href={`/api/v1/recording-files/${file.id}/download`}
-              >
-                <Download className="h-4 w-4" aria-hidden="true" />
-                {props.labels.download}
-              </a>
-            ) : null}
-            <button
-              className="inline-flex h-9 items-center justify-center rounded-md bg-ink px-3 text-sm font-medium text-white"
-              type="button"
-              onClick={props.onClose}
-            >
-              {props.labels.close}
-            </button>
-          </div>
-        </div>
-      </section>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -3347,6 +3227,19 @@ function formatBytes(value: number): string {
   return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+function totalRecordingBytes(recording: RecordingItem): number {
+  return (recording.files ?? []).reduce((total, file) => total + file.size_bytes, 0);
+}
+
+function hasShortSegment(recording: RecordingItem): boolean {
+  const segmentDurations = recording.source_segments?.map((segment) => segment.duration_ms).filter((value) => value > 0) ?? [];
+  if (segmentDurations.some((value) => value < 3 * 60 * 1000)) {
+    return true;
+  }
+  const durationMs = recording.duration_ms || recording.files?.[0]?.duration_ms || 0;
+  return durationMs > 0 && durationMs < 3 * 60 * 1000;
+}
+
 function bytesToGB(value: number): number {
   return Math.max(0, Math.round(value / 1024 / 1024 / 1024));
 }
@@ -3360,6 +3253,24 @@ function formatSeconds(value: number): string {
     return "0s";
   }
   return formatDuration(value * 1000);
+}
+
+function formatUploadSourceStatus(value: string, labels: AdminCopy): string {
+  if (value === "READY_TO_UPLOAD") {
+    return labels.uploadSourceReady;
+  }
+  if (value === "MERGE_PENDING") {
+    return labels.uploadSourcePendingMerge;
+  }
+  return value || labels.unknown;
+}
+
+function formatTimeline(value: number): string {
+  const totalSeconds = Math.max(0, Math.round(value / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
 function formatDuration(value: number): string {

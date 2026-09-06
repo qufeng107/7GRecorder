@@ -275,7 +275,7 @@ describe("AdminDashboard", () => {
 
   it("renders recording start time as its own China-time column", async () => {
     mockSuperAdminFetch((path) => {
-      if (path.endsWith("/api/v1/recordings")) {
+      if (path.includes("/api/v1/upload-sources")) {
         return {
           ok: true,
           json: async () => ({
@@ -290,20 +290,27 @@ describe("AdminDashboard", () => {
                 started_at: "2026-09-05T15:55:44Z",
                 completed_at: "2026-09-05T15:57:15Z",
                 duration_ms: 91000,
-                recording_status: "COMPLETED",
-                local_storage_status: "CLOSED",
-                local_protected: false,
-                files: [
+                status: "READY_TO_UPLOAD",
+                output_recording_file_id: 1,
+                total_bytes: 1024,
+                recording_count: 1,
+                file_count: 1,
+                max_gap_seconds: 0,
+                merge_gap_threshold_seconds: 600,
+                segments: [
                   {
                     id: 1,
-                    recording_id: 1,
+                    upload_source_id: 1,
+                    recording_id: 10,
+                    recording_file_id: 1,
+                    sort_order: 0,
+                    source_started_at: "2026-09-05T15:55:44Z",
+                    source_completed_at: "2026-09-05T15:57:15Z",
+                    timeline_start_ms: 0,
+                    timeline_end_ms: 91000,
                     relative_path: "recordings/1741048619/test.flv",
-                    original_name: "test.flv",
-                    kind: "VIDEO",
-                    file_status: "CLOSED",
                     size_bytes: 1024,
-                    duration_ms: 91000,
-                    closed_at: "2026-09-05T15:57:15Z"
+                    duration_ms: 91000
                   }
                 ]
               }
@@ -328,7 +335,7 @@ describe("AdminDashboard", () => {
 
   it("opens recording details and marks short segments", async () => {
     mockSuperAdminFetch((path) => {
-      if (path.endsWith("/api/v1/recordings")) {
+      if (path.includes("/api/v1/upload-sources")) {
         return {
           ok: true,
           json: async () => ({
@@ -343,31 +350,27 @@ describe("AdminDashboard", () => {
                 started_at: "2026-09-05T15:55:44Z",
                 completed_at: "2026-09-05T15:57:15Z",
                 duration_ms: 91000,
-                recording_status: "COMPLETED",
-                local_storage_status: "CLOSED",
-                local_protected: false,
-                files: [
+                status: "READY_TO_UPLOAD",
+                output_recording_file_id: 1,
+                total_bytes: 1024,
+                recording_count: 1,
+                file_count: 1,
+                max_gap_seconds: 0,
+                merge_gap_threshold_seconds: 600,
+                segments: [
                   {
                     id: 1,
+                    upload_source_id: 1,
                     recording_id: 1,
+                    recording_file_id: 1,
+                    sort_order: 0,
+                    source_started_at: "2026-09-05T15:55:44Z",
+                    source_completed_at: "2026-09-05T15:57:15Z",
+                    timeline_start_ms: 0,
+                    timeline_end_ms: 91000,
                     relative_path: "recordings/1741048619/short.flv",
-                    original_name: "short.flv",
-                    kind: "VIDEO",
-                    file_status: "CLOSED",
                     size_bytes: 1024,
-                    duration_ms: 91000,
-                    closed_at: "2026-09-05T15:57:15Z"
-                  },
-                  {
-                    id: 2,
-                    recording_id: 1,
-                    relative_path: "recordings/1741048619/short.xml",
-                    original_name: "short.xml",
-                    kind: "DANMAKU",
-                    file_status: "CLOSED",
-                    size_bytes: 512,
-                    duration_ms: 0,
-                    closed_at: "2026-09-05T15:57:15Z"
+                    duration_ms: 91000
                   }
                 ]
               }
@@ -389,47 +392,69 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("Protected Recordings")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
-    expect(await screen.findByRole("heading", { name: "Recording Details" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Source Segments" })).toBeInTheDocument();
     expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
-    expect(await screen.findByText("recordings/1741048619/short.xml")).toBeInTheDocument();
-    expect((await screen.findAllByText("File Size")).length).toBeGreaterThan(1);
+    expect(await screen.findByText("Timeline")).toBeInTheDocument();
   });
 
-  it("renders recording groups for merge planning", async () => {
+  it("renders multi-segment upload sources for merge planning", async () => {
     mockSuperAdminFetch((path) => {
-      if (path.includes("/api/v1/recording-groups")) {
+      if (path.includes("/api/v1/upload-sources")) {
         return {
           ok: true,
           json: async () => ({
             items: [
               {
-                id: "1:2026-09-06T10:00:00Z:2026-09-06T10:08:00Z",
+                id: 1,
                 recording_profile_id: 1,
                 profile_name: "7G",
                 room_id: "1741048619",
                 streamer_name: "streamer",
+                title: "merged source",
                 started_at: "2026-09-06T10:00:00Z",
                 completed_at: "2026-09-06T10:08:00Z",
+                duration_ms: 360000,
+                status: "MERGE_PENDING",
+                total_bytes: 5242880,
                 recording_count: 2,
                 file_count: 2,
-                total_bytes: 5242880,
-                total_duration_ms: 360000,
                 max_gap_seconds: 90,
-                has_short_segment: true,
-                ready_for_merge: true,
-                recordings: []
+                merge_gap_threshold_seconds: 600,
+                segments: [
+                  {
+                    id: 1,
+                    upload_source_id: 1,
+                    recording_id: 1,
+                    recording_file_id: 1,
+                    sort_order: 0,
+                    source_started_at: "2026-09-06T10:00:00Z",
+                    source_completed_at: "2026-09-06T10:02:00Z",
+                    timeline_start_ms: 0,
+                    timeline_end_ms: 120000,
+                    relative_path: "recordings/1741048619/part1.flv",
+                    size_bytes: 1048576,
+                    duration_ms: 120000
+                  },
+                  {
+                    id: 2,
+                    upload_source_id: 1,
+                    recording_id: 2,
+                    recording_file_id: 2,
+                    sort_order: 1,
+                    source_started_at: "2026-09-06T10:03:30Z",
+                    source_completed_at: "2026-09-06T10:08:00Z",
+                    timeline_start_ms: 120000,
+                    timeline_end_ms: 390000,
+                    relative_path: "recordings/1741048619/part2.flv",
+                    size_bytes: 4194304,
+                    duration_ms: 270000
+                  }
+                ]
               }
             ],
             total: 1,
-            max_gap_seconds: 120,
-            short_threshold_seconds: 180
+            merge_gap_threshold_seconds: 600
           })
-        } as Response;
-      }
-      if (path.endsWith("/api/v1/recordings")) {
-        return {
-          ok: true,
-          json: async () => ({ items: [], total: 0 })
         } as Response;
       }
       return undefined;
@@ -439,10 +464,11 @@ describe("AdminDashboard", () => {
     await switchToEnglish();
 
     fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
-    expect(await screen.findByText("Recording Groups")).toBeInTheDocument();
-    expect(await screen.findByText("Merge Ready")).toBeInTheDocument();
-    expect(await screen.findByText("Includes short segment")).toBeInTheDocument();
-    expect(await screen.findByText("1m 30s")).toBeInTheDocument();
+    expect(await screen.findByText("Upload Sources")).toBeInTheDocument();
+    expect(await screen.findByText("Pending merge")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    expect(await screen.findByText("recordings/1741048619/part1.flv")).toBeInTheDocument();
+    expect(await screen.findByText("recordings/1741048619/part2.flv")).toBeInTheDocument();
   });
 
   it("runs local cleanup from the system storage page after confirmation", async () => {
