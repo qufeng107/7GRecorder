@@ -114,6 +114,16 @@ docker compose --env-file /etc/7grecorder/app.env run --rm --no-deps 7grecorder 
   --password 'replace-with-a-long-random-password'
 ```
 
+重置已有账号密码：
+
+```bash
+cd /opt/7grecorder/deploy
+GIT_SHA="$(cat /opt/7grecorder/current-release)" \
+docker compose --env-file /etc/7grecorder/app.env run --rm --no-deps 7grecorder admin reset-password \
+  --username admin \
+  --password 'replace-with-a-new-long-random-password'
+```
+
 建议同一个 binary 最终提供少量运维命令：
 
 ```text
