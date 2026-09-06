@@ -355,6 +355,17 @@ describe("AdminDashboard", () => {
                     size_bytes: 1024,
                     duration_ms: 91000,
                     closed_at: "2026-09-05T15:57:15Z"
+                  },
+                  {
+                    id: 2,
+                    recording_id: 1,
+                    relative_path: "recordings/1741048619/short.xml",
+                    original_name: "short.xml",
+                    kind: "DANMAKU",
+                    file_status: "CLOSED",
+                    size_bytes: 512,
+                    duration_ms: 0,
+                    closed_at: "2026-09-05T15:57:15Z"
                   }
                 ]
               }
@@ -374,7 +385,8 @@ describe("AdminDashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(await screen.findByRole("heading", { name: "Recording Details" })).toBeInTheDocument();
-    expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
+    expect((await screen.findAllByText("recordings/1741048619/short.flv")).length).toBeGreaterThan(1);
+    expect(await screen.findByText("recordings/1741048619/short.xml")).toBeInTheDocument();
     expect(await screen.findByText("File Size")).toBeInTheDocument();
   });
 
