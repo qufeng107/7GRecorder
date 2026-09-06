@@ -10,7 +10,11 @@ export function PublicStreamer() {
         <Radio className="h-7 w-7 text-accent" aria-hidden="true" />
         <h1 className="text-3xl font-semibold tracking-normal">@{slug}</h1>
         <p className="text-sm leading-6 text-muted">
-          公开主播页边界已预留；第一版只展示明确公开的录播归档与已确认歌曲，不暴露本地或 COS 原始下载地址。
+          公开主播页已预留。第一版只展示明确公开的录播归档与已确认歌曲，不暴露本地或 COS 原始下载地址。
+        </p>
+        <p className="text-sm leading-6 text-muted">
+          Public streamer pages are reserved. The first version will only show explicitly public recording archives
+          and confirmed songs, without exposing local or COS source download URLs.
         </p>
       </div>
     </main>

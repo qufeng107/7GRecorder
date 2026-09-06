@@ -15,6 +15,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Settings,
   ShieldCheck,
   Unlock,
@@ -199,6 +200,10 @@ type ProfileForm = {
 };
 
 type AdminPage = "overview" | "profiles" | "recordings" | "system" | "accounts" | "me";
+type Language = "zh" | "en";
+type RecordingSortKey = "started_desc" | "started_asc" | "duration_desc" | "size_desc";
+type ProfileSortKey = "name_asc" | "room_asc";
+type AccountSortKey = "username_asc" | "role_asc";
 
 type AccountForm = {
   username: string;
@@ -224,14 +229,6 @@ const emptyProfileForm: ProfileForm = {
   finalize_grace_period_sec: 300
 };
 
-const statusRows = [
-  { label: "Recording Core", value: "Profiles ready", icon: Activity },
-  { label: "SQLite", value: "Migrated on deploy", icon: Database },
-  { label: "Local Storage", value: "Always enabled", icon: HardDrive },
-  { label: "Optional Modules", value: "Disabled until configured", icon: Archive },
-  { label: "Deployment", value: "main-only production", icon: ShieldCheck }
-];
-
 const defaultManagerPolicy: ManagerPolicy = {
   can_edit_recording_profile: true,
   can_edit_bilibili_module: true,
@@ -246,6 +243,311 @@ const emptyAccountForm: AccountForm = {
   enabled: true,
   policy: defaultManagerPolicy
 };
+
+const uiCopy = {
+  zh: {
+    appName: "7GRecorder 管理后台",
+    title: "录播控制台",
+    navLabel: "管理分区",
+    nav: {
+      overview: "总览",
+      profiles: "录制配置",
+      recordings: "录像文件",
+      accounts: "账号管理",
+      system: "系统设置"
+    },
+    statusRows: [
+      { label: "录制核心", value: "配置已就绪", icon: Activity },
+      { label: "SQLite", value: "部署时自动迁移", icon: Database },
+      { label: "本地存储", value: "始终启用", icon: HardDrive },
+      { label: "可选模块", value: "配置后启用", icon: Archive },
+      { label: "部署", value: "仅 main 分支发布生产", icon: ShieldCheck }
+    ],
+    language: "语言",
+    chinese: "中文",
+    english: "English",
+    myAccount: "我的账号",
+    signOut: "退出登录",
+    signIn: "登录",
+    session: "会话",
+    username: "用户名",
+    password: "密码",
+    role: "角色",
+    status: "状态",
+    enabled: "启用",
+    disabled: "停用",
+    allowed: "允许",
+    blocked: "禁止",
+    access: "权限",
+    systemSettings: "系统设置",
+    profiles: "录制配置",
+    allOwners: "全部账号",
+    policyUnavailable: "账号权限暂不可用。",
+    loginFailed: "登录失败，请检查用户名和密码。",
+    newProfile: "新建配置",
+    editProfile: "编辑配置",
+    archivedProfile: "已归档配置",
+    owner: "所属账号",
+    currentOwner: "当前所属账号",
+    name: "名称",
+    roomId: "直播间 ID",
+    streamer: "主播",
+    streamerUid: "主播 UID",
+    timezone: "时区",
+    publicSlug: "公开地址",
+    quality: "画质",
+    segmentSeconds: "分段秒数",
+    finalizeGraceSeconds: "收尾宽限秒数",
+    autoRecord: "自动录制",
+    recordDanmaku: "录制弹幕",
+    publicPage: "公开页面",
+    save: "保存",
+    create: "创建",
+    cancel: "取消",
+    close: "关闭",
+    restoreProfile: "恢复配置",
+    archiveProfile: "归档配置",
+    confirmArchive: "确认归档",
+    profileSaveFailed: "配置保存失败，请检查直播间是否重复以及必填项。",
+    recordingProfiles: "录制配置",
+    total: (count: number) => `共 ${count} 条`,
+    new: "新建",
+    ownerColumn: "所属账号",
+    room: "直播间",
+    runtime: "运行",
+    sync: "同步",
+    actions: "操作",
+    edit: "编辑",
+    archived: "已归档",
+    noProfiles: "暂无录制配置。",
+    newManager: "新建管理员",
+    initialPassword: "初始密码",
+    accountCreationFailed: "账号创建失败，请检查用户名和密码。",
+    accounts: "账号",
+    account: "账号",
+    noAccounts: "暂无账号。",
+    disable: "停用",
+    enable: "启用",
+    editProfiles: "编辑录制配置",
+    bilibiliConfig: "Bilibili 配置",
+    cosConfig: "COS 配置",
+    neteaseConfig: "网易云配置",
+    localFiles: "本地文件",
+    localStorage: "本地存储",
+    checkingStorage: "正在检查存储。",
+    indexedVideos: "已索引视频",
+    indexedSize: "已索引大小",
+    diskAvailable: "磁盘可用",
+    protected: "已保护",
+    health: "健康状态",
+    needReclaim: "需回收",
+    previewReclaimable: "预估可回收",
+    diskSummary: (used: number, total: string, completed: number, configured: boolean) =>
+      `磁盘已用 ${used}%，总计 ${total}。已完成录像 ${completed} 条。设置：${configured ? "已配置" : "使用默认值"}。`,
+    storageSettings: "存储设置",
+    maxRecordingGB: "录像上限 GB",
+    minFreeGB: "最低空闲 GB",
+    emergencyFreeGB: "紧急保留 GB",
+    cleanupTargetPercent: "清理目标 %",
+    storageSaveFailed: "存储设置保存失败，请检查阈值。",
+    cleanupPreview: "清理预览",
+    oldestUnprotected: "最早的未保护已完成录像",
+    recording: "录像",
+    profile: "配置",
+    closed: "结束时间",
+    files: "文件数",
+    reclaimable: "可回收",
+    untitled: "未命名",
+    noCleanupCandidates: "暂无可清理候选。",
+    recordings: "录像文件",
+    scan: "扫描",
+    scanResult: (imported: number, updated: number, skipped: number) =>
+      `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
+    scanFailed: "扫描失败，请查看服务器日志。",
+    startTime: "录制时间",
+    completedAt: "完成时间",
+    duration: "时长",
+    size: "大小",
+    path: "路径",
+    fileStatus: "文件状态",
+    noFile: "无文件",
+    unprotect: "取消保护",
+    protect: "保护",
+    download: "下载",
+    loadingRecordings: "正在加载录像。",
+    noRecordings: "暂无已索引录像。",
+    api: "API",
+    release: "版本",
+    checking: "检查中",
+    unknown: "未知",
+    chinaTime: "中国时间",
+    search: "搜索",
+    searchPlaceholder: "搜索名称、直播间、路径",
+    sortBy: "排序",
+    sortNewest: "录制时间：新到旧",
+    sortOldest: "录制时间：旧到新",
+    sortDuration: "时长：长到短",
+    sortSize: "大小：大到小",
+    sortName: "名称：A 到 Z",
+    sortRoom: "直播间：小到大",
+    sortUsername: "用户名：A 到 Z",
+    sortRole: "角色：A 到 Z",
+    emptyFiltered: "没有匹配结果。"
+  },
+  en: {
+    appName: "7GRecorder Admin",
+    title: "Recorder Console",
+    navLabel: "Admin sections",
+    nav: {
+      overview: "Overview",
+      profiles: "Profiles",
+      recordings: "Recordings",
+      accounts: "Accounts",
+      system: "System Settings"
+    },
+    statusRows: [
+      { label: "Recording Core", value: "Profiles ready", icon: Activity },
+      { label: "SQLite", value: "Migrated on deploy", icon: Database },
+      { label: "Local Storage", value: "Always enabled", icon: HardDrive },
+      { label: "Optional Modules", value: "Disabled until configured", icon: Archive },
+      { label: "Deployment", value: "main-only production", icon: ShieldCheck }
+    ],
+    language: "Language",
+    chinese: "中文",
+    english: "English",
+    myAccount: "My Account",
+    signOut: "Sign out",
+    signIn: "Sign in",
+    session: "Session",
+    username: "Username",
+    password: "Password",
+    role: "Role",
+    status: "Status",
+    enabled: "ENABLED",
+    disabled: "DISABLED",
+    allowed: "Allowed",
+    blocked: "Blocked",
+    access: "Access",
+    systemSettings: "System Settings",
+    profiles: "Profiles",
+    allOwners: "All owners",
+    policyUnavailable: "Access policy is not available.",
+    loginFailed: "Login failed. Check the credentials.",
+    newProfile: "New Profile",
+    editProfile: "Edit Profile",
+    archivedProfile: "Archived profile",
+    owner: "Owner",
+    currentOwner: "Current owner",
+    name: "Name",
+    roomId: "Room ID",
+    streamer: "Streamer",
+    streamerUid: "Streamer UID",
+    timezone: "Timezone",
+    publicSlug: "Public Slug",
+    quality: "Quality",
+    segmentSeconds: "Segment Seconds",
+    finalizeGraceSeconds: "Finalize Grace Seconds",
+    autoRecord: "Auto Record",
+    recordDanmaku: "Record Danmaku",
+    publicPage: "Public Page",
+    save: "Save",
+    create: "Create",
+    cancel: "Cancel",
+    close: "Close",
+    restoreProfile: "Restore profile",
+    archiveProfile: "Archive profile",
+    confirmArchive: "Confirm archive",
+    profileSaveFailed: "Profile save failed. Check unique room and required fields.",
+    recordingProfiles: "Recording Profiles",
+    total: (count: number) => `${count} total`,
+    new: "New",
+    ownerColumn: "Owner",
+    room: "Room",
+    runtime: "Runtime",
+    sync: "Sync",
+    actions: "Actions",
+    edit: "Edit",
+    archived: "Archived",
+    noProfiles: "No profiles yet.",
+    newManager: "New Manager",
+    initialPassword: "Initial Password",
+    accountCreationFailed: "Account creation failed. Check username and password.",
+    accounts: "Accounts",
+    account: "Account",
+    noAccounts: "No accounts yet.",
+    disable: "Disable",
+    enable: "Enable",
+    editProfiles: "Edit profiles",
+    bilibiliConfig: "Bilibili config",
+    cosConfig: "COS config",
+    neteaseConfig: "NetEase config",
+    localFiles: "Local files",
+    localStorage: "Local Storage",
+    checkingStorage: "Checking storage.",
+    indexedVideos: "Indexed Videos",
+    indexedSize: "Indexed Size",
+    diskAvailable: "Disk Available",
+    protected: "Protected",
+    health: "Health",
+    needReclaim: "Need Reclaim",
+    previewReclaimable: "Preview Reclaimable",
+    diskSummary: (used: number, total: string, completed: number, configured: boolean) =>
+      `Disk used: ${used}% of ${total}. Completed recordings: ${completed}. Settings: ${
+        configured ? "configured" : "derived default"
+      }.`,
+    storageSettings: "Storage Settings",
+    maxRecordingGB: "Max Recording GB",
+    minFreeGB: "Min Free GB",
+    emergencyFreeGB: "Emergency Free GB",
+    cleanupTargetPercent: "Cleanup Target %",
+    storageSaveFailed: "Storage settings save failed. Check the thresholds.",
+    cleanupPreview: "Cleanup Preview",
+    oldestUnprotected: "Oldest unprotected completed recordings",
+    recording: "Recording",
+    profile: "Profile",
+    closed: "Closed",
+    files: "Files",
+    reclaimable: "Reclaimable",
+    untitled: "Untitled",
+    noCleanupCandidates: "No cleanup candidates.",
+    recordings: "Recordings",
+    scan: "Scan",
+    scanResult: (imported: number, updated: number, skipped: number) =>
+      `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
+    scanFailed: "Scan failed. Check server logs.",
+    startTime: "Recording Time",
+    completedAt: "Completed",
+    duration: "Duration",
+    size: "Size",
+    path: "Path",
+    fileStatus: "File Status",
+    noFile: "NO_FILE",
+    unprotect: "Unprotect",
+    protect: "Protect",
+    download: "Download",
+    loadingRecordings: "Loading recordings.",
+    noRecordings: "No recordings indexed yet.",
+    api: "API",
+    release: "Release",
+    checking: "checking",
+    unknown: "unknown",
+    chinaTime: "China Time",
+    search: "Search",
+    searchPlaceholder: "Search name, room, or path",
+    sortBy: "Sort by",
+    sortNewest: "Recording time: newest",
+    sortOldest: "Recording time: oldest",
+    sortDuration: "Duration: longest",
+    sortSize: "Size: largest",
+    sortName: "Name: A to Z",
+    sortRoom: "Room: low to high",
+    sortUsername: "Username: A to Z",
+    sortRole: "Role: A to Z",
+    emptyFiltered: "No matching results."
+  }
+} as const;
+
+type AdminCopy = (typeof uiCopy)[Language];
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -301,11 +603,86 @@ function profilePayload(form: ProfileForm) {
   };
 }
 
+function includesSearch(value: string | number | undefined, search: string): boolean {
+  return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase());
+}
+
+function filterProfiles(items: RecordingProfile[], search: string, sort: ProfileSortKey): RecordingProfile[] {
+  const filtered = items.filter((profile) => {
+    if (!search.trim()) {
+      return true;
+    }
+    return (
+      includesSearch(profile.name, search) ||
+      includesSearch(profile.room_id, search) ||
+      includesSearch(profile.streamer_name, search) ||
+      includesSearch(profile.owner_username, search)
+    );
+  });
+  return [...filtered].sort((left, right) => {
+    if (sort === "room_asc") {
+      return left.room_id.localeCompare(right.room_id, "zh-CN", { numeric: true });
+    }
+    return left.name.localeCompare(right.name, "zh-CN");
+  });
+}
+
+function filterAccounts(items: Account[], search: string, sort: AccountSortKey): Account[] {
+  const filtered = items.filter((account) => {
+    if (!search.trim()) {
+      return true;
+    }
+    return includesSearch(account.username, search) || includesSearch(account.role, search);
+  });
+  return [...filtered].sort((left, right) => {
+    if (sort === "role_asc") {
+      return left.role.localeCompare(right.role) || left.username.localeCompare(right.username, "zh-CN");
+    }
+    return left.username.localeCompare(right.username, "zh-CN");
+  });
+}
+
+function filterRecordings(items: RecordingItem[], search: string, sort: RecordingSortKey): RecordingItem[] {
+  const filtered = items.filter((recording) => {
+    if (!search.trim()) {
+      return true;
+    }
+    const firstFile = recording.files?.[0];
+    return (
+      includesSearch(recording.title, search) ||
+      includesSearch(recording.profile_name, search) ||
+      includesSearch(recording.room_id, search) ||
+      includesSearch(recording.streamer_name, search) ||
+      includesSearch(firstFile?.relative_path, search) ||
+      includesSearch(firstFile?.original_name, search)
+    );
+  });
+  return [...filtered].sort((left, right) => {
+    if (sort === "started_asc") {
+      return Date.parse(left.started_at) - Date.parse(right.started_at);
+    }
+    if (sort === "duration_desc") {
+      return right.duration_ms - left.duration_ms;
+    }
+    if (sort === "size_desc") {
+      return (right.files?.[0]?.size_bytes ?? 0) - (left.files?.[0]?.size_bytes ?? 0);
+    }
+    return Date.parse(right.started_at) - Date.parse(left.started_at);
+  });
+}
+
 export function AdminDashboard() {
   const queryClient = useQueryClient();
+  const [language, setLanguage] = useState<Language>("zh");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [activePage, setActivePage] = useState<AdminPage>("overview");
+  const [profileSearch, setProfileSearch] = useState("");
+  const [profileSort, setProfileSort] = useState<ProfileSortKey>("name_asc");
+  const [recordingSearch, setRecordingSearch] = useState("");
+  const [recordingSort, setRecordingSort] = useState<RecordingSortKey>("started_desc");
+  const [accountSearch, setAccountSearch] = useState("");
+  const [accountSort, setAccountSort] = useState<AccountSortKey>("username_asc");
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
@@ -328,6 +705,7 @@ export function AdminDashboard() {
   const user = meQuery.data?.user;
   const ownPolicy = meQuery.data?.policy;
   const canManageSystemSettings = user?.role === "SUPER_ADMIN";
+  const ui = uiCopy[language];
 
   const healthQuery = useQuery({
     queryKey: ["system-health"],
@@ -383,6 +761,9 @@ export function AdminDashboard() {
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
   const accounts = accountsQuery.data?.items ?? [];
   const accountTotal = accountsQuery.data?.total ?? accounts.length;
+  const visibleProfiles = filterProfiles(profiles, profileSearch, profileSort);
+  const visibleRecordings = filterRecordings(recordings, recordingSearch, recordingSort);
+  const visibleAccounts = filterAccounts(accounts, accountSearch, accountSort);
 
   useEffect(() => {
     if (activePage === "system" && user && !canManageSystemSettings) {
@@ -612,22 +993,28 @@ export function AdminDashboard() {
         <header className="border-b border-border pb-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-sm font-medium text-accent">7GRecorder Admin</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-normal">Recorder Console</h1>
+              <p className="text-sm font-medium text-accent">{ui.appName}</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-normal">{ui.title}</h1>
             </div>
             {user ? (
               <AccountMenu
+                language={language}
+                labels={ui}
                 onAccount={() => setActivePage("me")}
                 logoutPending={logoutMutation.isPending}
                 user={user}
                 onLogout={() => logoutMutation.mutate()}
+                onLanguageChange={setLanguage}
               />
-            ) : null}
+            ) : (
+              <LanguageControl language={language} labels={ui} onLanguageChange={setLanguage} />
+            )}
           </div>
           {user ? (
             <AdminNav
               activePage={activePage}
               canManageSystemSettings={Boolean(canManageSystemSettings)}
+              labels={ui}
               onChange={setActivePage}
             />
           ) : null}
@@ -636,6 +1023,7 @@ export function AdminDashboard() {
         {user ? null : (
           <SessionPanel
             loginError={loginMutation.isError}
+            labels={ui}
             logoutPending={logoutMutation.isPending}
             password={password}
             username={username}
@@ -649,11 +1037,12 @@ export function AdminDashboard() {
 
         {user ? (
           <>
-            {activePage === "overview" ? <OverviewPanel statusRows={statusRows} /> : null}
+            {activePage === "overview" ? <OverviewPanel statusRows={ui.statusRows} /> : null}
 
             {activePage === "me" ? (
               <MyAccountPanel
                 canManageSystemSettings={Boolean(canManageSystemSettings)}
+                labels={ui}
                 policy={ownPolicy}
                 user={user}
               />
@@ -661,9 +1050,13 @@ export function AdminDashboard() {
 
             {activePage === "profiles" ? (
               <ProfileListPanel
-                profiles={profiles}
+                labels={ui}
+                profiles={visibleProfiles}
+                search={profileSearch}
                 selectedProfileId={selectedProfileId}
+                sort={profileSort}
                 total={profileTotal}
+                visibleTotal={visibleProfiles.length}
                 showOwner={Boolean(canManageSystemSettings)}
                 onCreate={() => {
                   setSelectedProfileId(null);
@@ -675,21 +1068,29 @@ export function AdminDashboard() {
                   setProfileForm(profileToForm(profile));
                   setProfileEditorOpen(true);
                 }}
+                onSearchChange={setProfileSearch}
+                onSortChange={setProfileSort}
               />
             ) : null}
 
             {activePage === "accounts" && canManageSystemSettings ? (
               <AccountsPanel
                 accountForm={accountForm}
-                accounts={accounts}
+                accounts={visibleAccounts}
                 createError={createAccountMutation.isError}
                 createPending={createAccountMutation.isPending}
                 currentUserId={user.id}
+                labels={ui}
                 policyPending={updatePolicyMutation.isPending}
+                search={accountSearch}
+                sort={accountSort}
                 total={accountTotal}
+                visibleTotal={visibleAccounts.length}
                 updatePending={updateAccountMutation.isPending}
                 onAccountFormChange={setAccountForm}
                 onCreate={onAccountSubmit}
+                onSearchChange={setAccountSearch}
+                onSortChange={setAccountSort}
                 onToggleEnabled={(account) =>
                   updateAccountMutation.mutate({ accountId: account.id, enabled: !account.enabled })
                 }
@@ -705,6 +1106,7 @@ export function AdminDashboard() {
                 form={profileForm}
                 isEditing={Boolean(selectedProfileId)}
                 isSaving={saveProfileMutation.isPending}
+                labels={ui}
                 profile={selectedProfile}
                 restorePending={restoreProfileMutation.isPending}
                 saveError={saveProfileMutation.isError}
@@ -729,6 +1131,7 @@ export function AdminDashboard() {
                 form={storageForm}
                 isLoading={localStorageQuery.isLoading}
                 isSaving={saveStorageSettingsMutation.isPending}
+                labels={ui}
                 saveError={saveStorageSettingsMutation.isError}
                 status={localStorageQuery.data}
                 onFormChange={setStorageForm}
@@ -739,13 +1142,19 @@ export function AdminDashboard() {
             {activePage === "recordings" ? (
               <RecordingsPanel
                 isLoading={recordingsQuery.isLoading}
+                labels={ui}
                 protectPending={protectRecordingMutation.isPending}
                 reconcileError={reconcileMutation.isError}
                 reconcilePending={reconcileMutation.isPending}
                 reconcileResult={reconcileMutation.data}
-                recordings={recordings}
+                recordings={visibleRecordings}
+                search={recordingSearch}
+                sort={recordingSort}
                 total={recordingTotal}
+                visibleTotal={visibleRecordings.length}
                 onReconcile={() => reconcileMutation.mutate()}
+                onSearchChange={setRecordingSearch}
+                onSortChange={setRecordingSort}
                 onToggleProtect={(recording) =>
                   protectRecordingMutation.mutate({ id: recording.id, protected: !recording.local_protected })
                 }
@@ -755,8 +1164,8 @@ export function AdminDashboard() {
         ) : null}
 
         <section className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-4 text-sm text-muted">
-          <span>API: {healthQuery.data?.status ?? "checking"}</span>
-          <span>Release: {healthQuery.data?.release_sha ?? "unknown"}</span>
+          <span>{ui.api}: {healthQuery.data?.status ?? ui.checking}</span>
+          <span>{ui.release}: {healthQuery.data?.release_sha ?? ui.unknown}</span>
         </section>
       </div>
     </main>
@@ -766,21 +1175,22 @@ export function AdminDashboard() {
 function AdminNav(props: {
   activePage: AdminPage;
   canManageSystemSettings: boolean;
+  labels: AdminCopy;
   onChange: (page: AdminPage) => void;
 }) {
   const items: Array<{ page: AdminPage; label: string; icon: typeof Activity }> = [
-    { page: "overview", label: "Overview", icon: LayoutDashboard },
-    { page: "profiles", label: "Profiles", icon: Activity },
-    { page: "recordings", label: "Recordings", icon: FileVideo }
+    { page: "overview", label: props.labels.nav.overview, icon: LayoutDashboard },
+    { page: "profiles", label: props.labels.nav.profiles, icon: Activity },
+    { page: "recordings", label: props.labels.nav.recordings, icon: FileVideo }
   ];
 
   if (props.canManageSystemSettings) {
-    items.push({ page: "accounts", label: "Accounts", icon: Users });
-    items.push({ page: "system", label: "System Settings", icon: Settings });
+    items.push({ page: "accounts", label: props.labels.nav.accounts, icon: Users });
+    items.push({ page: "system", label: props.labels.nav.system, icon: Settings });
   }
 
   return (
-    <nav className="mt-5 flex flex-wrap gap-2" aria-label="Admin sections">
+    <nav className="mt-5 flex flex-wrap gap-2" aria-label={props.labels.navLabel}>
       {items.map(({ page, label, icon: Icon }) => {
         const isActive = props.activePage === page;
         return (
@@ -803,7 +1213,15 @@ function AdminNav(props: {
   );
 }
 
-function AccountMenu(props: { logoutPending: boolean; user: User; onAccount: () => void; onLogout: () => void }) {
+function AccountMenu(props: {
+  language: Language;
+  labels: AdminCopy;
+  logoutPending: boolean;
+  user: User;
+  onAccount: () => void;
+  onLanguageChange: (language: Language) => void;
+  onLogout: () => void;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-panel px-3 py-2 shadow-sm">
       <UserCircle className="h-5 w-5 text-accent" aria-hidden="true" />
@@ -811,13 +1229,14 @@ function AccountMenu(props: { logoutPending: boolean; user: User; onAccount: () 
         <p className="truncate text-sm font-semibold">{props.user.username}</p>
         <p className="text-xs text-muted">{props.user.role}</p>
       </div>
+      <LanguageControl language={props.language} labels={props.labels} onLanguageChange={props.onLanguageChange} />
       <button
         className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent"
         type="button"
         onClick={props.onAccount}
       >
         <UserCircle className="h-4 w-4" aria-hidden="true" />
-        My Account
+        {props.labels.myAccount}
       </button>
       <button
         className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-medium text-white disabled:opacity-60"
@@ -826,64 +1245,85 @@ function AccountMenu(props: { logoutPending: boolean; user: User; onAccount: () 
         onClick={props.onLogout}
       >
         <LogOut className="h-4 w-4" aria-hidden="true" />
-        Sign out
+        {props.labels.signOut}
       </button>
     </div>
   );
 }
 
+function LanguageControl(props: {
+  language: Language;
+  labels: AdminCopy;
+  onLanguageChange: (language: Language) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-xs font-medium text-muted shadow-sm">
+      {props.labels.language}
+      <select
+        className="h-9 rounded-md border border-border bg-white px-2 text-sm font-medium text-ink outline-none focus:border-accent"
+        value={props.language}
+        onChange={(event) => props.onLanguageChange(event.target.value as Language)}
+      >
+        <option value="zh">{props.labels.chinese}</option>
+        <option value="en">{props.labels.english}</option>
+      </select>
+    </label>
+  );
+}
+
 function MyAccountPanel(props: {
   canManageSystemSettings: boolean;
+  labels: AdminCopy;
   policy?: ManagerPolicy;
   user: User;
 }) {
   return (
     <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
       <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">My Account</h2>
+        <h2 className="text-sm font-semibold">{props.labels.myAccount}</h2>
         <div className="mt-4 grid gap-3">
-          <Metric label="Username" value={props.user.username} />
-          <Metric label="Role" value={props.user.role} />
-          <Metric label="Status" value={props.user.enabled ? "ENABLED" : "DISABLED"} />
+          <Metric label={props.labels.username} value={props.user.username} />
+          <Metric label={props.labels.role} value={props.user.role} />
+          <Metric label={props.labels.status} value={props.user.enabled ? props.labels.enabled : props.labels.disabled} />
         </div>
       </section>
 
       <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">Access</h2>
+        <h2 className="text-sm font-semibold">{props.labels.access}</h2>
         {props.canManageSystemSettings ? (
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <Metric label="System Settings" value="Allowed" />
-            <Metric label="Accounts" value="Allowed" />
-            <Metric label="Profiles" value="All owners" />
+            <Metric label={props.labels.systemSettings} value={props.labels.allowed} />
+            <Metric label={props.labels.accounts} value={props.labels.allowed} />
+            <Metric label={props.labels.profiles} value={props.labels.allOwners} />
           </div>
         ) : props.policy ? (
           <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            <PermissionBadge label="Recording Profiles" enabled={props.policy.can_edit_recording_profile} />
-            <PermissionBadge label="Bilibili Config" enabled={props.policy.can_edit_bilibili_module} />
-            <PermissionBadge label="COS Config" enabled={props.policy.can_edit_cos_module} />
-            <PermissionBadge label="NetEase Config" enabled={props.policy.can_edit_netease_module} />
-            <PermissionBadge label="Local Files" enabled={props.policy.can_manage_local_files} />
+            <PermissionBadge labels={props.labels} label={props.labels.recordingProfiles} enabled={props.policy.can_edit_recording_profile} />
+            <PermissionBadge labels={props.labels} label={props.labels.bilibiliConfig} enabled={props.policy.can_edit_bilibili_module} />
+            <PermissionBadge labels={props.labels} label={props.labels.cosConfig} enabled={props.policy.can_edit_cos_module} />
+            <PermissionBadge labels={props.labels} label={props.labels.neteaseConfig} enabled={props.policy.can_edit_netease_module} />
+            <PermissionBadge labels={props.labels} label={props.labels.localFiles} enabled={props.policy.can_manage_local_files} />
           </div>
         ) : (
-          <p className="mt-4 text-sm text-muted">Access policy is not available.</p>
+          <p className="mt-4 text-sm text-muted">{props.labels.policyUnavailable}</p>
         )}
       </section>
     </section>
   );
 }
 
-function PermissionBadge(props: { enabled: boolean; label: string }) {
+function PermissionBadge(props: { enabled: boolean; label: string; labels: AdminCopy }) {
   return (
     <div className="rounded-md border border-border bg-white px-3 py-2">
       <p className="text-xs uppercase text-muted">{props.label}</p>
       <p className={`mt-1 text-sm font-semibold ${props.enabled ? "text-accent" : "text-muted"}`}>
-        {props.enabled ? "Allowed" : "Blocked"}
+        {props.enabled ? props.labels.allowed : props.labels.blocked}
       </p>
     </div>
   );
 }
 
-function OverviewPanel(props: { statusRows: typeof statusRows }) {
+function OverviewPanel(props: { statusRows: AdminCopy["statusRows"] }) {
   return (
     <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {props.statusRows.map(({ label, value, icon: Icon }) => (
@@ -902,6 +1342,7 @@ function OverviewPanel(props: { statusRows: typeof statusRows }) {
 }
 
 function SessionPanel(props: {
+  labels: AdminCopy;
   loginError: boolean;
   logoutPending: boolean;
   password: string;
@@ -915,7 +1356,7 @@ function SessionPanel(props: {
   if (props.user) {
     return (
       <aside className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">Session</h2>
+        <h2 className="text-sm font-semibold">{props.labels.session}</h2>
         <div className="mt-4 flex flex-col gap-4">
           <div>
             <p className="text-lg font-semibold">{props.user.username}</p>
@@ -928,7 +1369,7 @@ function SessionPanel(props: {
             onClick={props.onLogout}
           >
             <LogOut className="h-4 w-4" aria-hidden="true" />
-            Sign out
+            {props.labels.signOut}
           </button>
         </div>
       </aside>
@@ -937,27 +1378,27 @@ function SessionPanel(props: {
 
   return (
     <aside className="rounded-md border border-border bg-panel p-4 shadow-sm">
-      <h2 className="text-sm font-semibold">Session</h2>
+      <h2 className="text-sm font-semibold">{props.labels.session}</h2>
       <form className="mt-4 flex flex-col gap-3" onSubmit={props.onLoginSubmit}>
         <TextField
           autoComplete="username"
-          label="Username"
+          label={props.labels.username}
           value={props.username}
           onChange={props.onUsernameChange}
         />
         <TextField
           autoComplete="current-password"
-          label="Password"
+          label={props.labels.password}
           type="password"
           value={props.password}
           onChange={props.onPasswordChange}
         />
         {props.loginError ? (
-          <p className="text-sm text-red-700">Login failed. Check the credentials.</p>
+          <p className="text-sm text-red-700">{props.labels.loginFailed}</p>
         ) : null}
         <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white">
           <LogIn className="h-4 w-4" aria-hidden="true" />
-          Sign in
+          {props.labels.signIn}
         </button>
       </form>
     </aside>
@@ -969,6 +1410,7 @@ function ProfileEditorDialog(props: {
   form: ProfileForm;
   isEditing: boolean;
   isSaving: boolean;
+  labels: AdminCopy;
   ownerAccounts: Account[];
   profile?: RecordingProfile;
   restorePending: boolean;
@@ -997,8 +1439,8 @@ function ProfileEditorDialog(props: {
       >
         <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
           <div>
-            <h2 className="text-base font-semibold">{props.isEditing ? "Edit Profile" : "New Profile"}</h2>
-            {isArchived ? <p className="mt-1 text-xs font-medium text-muted">Archived profile</p> : null}
+            <h2 className="text-base font-semibold">{props.isEditing ? props.labels.editProfile : props.labels.newProfile}</h2>
+            {isArchived ? <p className="mt-1 text-xs font-medium text-muted">{props.labels.archivedProfile}</p> : null}
           </div>
           <button
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
@@ -1006,20 +1448,20 @@ function ProfileEditorDialog(props: {
             onClick={props.onCancel}
           >
             <X className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{props.labels.close}</span>
           </button>
         </div>
 
         <div className="mt-4 grid gap-3">
           {props.showOwner ? (
             <label className="flex flex-col gap-1 text-sm font-medium">
-              Owner
+              {props.labels.owner}
               <select
                 className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
                 value={props.form.owner_user_id}
                 onChange={(event) => update("owner_user_id", event.target.value)}
               >
-                {selectedOwnerMissing ? <option value={props.form.owner_user_id}>Current owner</option> : null}
+                {selectedOwnerMissing ? <option value={props.form.owner_user_id}>{props.labels.currentOwner}</option> : null}
                 {ownerOptions.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.username} ({account.role})
@@ -1028,65 +1470,65 @@ function ProfileEditorDialog(props: {
               </select>
             </label>
           ) : null}
-          <TextField label="Name" value={props.form.name} onChange={(value) => update("name", value)} />
+          <TextField label={props.labels.name} value={props.form.name} onChange={(value) => update("name", value)} />
           <TextField
-            label="Room ID"
+            label={props.labels.roomId}
             value={props.form.room_id}
             onChange={(value) => update("room_id", value)}
           />
           <TextField
-            label="Streamer"
+            label={props.labels.streamer}
             value={props.form.streamer_name}
             onChange={(value) => update("streamer_name", value)}
           />
           <TextField
-            label="Streamer UID"
+            label={props.labels.streamerUid}
             value={props.form.streamer_uid}
             onChange={(value) => update("streamer_uid", value)}
           />
           <TextField
-            label="Timezone"
+            label={props.labels.timezone}
             value={props.form.timezone}
             onChange={(value) => update("timezone", value)}
           />
           <TextField
-            label="Public Slug"
+            label={props.labels.publicSlug}
             value={props.form.public_slug}
             onChange={(value) => update("public_slug", value)}
           />
-          <SelectField label="Quality" value={props.form.quality} onChange={(value) => update("quality", value)} />
+          <SelectField label={props.labels.quality} value={props.form.quality} onChange={(value) => update("quality", value)} />
           <NumberField
-            label="Segment Seconds"
+            label={props.labels.segmentSeconds}
             min={60}
             value={props.form.segment_duration_sec}
             onChange={(value) => update("segment_duration_sec", value)}
           />
           <NumberField
-            label="Finalize Grace Seconds"
+            label={props.labels.finalizeGraceSeconds}
             min={0}
             value={props.form.finalize_grace_period_sec}
             onChange={(value) => update("finalize_grace_period_sec", value)}
           />
-          <ToggleField label="Enabled" checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
+          <ToggleField label={props.labels.enabled} checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
           <ToggleField
-            label="Auto Record"
+            label={props.labels.autoRecord}
             checked={props.form.auto_record}
             onChange={(value) => update("auto_record", value)}
           />
           <ToggleField
-            label="Record Danmaku"
+            label={props.labels.recordDanmaku}
             checked={props.form.record_danmaku}
             onChange={(value) => update("record_danmaku", value)}
           />
           <ToggleField
-            label="Public Page"
+            label={props.labels.publicPage}
             checked={props.form.public_enabled}
             onChange={(value) => update("public_enabled", value)}
           />
         </div>
 
         {props.saveError ? (
-          <p className="mt-3 text-sm text-red-700">Profile save failed. Check unique room and required fields.</p>
+          <p className="mt-3 text-sm text-red-700">{props.labels.profileSaveFailed}</p>
         ) : null}
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
@@ -1099,7 +1541,7 @@ function ProfileEditorDialog(props: {
                 onClick={() => props.onRestore(props.profile!.id)}
               >
                 <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
-                Restore profile
+                {props.labels.restoreProfile}
               </button>
             ) : null}
             {props.profile && !isArchived ? (
@@ -1112,14 +1554,14 @@ function ProfileEditorDialog(props: {
                       type="button"
                       onClick={() => props.onArchive(props.profile!.id)}
                     >
-                      Confirm archive
+                      {props.labels.confirmArchive}
                     </button>
                     <button
                       className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
                       type="button"
                       onClick={() => setConfirmArchive(false)}
                     >
-                      Cancel
+                      {props.labels.cancel}
                     </button>
                   </>
                 ) : (
@@ -1130,7 +1572,7 @@ function ProfileEditorDialog(props: {
                     onClick={() => setConfirmArchive(true)}
                   >
                     <Archive className="h-4 w-4" aria-hidden="true" />
-                    Archive profile
+                    {props.labels.archiveProfile}
                   </button>
                 )}
               </div>
@@ -1143,7 +1585,7 @@ function ProfileEditorDialog(props: {
               type="button"
               onClick={props.onCancel}
             >
-              Cancel
+              {props.labels.cancel}
             </button>
             <button
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
@@ -1151,7 +1593,7 @@ function ProfileEditorDialog(props: {
               type="submit"
             >
               {props.isEditing ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-              {props.isEditing ? "Save" : "Create"}
+              {props.isEditing ? props.labels.save : props.labels.create}
             </button>
           </div>
         </div>
@@ -1166,11 +1608,17 @@ function AccountsPanel(props: {
   createError: boolean;
   createPending: boolean;
   currentUserId: number;
+  labels: AdminCopy;
   policyPending: boolean;
+  search: string;
+  sort: AccountSortKey;
   total: number;
+  visibleTotal: number;
   updatePending: boolean;
   onAccountFormChange: (form: AccountForm) => void;
   onCreate: (event: FormEvent<HTMLFormElement>) => void;
+  onSearchChange: (value: string) => void;
+  onSortChange: (value: AccountSortKey) => void;
   onToggleEnabled: (account: Account) => void;
   onUpdatePolicy: (account: Account, policy: ManagerPolicy) => void;
 }) {
@@ -1188,59 +1636,71 @@ function AccountsPanel(props: {
     <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
       <form className="rounded-md border border-border bg-panel p-4 shadow-sm" onSubmit={props.onCreate}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">New Manager</h2>
+          <h2 className="text-sm font-semibold">{props.labels.newManager}</h2>
           <button
             className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
             disabled={props.createPending}
             type="submit"
           >
             <UserPlus className="h-4 w-4" aria-hidden="true" />
-            Create
+            {props.labels.create}
           </button>
         </div>
         <div className="mt-4 grid gap-3">
           <TextField
             autoComplete="username"
-            label="Username"
+            label={props.labels.username}
             value={props.accountForm.username}
             onChange={(value) => updateForm("username", value)}
           />
           <TextField
             autoComplete="new-password"
-            label="Initial Password"
+            label={props.labels.initialPassword}
             type="password"
             value={props.accountForm.password}
             onChange={(value) => updateForm("password", value)}
           />
           <ToggleField
-            label="Enabled"
+            label={props.labels.enabled}
             checked={props.accountForm.enabled}
             onChange={(value) => updateForm("enabled", value)}
           />
           <AccountPolicyFields
+            labels={props.labels}
             policy={props.accountForm.policy}
             onChange={(key, value) => updateFormPolicy(key, value)}
           />
           {props.createError ? (
-            <p className="text-sm text-red-700">Account creation failed. Check username and password.</p>
+            <p className="text-sm text-red-700">{props.labels.accountCreationFailed}</p>
           ) : null}
         </div>
       </form>
 
       <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">Accounts</h2>
-          <span className="text-sm text-muted">{props.total} total</span>
+          <h2 className="text-sm font-semibold">{props.labels.accounts}</h2>
+          <span className="text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</span>
         </div>
+        <TableToolbar
+          labels={props.labels}
+          search={props.search}
+          sort={props.sort}
+          sortOptions={[
+            { value: "username_asc", label: props.labels.sortUsername },
+            { value: "role_asc", label: props.labels.sortRole }
+          ]}
+          onSearchChange={props.onSearchChange}
+          onSortChange={(value) => props.onSortChange(value as AccountSortKey)}
+        />
         <div className="mt-4 overflow-hidden rounded-md border border-border">
           <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
               <tr>
-                <th className="px-3 py-2 font-semibold">Account</th>
-                <th className="px-3 py-2 font-semibold">Role</th>
-                <th className="px-3 py-2 font-semibold">Profiles</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="px-3 py-2 font-semibold">Actions</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.account}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.role}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.profiles}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
               </tr>
             </thead>
             <tbody>
@@ -1252,7 +1712,7 @@ function AccountsPanel(props: {
                   </td>
                   <td className="px-3 py-3 text-muted">{account.role}</td>
                   <td className="px-3 py-3 text-muted">{account.profile_count}</td>
-                  <td className="px-3 py-3 text-muted">{account.enabled ? "ENABLED" : "DISABLED"}</td>
+                  <td className="px-3 py-3 text-muted">{account.enabled ? props.labels.enabled : props.labels.disabled}</td>
                   <td className="px-3 py-3">
                     <div className="flex flex-col items-start gap-2">
                       <button
@@ -1261,12 +1721,13 @@ function AccountsPanel(props: {
                         type="button"
                         onClick={() => props.onToggleEnabled(account)}
                       >
-                        {account.enabled ? "Disable" : "Enable"}
+                        {account.enabled ? props.labels.disable : props.labels.enable}
                       </button>
                       {account.policy ? (
                         <div className="grid gap-2 pt-1">
                           <AccountPolicyFields
                             compact
+                            labels={props.labels}
                             policy={account.policy}
                             onChange={(key, value) =>
                               props.onUpdatePolicy(account, { ...account.policy!, [key]: value })
@@ -1282,7 +1743,7 @@ function AccountsPanel(props: {
               {props.accounts.length === 0 ? (
                 <tr>
                   <td className="px-3 py-8 text-center text-muted" colSpan={5}>
-                    No accounts yet.
+                    {props.accounts.length === 0 && props.search ? props.labels.emptyFiltered : props.labels.noAccounts}
                   </td>
                 </tr>
               ) : null}
@@ -1297,15 +1758,16 @@ function AccountsPanel(props: {
 function AccountPolicyFields(props: {
   compact?: boolean;
   disabled?: boolean;
+  labels: AdminCopy;
   policy: ManagerPolicy;
   onChange: (key: PolicyFlag, value: boolean) => void;
 }) {
   const fields: Array<{ key: PolicyFlag; label: string }> = [
-    { key: "can_edit_recording_profile", label: "Edit profiles" },
-    { key: "can_edit_bilibili_module", label: "Bilibili config" },
-    { key: "can_edit_cos_module", label: "COS config" },
-    { key: "can_edit_netease_module", label: "NetEase config" },
-    { key: "can_manage_local_files", label: "Local files" }
+    { key: "can_edit_recording_profile", label: props.labels.editProfiles },
+    { key: "can_edit_bilibili_module", label: props.labels.bilibiliConfig },
+    { key: "can_edit_cos_module", label: props.labels.cosConfig },
+    { key: "can_edit_netease_module", label: props.labels.neteaseConfig },
+    { key: "can_manage_local_files", label: props.labels.localFiles }
   ];
 
   return (
@@ -1324,39 +1786,56 @@ function AccountPolicyFields(props: {
 }
 
 function ProfileListPanel(props: {
+  labels: AdminCopy;
   profiles: RecordingProfile[];
+  search: string;
   selectedProfileId: number | null;
   showOwner: boolean;
+  sort: ProfileSortKey;
   total: number;
+  visibleTotal: number;
   onCreate: () => void;
+  onSearchChange: (value: string) => void;
   onSelect: (profile: RecordingProfile) => void;
+  onSortChange: (value: ProfileSortKey) => void;
 }) {
   return (
     <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">Recording Profiles</h2>
+        <h2 className="text-sm font-semibold">{props.labels.recordingProfiles}</h2>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-muted">{props.total} total</span>
+          <span className="text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</span>
           <button
             className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white"
             type="button"
             onClick={props.onCreate}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
-            New
+            {props.labels.new}
           </button>
         </div>
       </div>
+      <TableToolbar
+        labels={props.labels}
+        search={props.search}
+        sort={props.sort}
+        sortOptions={[
+          { value: "name_asc", label: props.labels.sortName },
+          { value: "room_asc", label: props.labels.sortRoom }
+        ]}
+        onSearchChange={props.onSearchChange}
+        onSortChange={(value) => props.onSortChange(value as ProfileSortKey)}
+      />
       <div className="mt-4 overflow-hidden rounded-md border border-border">
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
             <tr>
-              <th className="px-3 py-2 font-semibold">Name</th>
-              {props.showOwner ? <th className="px-3 py-2 font-semibold">Owner</th> : null}
-              <th className="px-3 py-2 font-semibold">Room</th>
-              <th className="px-3 py-2 font-semibold">Runtime</th>
-              <th className="px-3 py-2 font-semibold">Sync</th>
-              <th className="px-3 py-2 font-semibold">Actions</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.name}</th>
+              {props.showOwner ? <th className="px-3 py-2 font-semibold">{props.labels.ownerColumn}</th> : null}
+              <th className="px-3 py-2 font-semibold">{props.labels.room}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.runtime}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.sync}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -1380,7 +1859,7 @@ function ProfileListPanel(props: {
                 <td className="px-3 py-3">
                   {profile.archived_at ? (
                     <span className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted">
-                      Archived
+                      {props.labels.archived}
                     </span>
                   ) : (
                     <button
@@ -1388,7 +1867,7 @@ function ProfileListPanel(props: {
                       type="button"
                       onClick={() => props.onSelect(profile)}
                     >
-                      Edit
+                      {props.labels.edit}
                     </button>
                   )}
                 </td>
@@ -1397,7 +1876,7 @@ function ProfileListPanel(props: {
             {props.profiles.length === 0 ? (
               <tr>
                 <td className="px-3 py-8 text-center text-muted" colSpan={props.showOwner ? 6 : 5}>
-                  No profiles yet.
+                  {props.profiles.length === 0 && props.search ? props.labels.emptyFiltered : props.labels.noProfiles}
                 </td>
               </tr>
             ) : null}
@@ -1418,6 +1897,7 @@ function StoragePanel(props: {
   };
   isLoading: boolean;
   isSaving: boolean;
+  labels: AdminCopy;
   previewReclaimableBytes: number;
   saveError: boolean;
   status?: LocalStorageStatus;
@@ -1441,36 +1921,39 @@ function StoragePanel(props: {
     <section id="storage" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Local Storage</h2>
-          <p className="mt-1 text-sm text-muted">{props.status?.data_root ?? "Checking storage."}</p>
+          <h2 className="text-sm font-semibold">{props.labels.localStorage}</h2>
+          <p className="mt-1 text-sm text-muted">{props.status?.data_root ?? props.labels.checkingStorage}</p>
         </div>
         <HardDrive className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Indexed Videos" value={props.isLoading ? "..." : String(props.status?.indexed_video_files ?? 0)} />
-        <Metric label="Indexed Size" value={formatBytes(props.status?.indexed_video_bytes ?? 0)} />
-        <Metric label="Disk Available" value={formatBytes(props.status?.disk_available_bytes ?? 0)} />
-        <Metric label="Protected" value={String(props.status?.protected_recordings ?? 0)} />
+        <Metric label={props.labels.indexedVideos} value={props.isLoading ? "..." : String(props.status?.indexed_video_files ?? 0)} />
+        <Metric label={props.labels.indexedSize} value={formatBytes(props.status?.indexed_video_bytes ?? 0)} />
+        <Metric label={props.labels.diskAvailable} value={formatBytes(props.status?.disk_available_bytes ?? 0)} />
+        <Metric label={props.labels.protected} value={String(props.status?.protected_recordings ?? 0)} />
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <Metric label="Health" value={props.status?.health ?? "CHECKING"} />
-        <Metric label="Need Reclaim" value={formatBytes(props.status?.need_reclaim_bytes ?? 0)} />
-        <Metric label="Preview Reclaimable" value={formatBytes(props.previewReclaimableBytes)} />
+        <Metric label={props.labels.health} value={props.status?.health ?? props.labels.checking} />
+        <Metric label={props.labels.needReclaim} value={formatBytes(props.status?.need_reclaim_bytes ?? 0)} />
+        <Metric label={props.labels.previewReclaimable} value={formatBytes(props.previewReclaimableBytes)} />
       </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e6ebe4]">
         <div className="h-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, usedPercent))}%` }} />
       </div>
       <p className="mt-2 text-xs text-muted">
-        Disk used: {usedPercent}% of {formatBytes(props.status?.disk_total_bytes ?? 0)}. Completed recordings:{" "}
-        {props.status?.completed_recordings ?? 0}. Settings:{" "}
-        {props.status?.settings_configured ? "configured" : "derived default"}.
+        {props.labels.diskSummary(
+          usedPercent,
+          formatBytes(props.status?.disk_total_bytes ?? 0),
+          props.status?.completed_recordings ?? 0,
+          Boolean(props.status?.settings_configured)
+        )}
       </p>
 
       <div className="mt-5 border-t border-border pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold">Storage Settings</h3>
+          <h3 className="text-sm font-semibold">{props.labels.storageSettings}</h3>
           <button
             className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
             disabled={props.isSaving}
@@ -1478,30 +1961,30 @@ function StoragePanel(props: {
             onClick={props.onSave}
           >
             <Save className="h-4 w-4" aria-hidden="true" />
-            Save
+            {props.labels.save}
           </button>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <NumberField
-            label="Max Recording GB"
+            label={props.labels.maxRecordingGB}
             min={1}
             value={props.form.maxRecordingGB}
             onChange={(value) => update("maxRecordingGB", value)}
           />
           <NumberField
-            label="Min Free GB"
+            label={props.labels.minFreeGB}
             min={1}
             value={props.form.minFreeGB}
             onChange={(value) => update("minFreeGB", value)}
           />
           <NumberField
-            label="Emergency Free GB"
+            label={props.labels.emergencyFreeGB}
             min={1}
             value={props.form.emergencyFreeGB}
             onChange={(value) => update("emergencyFreeGB", value)}
           />
           <NumberField
-            label="Cleanup Target %"
+            label={props.labels.cleanupTargetPercent}
             max={99}
             min={1}
             value={props.form.cleanupTargetPercent}
@@ -1509,35 +1992,35 @@ function StoragePanel(props: {
           />
         </div>
         {props.saveError ? (
-          <p className="mt-3 text-sm text-red-700">Storage settings save failed. Check the thresholds.</p>
+          <p className="mt-3 text-sm text-red-700">{props.labels.storageSaveFailed}</p>
         ) : null}
       </div>
 
       <div className="mt-5 border-t border-border pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold">Cleanup Preview</h3>
-          <span className="text-xs text-muted">Oldest unprotected completed recordings</span>
+          <h3 className="text-sm font-semibold">{props.labels.cleanupPreview}</h3>
+          <span className="text-xs text-muted">{props.labels.oldestUnprotected}</span>
         </div>
         <div className="mt-3 overflow-hidden rounded-md border border-border">
           <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
               <tr>
-                <th className="px-3 py-2 font-semibold">Recording</th>
-                <th className="px-3 py-2 font-semibold">Closed</th>
-                <th className="px-3 py-2 font-semibold">Files</th>
-                <th className="px-3 py-2 font-semibold">Reclaimable</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.recording}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.closed}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.files}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.reclaimable}</th>
               </tr>
             </thead>
             <tbody>
               {props.candidates.map((candidate) => (
                 <tr key={candidate.recording_id} className="bg-white">
                   <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{candidate.title || candidate.streamer_name || "Untitled"}</p>
+                    <p className="font-medium text-ink">{candidate.title || candidate.streamer_name || props.labels.untitled}</p>
                     <p className="mt-1 text-xs text-muted">
                       {candidate.profile_name} - {candidate.room_id}
                     </p>
                   </td>
-                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(candidate.completed_at || "")}</td>
+                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(candidate.completed_at || "", props.labels)}</td>
                   <td className="px-3 py-3 text-muted">{candidate.file_count}</td>
                   <td className="px-3 py-3 text-muted">{formatBytes(candidate.reclaimable_bytes)}</td>
                 </tr>
@@ -1545,7 +2028,7 @@ function StoragePanel(props: {
               {props.candidates.length === 0 ? (
                 <tr>
                   <td className="px-3 py-6 text-center text-muted" colSpan={4}>
-                    No cleanup candidates.
+                    {props.labels.noCleanupCandidates}
                   </td>
                 </tr>
               ) : null}
@@ -1566,23 +2049,70 @@ function Metric(props: { label: string; value: string }) {
   );
 }
 
+function TableToolbar(props: {
+  labels: AdminCopy;
+  search: string;
+  sort: string;
+  sortOptions: Array<{ label: string; value: string }>;
+  onSearchChange: (value: string) => void;
+  onSortChange: (value: string) => void;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border border-border bg-white p-3 sm:flex-row sm:items-end sm:justify-between">
+      <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium">
+        {props.labels.search}
+        <div className="flex h-10 items-center gap-2 rounded-md border border-border bg-white px-3 focus-within:border-accent">
+          <Search className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+          <input
+            className="min-w-0 flex-1 text-sm font-normal outline-none"
+            placeholder={props.labels.searchPlaceholder}
+            type="search"
+            value={props.search}
+            onChange={(event) => props.onSearchChange(event.target.value)}
+          />
+        </div>
+      </label>
+      <label className="flex flex-col gap-1 text-sm font-medium sm:w-64">
+        {props.labels.sortBy}
+        <select
+          className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+          value={props.sort}
+          onChange={(event) => props.onSortChange(event.target.value)}
+        >
+          {props.sortOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 function RecordingsPanel(props: {
   isLoading: boolean;
+  labels: AdminCopy;
   protectPending: boolean;
   reconcileError: boolean;
   reconcilePending: boolean;
   reconcileResult?: ReconcileResult;
   recordings: RecordingItem[];
+  search: string;
+  sort: RecordingSortKey;
   total: number;
+  visibleTotal: number;
   onReconcile: () => void;
+  onSearchChange: (value: string) => void;
+  onSortChange: (value: RecordingSortKey) => void;
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
   return (
     <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Recordings</h2>
-          <p className="mt-1 text-sm text-muted">{props.total} total</p>
+          <h2 className="text-sm font-semibold">{props.labels.recordings}</h2>
+          <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
         </div>
         <button
           className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
@@ -1591,31 +2121,49 @@ function RecordingsPanel(props: {
           onClick={props.onReconcile}
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          Scan
+          {props.labels.scan}
         </button>
       </div>
 
       {props.reconcileResult ? (
         <p className="mt-3 text-sm text-muted">
-          Scan: {props.reconcileResult.imported} imported, {props.reconcileResult.updated} updated,{" "}
-          {props.reconcileResult.skipped} ignored.
+          {props.labels.scanResult(
+            props.reconcileResult.imported,
+            props.reconcileResult.updated,
+            props.reconcileResult.skipped
+          )}
         </p>
       ) : null}
       {props.reconcileError ? (
-        <p className="mt-3 text-sm text-red-700">Scan failed. Check server logs.</p>
+        <p className="mt-3 text-sm text-red-700">{props.labels.scanFailed}</p>
       ) : null}
+
+      <TableToolbar
+        labels={props.labels}
+        search={props.search}
+        sort={props.sort}
+        sortOptions={[
+          { value: "started_desc", label: props.labels.sortNewest },
+          { value: "started_asc", label: props.labels.sortOldest },
+          { value: "duration_desc", label: props.labels.sortDuration },
+          { value: "size_desc", label: props.labels.sortSize }
+        ]}
+        onSearchChange={props.onSearchChange}
+        onSortChange={(value) => props.onSortChange(value as RecordingSortKey)}
+      />
 
       <div className="mt-4 overflow-hidden rounded-md border border-border">
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
             <tr>
-              <th className="px-3 py-2 font-semibold">Recording</th>
-              <th className="px-3 py-2 font-semibold">Profile</th>
-              <th className="px-3 py-2 font-semibold">Status</th>
-              <th className="px-3 py-2 font-semibold">Duration</th>
-              <th className="px-3 py-2 font-semibold">Size</th>
-              <th className="px-3 py-2 font-semibold">Path</th>
-              <th className="px-3 py-2 font-semibold">Actions</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.recording}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.startTime}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.profile}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.path}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -1627,22 +2175,22 @@ function RecordingsPanel(props: {
                     <div className="flex items-start gap-2">
                       <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                       <div>
-                        <p className="font-semibold text-ink">{recording.title || file?.original_name || "Untitled"}</p>
-                        <p className="mt-1 text-xs text-muted">Start: {formatDateTime(recording.started_at)}</p>
+                        <p className="font-semibold text-ink">{recording.title || file?.original_name || props.labels.untitled}</p>
                         <p className="mt-1 text-xs text-muted">
-                          Closed: {formatDateTime(recording.completed_at || file?.closed_at || "")}
+                          {props.labels.completedAt}: {formatDateTime(recording.completed_at || file?.closed_at || "", props.labels)}
                         </p>
                       </div>
                     </div>
                   </td>
+                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(recording.started_at, props.labels)}</td>
                   <td className="px-3 py-3">
                     <p className="font-medium text-ink">{recording.profile_name}</p>
                     <p className="mt-1 text-xs text-muted">{recording.room_id}</p>
                   </td>
                   <td className="px-3 py-3 text-muted">
                     <p>{recording.recording_status}</p>
-                    <p className="mt-1 text-xs">{file?.file_status ?? "NO_FILE"}</p>
-                    {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">PROTECTED</p> : null}
+                    <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>
+                    {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
                   </td>
                   <td className="px-3 py-3 text-muted">
                     {formatDuration(recording.duration_ms || file?.duration_ms || 0)}
@@ -1664,7 +2212,7 @@ function RecordingsPanel(props: {
                         ) : (
                           <Lock className="h-3.5 w-3.5" aria-hidden="true" />
                         )}
-                        {recording.local_protected ? "Unprotect" : "Protect"}
+                        {recording.local_protected ? props.labels.unprotect : props.labels.protect}
                       </button>
                       {file && file.file_status !== "WRITING" ? (
                         <a
@@ -1672,7 +2220,7 @@ function RecordingsPanel(props: {
                           href={`/api/v1/recording-files/${file.id}/download`}
                         >
                           <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                          Download
+                          {props.labels.download}
                         </a>
                       ) : null}
                     </div>
@@ -1682,8 +2230,12 @@ function RecordingsPanel(props: {
             })}
             {props.recordings.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={7}>
-                  {props.isLoading ? "Loading recordings." : "No recordings indexed yet."}
+                <td className="px-3 py-8 text-center text-muted" colSpan={8}>
+                  {props.isLoading
+                    ? props.labels.loadingRecordings
+                    : props.recordings.length === 0 && props.search
+                      ? props.labels.emptyFiltered
+                      : props.labels.noRecordings}
                 </td>
               </tr>
             ) : null}
@@ -1754,7 +2306,7 @@ function formatDuration(value: number): string {
   return `${seconds}s`;
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, labels: AdminCopy): string {
   if (!value) {
     return "-";
   }
@@ -1762,7 +2314,7 @@ function formatDateTime(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return `${new Intl.DateTimeFormat("zh-CN", {
+  const formatted = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
@@ -1771,7 +2323,8 @@ function formatDateTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
     hour12: false
-  }).format(date)} 中国时间`;
+  }).format(date);
+  return `${formatted} ${labels.chinaTime}`;
 }
 
 function NumberField(props: { label: string; max?: number; min: number; value: number; onChange: (value: number) => void }) {
