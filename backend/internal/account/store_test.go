@@ -119,7 +119,7 @@ func bootstrapTestAdmin(t *testing.T, ctx context.Context, database *sql.DB) Use
 
 func insertTestManager(t *testing.T, ctx context.Context, database *sql.DB) User {
 	t.Helper()
-	passwordHash, err := authHash("not-used")
+	passwordHash, err := authHash("unused manager password")
 	if err != nil {
 		t.Fatalf("authHash returned error: %v", err)
 	}
