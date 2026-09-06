@@ -445,8 +445,7 @@ const uiCopy = {
     scanResult: (imported: number, updated: number, skipped: number) =>
       `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
     scanFailed: "扫描失败，请查看服务器日志。",
-    startDate: "录制日期",
-    startTime: "录制时间（中国时间）",
+    startTime: "录制时间",
     completedAt: "完成时间",
     duration: "时长",
     size: "大小",
@@ -637,8 +636,7 @@ const uiCopy = {
     scanResult: (imported: number, updated: number, skipped: number) =>
       `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
     scanFailed: "Scan failed. Check server logs.",
-    startDate: "Recording Date",
-    startTime: "Time (China Time)",
+    startTime: "Recording Time",
     completedAt: "Completed",
     duration: "Duration",
     size: "Size",
@@ -2557,6 +2555,25 @@ function TableToolbar(props: {
   );
 }
 
+function TableTimeHeader(props: { labels: AdminCopy; title: string }) {
+  return (
+    <span className="block leading-4">
+      <span className="block">{props.title}</span>
+      <span className="block text-[11px] normal-case text-muted">{props.labels.chinaTime}</span>
+    </span>
+  );
+}
+
+function TableDateTime(props: { value: string }) {
+  const parts = formatChinaDateParts(props.value);
+  return (
+    <span className="block text-xs leading-5 text-muted">
+      <span className="block whitespace-nowrap">{parts.date}</span>
+      <span className="block whitespace-nowrap">{parts.time}</span>
+    </span>
+  );
+}
+
 function RecordingsPanel(props: {
   canManageLocalFiles: boolean;
   canScanLocalFiles: boolean;
@@ -2624,18 +2641,21 @@ function RecordingsPanel(props: {
       }
     },
     {
-      id: "date",
-      header: props.labels.startDate,
-      size: 120,
-      minSize: 110,
-      cell: ({ row }) => <span className="text-xs text-muted">{formatChinaDateParts(row.original.started_at).date}</span>
-    },
-    {
-      id: "time",
-      header: props.labels.startTime,
+      id: "startedAt",
+      header: () => <TableTimeHeader title={props.labels.startTime} labels={props.labels} />,
       size: 150,
       minSize: 140,
-      cell: ({ row }) => <span className="text-xs text-muted">{formatChinaDateParts(row.original.started_at).time}</span>
+      cell: ({ row }) => <TableDateTime value={row.original.started_at} />
+    },
+    {
+      id: "completedAt",
+      header: () => <TableTimeHeader title={props.labels.completedAt} labels={props.labels} />,
+      size: 150,
+      minSize: 140,
+      cell: ({ row }) => {
+        const file = row.original.files?.[0];
+        return <TableDateTime value={row.original.completed_at || file?.closed_at || ""} />;
+      }
     },
     {
       id: "profile",
@@ -2682,13 +2702,6 @@ function RecordingsPanel(props: {
       size: 90,
       minSize: 80,
       cell: ({ row }) => <span className="text-muted">{formatBytes(row.original.files?.[0]?.size_bytes ?? 0)}</span>
-    },
-    {
-      id: "path",
-      header: props.labels.path,
-      size: 360,
-      minSize: 220,
-      cell: ({ row }) => <span className="break-all text-xs text-muted">{row.original.files?.[0]?.relative_path ?? "-"}</span>
     },
     {
       id: "actions",
@@ -2811,7 +2824,7 @@ function RecordingsPanel(props: {
       />
 
       <div className="mt-4 overflow-auto rounded-md border border-border">
-        <table className="border-collapse text-left text-sm" style={{ minWidth: table.getCenterTotalSize() }}>
+        <table className="border-collapse text-left text-sm" style={{ minWidth: table.getTotalSize() }}>
           <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
@@ -2822,7 +2835,7 @@ function RecordingsPanel(props: {
                     style={{ width: header.getSize() }}
                   >
                     <div className="flex min-w-0 items-center justify-between gap-2">
-                      <span className="truncate">
+                      <span className="min-w-0">
                         {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                       </span>
                       {header.column.getCanResize() ? (

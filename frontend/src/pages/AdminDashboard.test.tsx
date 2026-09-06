@@ -319,8 +319,8 @@ describe("AdminDashboard", () => {
     await switchToEnglish();
 
     fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
-    expect(await screen.findByText("Recording Date")).toBeInTheDocument();
-    expect(await screen.findByText("Time (China Time)")).toBeInTheDocument();
+    expect(await screen.findByText("Recording Time")).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
     expect(await screen.findByText("test recording")).toBeInTheDocument();
     expect((await screen.findAllByText(/China Time/)).length).toBeGreaterThan(0);
   });
@@ -389,7 +389,7 @@ describe("AdminDashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(await screen.findByRole("heading", { name: "Recording Details" })).toBeInTheDocument();
-    expect((await screen.findAllByText("recordings/1741048619/short.flv")).length).toBeGreaterThan(1);
+    expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
     expect(await screen.findByText("recordings/1741048619/short.xml")).toBeInTheDocument();
     expect((await screen.findAllByText("File Size")).length).toBeGreaterThan(1);
   });

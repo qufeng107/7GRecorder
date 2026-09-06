@@ -16,8 +16,9 @@
 
 ## Recording History
 
-- Recording start date and recording start clock time are separate first-class table columns.
-- The recording time column header carries the visible China Time label; row cells should not repeat it.
+- Recording start and completion timestamps are first-class table columns.
+- Timestamp headers show the China Time label on a second line. Timestamp cells show date and clock time on separate
+  lines without repeating the timezone label.
 - Displayed recording timestamps use `Asia/Shanghai`.
 - Each recording row can open a details dialog with profile, streamer, China-time timestamps, duration, local status,
   all indexed files, per-file paths, protect action, and per-file download actions.
