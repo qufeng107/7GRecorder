@@ -395,6 +395,56 @@ describe("AdminDashboard", () => {
     expect((await screen.findAllByText("File Size")).length).toBeGreaterThan(1);
   });
 
+  it("renders recording groups for merge planning", async () => {
+    mockSuperAdminFetch((path) => {
+      if (path.includes("/api/v1/recording-groups")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: "1:2026-09-06T10:00:00Z:2026-09-06T10:08:00Z",
+                recording_profile_id: 1,
+                profile_name: "7G",
+                room_id: "1741048619",
+                streamer_name: "streamer",
+                started_at: "2026-09-06T10:00:00Z",
+                completed_at: "2026-09-06T10:08:00Z",
+                recording_count: 2,
+                file_count: 2,
+                total_bytes: 5242880,
+                total_duration_ms: 360000,
+                max_gap_seconds: 90,
+                has_short_segment: true,
+                ready_for_merge: true,
+                recordings: []
+              }
+            ],
+            total: 1,
+            max_gap_seconds: 120,
+            short_threshold_seconds: 180
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/recordings")) {
+        return {
+          ok: true,
+          json: async () => ({ items: [], total: 0 })
+        } as Response;
+      }
+      return undefined;
+    });
+
+    renderWithClient();
+    await switchToEnglish();
+
+    fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
+    expect(await screen.findByText("Recording Groups")).toBeInTheDocument();
+    expect(await screen.findByText("Merge Ready")).toBeInTheDocument();
+    expect(await screen.findByText("Includes short segment")).toBeInTheDocument();
+    expect(await screen.findByText("1m 30s")).toBeInTheDocument();
+  });
+
   it("runs local cleanup from the system storage page after confirmation", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = input instanceof Request ? input.url : input.toString();

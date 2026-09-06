@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -40,6 +41,36 @@ type Recording struct {
 	LocalStorageStatus string `json:"local_storage_status"`
 	LocalProtected     bool   `json:"local_protected"`
 	Files              []File `json:"files"`
+}
+
+type RecordingGroup struct {
+	ID                 string      `json:"id"`
+	RecordingProfileID int64       `json:"recording_profile_id"`
+	ProfileName        string      `json:"profile_name"`
+	RoomID             string      `json:"room_id"`
+	StreamerName       string      `json:"streamer_name"`
+	StartedAt          string      `json:"started_at"`
+	CompletedAt        string      `json:"completed_at,omitempty"`
+	RecordingCount     int         `json:"recording_count"`
+	FileCount          int         `json:"file_count"`
+	TotalBytes         int64       `json:"total_bytes"`
+	TotalDurationMs    int64       `json:"total_duration_ms"`
+	MaxGapSeconds      int64       `json:"max_gap_seconds"`
+	HasShortSegment    bool        `json:"has_short_segment"`
+	ReadyForMerge      bool        `json:"ready_for_merge"`
+	Recordings         []Recording `json:"recordings"`
+}
+
+type RecordingGroupList struct {
+	Items                 []RecordingGroup `json:"items"`
+	Total                 int              `json:"total"`
+	MaxGapSeconds         int64            `json:"max_gap_seconds"`
+	ShortThresholdSeconds int64            `json:"short_threshold_seconds"`
+}
+
+type RecordingGroupListRequest struct {
+	MaxGapSeconds         int64
+	ShortThresholdSeconds int64
 }
 
 type File struct {
@@ -184,6 +215,167 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 		return nil, fmt.Errorf("iterate recordings: %w", err)
 	}
 	return items, nil
+}
+
+func (s Store) ListGroups(ctx context.Context, actor account.User, req RecordingGroupListRequest) (RecordingGroupList, error) {
+	maxGapSeconds := normalizeGroupSeconds(req.MaxGapSeconds, 120)
+	shortThresholdSeconds := normalizeGroupSeconds(req.ShortThresholdSeconds, 180)
+
+	recordings, err := s.List(ctx, actor)
+	if err != nil {
+		return RecordingGroupList{}, err
+	}
+	sort.SliceStable(recordings, func(i, j int) bool {
+		if recordings[i].RecordingProfileID != recordings[j].RecordingProfileID {
+			return recordings[i].RecordingProfileID < recordings[j].RecordingProfileID
+		}
+		startI := parseRecordingTimestamp(recordings[i].StartedAt)
+		startJ := parseRecordingTimestamp(recordings[j].StartedAt)
+		if !startI.Equal(startJ) {
+			return startI.Before(startJ)
+		}
+		return recordings[i].ID < recordings[j].ID
+	})
+
+	groups := make([]RecordingGroup, 0)
+	var current *RecordingGroup
+	var previousEnd time.Time
+
+	flush := func() {
+		if current == nil {
+			return
+		}
+		current.ID = fmt.Sprintf("%d:%s:%s", current.RecordingProfileID, current.StartedAt, current.CompletedAt)
+		current.ReadyForMerge = current.RecordingCount > 1 && groupHasClosedVideoForEach(current.Recordings)
+		groups = append(groups, *current)
+		current = nil
+		previousEnd = time.Time{}
+	}
+
+	for _, item := range recordings {
+		if item.RecordingStatus != "COMPLETED" || item.LocalStorageStatus == "DELETED" {
+			continue
+		}
+		started := parseRecordingTimestamp(item.StartedAt)
+		completed := recordingCompletedTime(item)
+		shouldStartNewGroup := current == nil || current.RecordingProfileID != item.RecordingProfileID
+		if !shouldStartNewGroup && !previousEnd.IsZero() && !started.IsZero() {
+			gapSeconds := int64(started.Sub(previousEnd).Seconds())
+			if gapSeconds > maxGapSeconds {
+				shouldStartNewGroup = true
+			}
+		}
+		if shouldStartNewGroup {
+			flush()
+			current = &RecordingGroup{
+				RecordingProfileID: item.RecordingProfileID,
+				ProfileName:        item.ProfileName,
+				RoomID:             item.RoomID,
+				StreamerName:       item.StreamerName,
+				StartedAt:          item.StartedAt,
+				CompletedAt:        item.CompletedAt,
+				Recordings:         make([]Recording, 0),
+			}
+		} else if !previousEnd.IsZero() && !started.IsZero() {
+			gapSeconds := int64(started.Sub(previousEnd).Seconds())
+			if gapSeconds > current.MaxGapSeconds {
+				current.MaxGapSeconds = gapSeconds
+			}
+		}
+		addRecordingToGroup(current, item, shortThresholdSeconds)
+		if !completed.IsZero() && (previousEnd.IsZero() || completed.After(previousEnd)) {
+			previousEnd = completed
+			current.CompletedAt = completed.UTC().Format(time.RFC3339)
+		}
+	}
+	flush()
+
+	sort.SliceStable(groups, func(i, j int) bool {
+		startI := parseRecordingTimestamp(groups[i].StartedAt)
+		startJ := parseRecordingTimestamp(groups[j].StartedAt)
+		if !startI.Equal(startJ) {
+			return startI.After(startJ)
+		}
+		return groups[i].ID > groups[j].ID
+	})
+	return RecordingGroupList{
+		Items:                 groups,
+		Total:                 len(groups),
+		MaxGapSeconds:         maxGapSeconds,
+		ShortThresholdSeconds: shortThresholdSeconds,
+	}, nil
+}
+
+func addRecordingToGroup(group *RecordingGroup, item Recording, shortThresholdSeconds int64) {
+	group.Recordings = append(group.Recordings, item)
+	group.RecordingCount++
+	durationMs := item.DurationMs
+	for _, file := range item.Files {
+		group.FileCount++
+		if strings.EqualFold(file.Kind, "video") && file.FileStatus != "DELETED" {
+			group.TotalBytes += file.SizeBytes
+		}
+		if durationMs == 0 && file.DurationMs > 0 {
+			durationMs = file.DurationMs
+		}
+	}
+	group.TotalDurationMs += durationMs
+	if durationMs > 0 && durationMs < shortThresholdSeconds*1000 {
+		group.HasShortSegment = true
+	}
+	if group.CompletedAt == "" {
+		group.CompletedAt = item.CompletedAt
+	}
+}
+
+func groupHasClosedVideoForEach(recordings []Recording) bool {
+	for _, item := range recordings {
+		found := false
+		for _, file := range item.Files {
+			if strings.EqualFold(file.Kind, "video") && file.FileStatus == "CLOSED" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return len(recordings) > 0
+}
+
+func recordingCompletedTime(item Recording) time.Time {
+	completed := parseRecordingTimestamp(item.CompletedAt)
+	for _, file := range item.Files {
+		fileClosed := parseRecordingTimestamp(file.ClosedAt)
+		if completed.IsZero() || fileClosed.After(completed) {
+			completed = fileClosed
+		}
+	}
+	return completed
+}
+
+func parseRecordingTimestamp(value string) time.Time {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+func normalizeGroupSeconds(value int64, fallback int64) int64 {
+	if value <= 0 {
+		return fallback
+	}
+	if value > 24*60*60 {
+		return 24 * 60 * 60
+	}
+	return value
 }
 
 func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (LocalStorageStatus, error) {

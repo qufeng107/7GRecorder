@@ -259,6 +259,18 @@ move, upload, or otherwise mutate recording files.
 
 前端不得直接 PATCH `recording_status`、`local_storage_status` 等内部状态。
 
+Recording group diagnostics:
+
+```text
+GET /api/v1/recording-groups?max_gap_seconds=120&short_threshold_seconds=180
+```
+
+This endpoint computes read-only groups from visible completed local recordings. Adjacent recordings from the same
+profile are grouped when the gap from previous completion to next start is less than or equal to the configured
+threshold. It returns source recordings, group time window, segment/file counts, total size, total duration, max gap,
+short-segment signal, and whether the group is eligible for a later merge job. It must not merge, move, upload, delete,
+or rewrite files.
+
 ### Files / Download
 
 ```text

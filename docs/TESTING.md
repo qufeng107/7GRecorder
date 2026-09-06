@@ -185,6 +185,8 @@ song processing FAILED
 - Storage Critical 可以阻止低优先级重任务。
 - Admin Jobs API covers list visibility, failed/cancelled retry reset, and invalid running-job cancel rejection.
 - Admin Jobs UI covers list rendering and retry action wiring.
+- Recording group diagnostics cover adjacent same-profile grouping, real-gap splitting, short-segment flags, and
+  read-only behavior before FFmpeg merge jobs exist.
 
 ---
 

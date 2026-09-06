@@ -92,6 +92,23 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/recording-groups", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			result, err := store.ListGroups(r.Context(), actor, recording.RecordingGroupListRequest{
+				MaxGapSeconds:         r.Get("max_gap_seconds").Int64(),
+				ShortThresholdSeconds: r.Get("short_threshold_seconds").Int64(),
+			})
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
 	s.BindHandler("/api/v1/recording-files/reconcile", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodPost) {
 			return
