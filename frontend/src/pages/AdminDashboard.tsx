@@ -212,6 +212,12 @@ type AccountForm = {
   policy: ManagerPolicy;
 };
 
+type AccountEditForm = {
+  username: string;
+  password: string;
+  enabled: boolean;
+};
+
 const emptyProfileForm: ProfileForm = {
   owner_user_id: "",
   name: "",
@@ -242,6 +248,12 @@ const emptyAccountForm: AccountForm = {
   password: "",
   enabled: true,
   policy: defaultManagerPolicy
+};
+
+const emptyAccountEditForm: AccountEditForm = {
+  username: "",
+  password: "",
+  enabled: true
 };
 
 const uiCopy = {
@@ -326,6 +338,12 @@ const uiCopy = {
     accounts: "账号",
     account: "账号",
     noAccounts: "暂无账号。",
+    editAccount: "编辑账号",
+    accountSaveFailed: "账号保存失败，请检查用户名、密码或账号状态。",
+    newPassword: "新密码",
+    newPasswordHint: "留空表示不修改密码。",
+    saveAccount: "保存账号",
+    currentAccount: "当前账号",
     disable: "停用",
     enable: "启用",
     editProfiles: "编辑录制配置",
@@ -475,6 +493,12 @@ const uiCopy = {
     accounts: "Accounts",
     account: "Account",
     noAccounts: "No accounts yet.",
+    editAccount: "Edit Account",
+    accountSaveFailed: "Account save failed. Check username, password, or account status.",
+    newPassword: "New Password",
+    newPasswordHint: "Leave blank to keep the current password.",
+    saveAccount: "Save Account",
+    currentAccount: "Current account",
     disable: "Disable",
     enable: "Enable",
     editProfiles: "Edit profiles",
@@ -603,6 +627,22 @@ function profilePayload(form: ProfileForm) {
   };
 }
 
+function accountToEditForm(account: Account): AccountEditForm {
+  return {
+    username: account.username,
+    password: "",
+    enabled: account.enabled
+  };
+}
+
+function accountUpdatePayload(form: AccountEditForm) {
+  return {
+    username: form.username,
+    enabled: form.enabled,
+    ...(form.password ? { password: form.password } : {})
+  };
+}
+
 function includesSearch(value: string | number | undefined, search: string): boolean {
   return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase());
 }
@@ -686,6 +726,9 @@ export function AdminDashboard() {
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [accountEditorOpen, setAccountEditorOpen] = useState(false);
+  const [accountEditForm, setAccountEditForm] = useState<AccountEditForm>(emptyAccountEditForm);
   const [storageForm, setStorageForm] = useState({
     maxRecordingGB: 0,
     minFreeGB: 0,
@@ -764,6 +807,7 @@ export function AdminDashboard() {
   const visibleProfiles = filterProfiles(profiles, profileSearch, profileSort);
   const visibleRecordings = filterRecordings(recordings, recordingSearch, recordingSort);
   const visibleAccounts = filterAccounts(accounts, accountSearch, accountSort);
+  const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
 
   useEffect(() => {
     if (activePage === "system" && user && !canManageSystemSettings) {
@@ -780,6 +824,13 @@ export function AdminDashboard() {
       setProfileForm(profileToForm(selected));
     }
   }, [profiles, selectedProfileId]);
+
+  useEffect(() => {
+    const selected = accounts.find((account) => account.id === selectedAccountId);
+    if (selected) {
+      setAccountEditForm(accountToEditForm(selected));
+    }
+  }, [accounts, selectedAccountId]);
 
   useEffect(() => {
     const settings = localStorageQuery.data?.settings;
@@ -818,6 +869,9 @@ export function AdminDashboard() {
       setSelectedProfileId(null);
       setProfileEditorOpen(false);
       setProfileForm(emptyProfileForm);
+      setSelectedAccountId(null);
+      setAccountEditorOpen(false);
+      setAccountEditForm(emptyAccountEditForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
       queryClient.removeQueries({ queryKey: ["accounts"] });
@@ -951,12 +1005,15 @@ export function AdminDashboard() {
   });
 
   const updateAccountMutation = useMutation({
-    mutationFn: (request: { accountId: number; enabled: boolean }) =>
+    mutationFn: (request: { accountId: number; payload: ReturnType<typeof accountUpdatePayload> | { enabled: boolean } }) =>
       requestJson<Account>(`/api/v1/accounts/${request.accountId}`, {
         method: "PATCH",
-        body: JSON.stringify({ enabled: request.enabled })
+        body: JSON.stringify(request.payload)
       }),
     onSuccess: () => {
+      setAccountEditorOpen(false);
+      setSelectedAccountId(null);
+      setAccountEditForm(emptyAccountEditForm);
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
     }
   });
@@ -985,6 +1042,17 @@ export function AdminDashboard() {
   const onAccountSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     createAccountMutation.mutate();
+  };
+
+  const onAccountEditSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedAccountId) {
+      return;
+    }
+    updateAccountMutation.mutate({
+      accountId: selectedAccountId,
+      payload: accountUpdatePayload(accountEditForm)
+    });
   };
 
   return (
@@ -1091,12 +1159,35 @@ export function AdminDashboard() {
                 onCreate={onAccountSubmit}
                 onSearchChange={setAccountSearch}
                 onSortChange={setAccountSort}
+                onEdit={(account) => {
+                  setSelectedAccountId(account.id);
+                  setAccountEditForm(accountToEditForm(account));
+                  setAccountEditorOpen(true);
+                }}
                 onToggleEnabled={(account) =>
-                  updateAccountMutation.mutate({ accountId: account.id, enabled: !account.enabled })
+                  updateAccountMutation.mutate({ accountId: account.id, payload: { enabled: !account.enabled } })
                 }
                 onUpdatePolicy={(account, policy) =>
                   updatePolicyMutation.mutate({ accountId: account.id, policy })
                 }
+              />
+            ) : null}
+
+            {accountEditorOpen && selectedAccount ? (
+              <AccountEditorDialog
+                account={selectedAccount}
+                currentUserId={user.id}
+                form={accountEditForm}
+                isSaving={updateAccountMutation.isPending}
+                labels={ui}
+                saveError={updateAccountMutation.isError}
+                onCancel={() => {
+                  setAccountEditorOpen(false);
+                  setSelectedAccountId(null);
+                  setAccountEditForm(emptyAccountEditForm);
+                }}
+                onChange={setAccountEditForm}
+                onSubmit={onAccountEditSubmit}
               />
             ) : null}
 
@@ -1617,6 +1708,7 @@ function AccountsPanel(props: {
   updatePending: boolean;
   onAccountFormChange: (form: AccountForm) => void;
   onCreate: (event: FormEvent<HTMLFormElement>) => void;
+  onEdit: (account: Account) => void;
   onSearchChange: (value: string) => void;
   onSortChange: (value: AccountSortKey) => void;
   onToggleEnabled: (account: Account) => void;
@@ -1717,6 +1809,13 @@ function AccountsPanel(props: {
                     <div className="flex flex-col items-start gap-2">
                       <button
                         className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                        type="button"
+                        onClick={() => props.onEdit(account)}
+                      >
+                        {props.labels.edit}
+                      </button>
+                      <button
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
                         disabled={props.updatePending || account.id === props.currentUserId}
                         type="button"
                         onClick={() => props.onToggleEnabled(account)}
@@ -1781,6 +1880,94 @@ function AccountPolicyFields(props: {
           onChange={(value) => props.onChange(field.key, value)}
         />
       ))}
+    </div>
+  );
+}
+
+function AccountEditorDialog(props: {
+  account: Account;
+  currentUserId: number;
+  form: AccountEditForm;
+  isSaving: boolean;
+  labels: AdminCopy;
+  saveError: boolean;
+  onCancel: () => void;
+  onChange: (form: AccountEditForm) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const update = <K extends keyof AccountEditForm>(key: K, value: AccountEditForm[K]) => {
+    props.onChange({ ...props.form, [key]: value });
+  };
+  const isCurrentUser = props.account.id === props.currentUserId;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
+      <form
+        className="w-full max-w-lg rounded-md border border-border bg-panel p-4 shadow-xl"
+        onSubmit={props.onSubmit}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
+          <div>
+            <h2 className="text-base font-semibold">{props.labels.editAccount}</h2>
+            <p className="mt-1 text-xs text-muted">
+              ID {props.account.id} · {isCurrentUser ? props.labels.currentAccount : props.account.role}
+            </p>
+          </div>
+          <button
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
+            type="button"
+            onClick={props.onCancel}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+            <span className="sr-only">{props.labels.close}</span>
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <TextField
+            autoComplete="username"
+            label={props.labels.username}
+            value={props.form.username}
+            onChange={(value) => update("username", value)}
+          />
+          <TextField
+            autoComplete="new-password"
+            label={props.labels.newPassword}
+            type="password"
+            value={props.form.password}
+            onChange={(value) => update("password", value)}
+          />
+          <p className="-mt-2 text-xs text-muted">{props.labels.newPasswordHint}</p>
+          <ToggleField
+            disabled={isCurrentUser}
+            label={props.labels.enabled}
+            checked={props.form.enabled}
+            onChange={(value) => update("enabled", value)}
+          />
+        </div>
+
+        {props.saveError ? (
+          <p className="mt-3 text-sm text-red-700">{props.labels.accountSaveFailed}</p>
+        ) : null}
+
+        <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
+          <button
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
+            type="button"
+            onClick={props.onCancel}
+          >
+            {props.labels.cancel}
+          </button>
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={props.isSaving}
+            type="submit"
+          >
+            <Save className="h-4 w-4" aria-hidden="true" />
+            {props.labels.saveAccount}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
