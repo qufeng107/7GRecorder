@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminDashboard } from "./AdminDashboard";
 
@@ -414,5 +414,85 @@ describe("AdminDashboard", () => {
       "/api/v1/storage/local/actions/cleanup",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("lists jobs and retries a failed job", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = input instanceof Request ? input.url : input.toString();
+      if (path.endsWith("/api/v1/me")) {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 1, username: "admin", role: "SUPER_ADMIN", enabled: true }
+          })
+        } as Response;
+      }
+      if (path.includes("/api/v1/jobs?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 1,
+                recording_profile_id: 1,
+                type: "SYNC_RECORDER_PROFILE",
+                resource_class: "LIGHT",
+                business_key: "profile:1:recorder:sync",
+                status: "FAILED",
+                priority: 0,
+                attempts: 2,
+                max_attempts: 3,
+                run_after: "2026-09-06T08:00:00Z",
+                last_error_class: "TRANSIENT",
+                last_error: "temporary recorder sync failure",
+                created_at: "2026-09-06T07:00:00Z",
+                updated_at: "2026-09-06T08:01:00Z",
+                profile_name: "7G",
+                owner_username: "admin"
+              }
+            ],
+            total: 1
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/jobs/1/actions/retry")) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 1,
+            type: "SYNC_RECORDER_PROFILE",
+            resource_class: "LIGHT",
+            status: "PENDING",
+            priority: 0,
+            attempts: 0,
+            max_attempts: 3,
+            run_after: "2026-09-06T08:02:00Z",
+            created_at: "2026-09-06T07:00:00Z",
+            updated_at: "2026-09-06T08:02:00Z"
+          })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ items: [], total: 0, status: "ok", release_sha: "test" })
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithClient();
+    await switchToEnglish();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
+    expect(await screen.findByRole("heading", { name: "Jobs" })).toBeInTheDocument();
+    expect(await screen.findByText("SYNC_RECORDER_PROFILE")).toBeInTheDocument();
+    expect(await screen.findByText("temporary recorder sync failure")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/jobs/1/actions/retry",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
   });
 });

@@ -183,6 +183,8 @@ song processing FAILED
 - resource class 并发限制；
 - live recording 时不启动新的 NETWORK/MEDIA/AI；
 - Storage Critical 可以阻止低优先级重任务。
+- Admin Jobs API covers list visibility, failed/cancelled retry reset, and invalid running-job cancel rejection.
+- Admin Jobs UI covers list rendering and retry action wiring.
 
 ---
 
