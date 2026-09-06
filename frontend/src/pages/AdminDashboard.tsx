@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Activity,
@@ -1064,15 +1064,19 @@ export function AdminDashboard() {
     refetchInterval: 30000
   });
 
-  const profiles = profilesQuery.data?.items ?? [];
+  const profiles = useMemo(() => profilesQuery.data?.items ?? [], [profilesQuery.data?.items]);
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
-  const recordings = (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem);
+  const recordings = useMemo(
+    () => (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem),
+    [recordingsQuery.data?.items]
+  );
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
   const jobs = jobsQuery.data?.items ?? [];
   const jobTotal = jobsQuery.data?.total ?? jobs.length;
-  const accounts = accountsQuery.data?.items ?? [];
+  const accounts = useMemo(() => accountsQuery.data?.items ?? [], [accountsQuery.data?.items]);
   const accountTotal = accountsQuery.data?.total ?? accounts.length;
+  const localStorageSettings = localStorageQuery.data?.settings;
   const visibleProfiles = filterProfiles(profiles, profileSearch, profileSort);
   const visibleRecordings = filterRecordings(recordings, recordingSearch, recordingSort);
   const visibleJobs = filterJobs(jobs, jobSearch, jobSort);
@@ -1103,7 +1107,7 @@ export function AdminDashboard() {
   }, [accounts, selectedAccountId]);
 
   useEffect(() => {
-    const settings = localStorageQuery.data?.settings;
+    const settings = localStorageSettings;
     if (!settings) {
       return;
     }
@@ -1113,12 +1117,7 @@ export function AdminDashboard() {
       emergencyFreeGB: bytesToGB(settings.absolute_emergency_free_bytes),
       cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100)
     });
-  }, [
-    localStorageQuery.data?.settings?.absolute_emergency_free_bytes,
-    localStorageQuery.data?.settings?.cleanup_target_ratio,
-    localStorageQuery.data?.settings?.max_recording_bytes,
-    localStorageQuery.data?.settings?.min_system_free_bytes
-  ]);
+  }, [localStorageSettings]);
 
   const loginMutation = useMutation({
     mutationFn: () =>
@@ -3246,13 +3245,6 @@ function bytesToGB(value: number): number {
 
 function gbToBytes(value: number): number {
   return Math.max(0, Math.round(value * 1024 * 1024 * 1024));
-}
-
-function formatSeconds(value: number): string {
-  if (!value) {
-    return "0s";
-  }
-  return formatDuration(value * 1000);
 }
 
 function formatUploadSourceStatus(value: string, labels: AdminCopy): string {
