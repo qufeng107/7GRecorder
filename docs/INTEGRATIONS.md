@@ -107,8 +107,8 @@ CLI subprocess
 第一版整场 Recording 投稿要求：
 
 ```text
-Recording = COMPLETED
-all required video files = CLOSED + Local AVAILABLE
+Upload Source = READY_TO_UPLOAD
+source file = Local AVAILABLE
 ```
 
 如果已经因本地滚动存储造成必要分段缺失：
@@ -205,6 +205,7 @@ GenerateSignedDownloadURL
 
 - managed quota；
 - object metadata；
+- upload-source metadata；
 - rolling policy；
 - SOURCE_MISSING；
 - retry。

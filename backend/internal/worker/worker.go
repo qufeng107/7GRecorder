@@ -12,10 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/media"
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 	"github.com/7grecorder/7grecorder/backend/internal/recording"
+	"github.com/7grecorder/7grecorder/backend/internal/upload"
 )
 
 type Worker struct {
@@ -153,8 +155,15 @@ func (w Worker) runMergeJob(ctx context.Context, job workerJob) error {
 }
 
 func (w Worker) discoverUploadSources(ctx context.Context) error {
-	_, err := recording.NewStore(w.db, w.cfg).DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds)
+	if _, err := recording.NewStore(w.db, w.cfg).DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds); err != nil {
+		return err
+	}
+	_, err := upload.NewStore(w.db, w.cfg).Reconcile(ctx, accountSuperAdmin())
 	return err
+}
+
+func accountSuperAdmin() account.User {
+	return account.User{Role: account.RoleSuperAdmin}
 }
 
 func (w Worker) claimJob(ctx context.Context) (workerJob, error) {

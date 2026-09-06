@@ -192,6 +192,8 @@ song processing FAILED
   jobs, and segment timeline metadata.
 - Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
   `READY_TO_UPLOAD`, and terminal failure visibility.
+- Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`
+  source detection, idempotent Bilibili publication/job creation, and idempotent COS object/job creation.
 
 ---
 

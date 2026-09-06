@@ -345,6 +345,7 @@ created_at
 id
 recording_profile_id
 recording_id nullable
+upload_source_id nullable
 song_id nullable
 platform
 credential_id nullable
@@ -364,6 +365,7 @@ updated_at
 
 ```text
 (recording_id, platform) 对完整录播类 Publication 唯一
+(upload_source_id, platform) 对可上传视频类 Publication 唯一
 ```
 
 Bilibili Publication 与 COS 副本是不同概念。
@@ -408,6 +410,34 @@ status = AVAILABLE
 ```
 
 且只删除数据库登记、属于该 Storage Profile Prefix 的对象。
+
+### upload_source_cos_objects
+
+第一版上传归档以 `upload_sources` 为上传单位。每一条表示一个可上传视频在 COS 中的一份管理对象副本。
+
+```text
+id
+cos_storage_profile_id
+recording_profile_id
+upload_source_id
+object_key
+size_bytes
+checksum nullable
+etag nullable
+status               PENDING | UPLOADING | AVAILABLE | FAILED | DELETED | SOURCE_MISSING
+last_error nullable
+uploaded_at nullable
+deleted_at nullable
+created_at
+updated_at
+```
+
+约束：
+
+```text
+(cos_storage_profile_id, upload_source_id) UNIQUE
+(cos_storage_profile_id, object_key) UNIQUE
+```
 
 ---
 
@@ -583,8 +613,14 @@ publications.recording_profile_id
 publications.recording_id/song_id
   nullable FK
 
+publications.upload_source_id
+  nullable FK
+
 cos_objects.recording_file_id
   → recording_files.id
+
+upload_source_cos_objects.upload_source_id
+  → upload_sources.id
 
 songs.recording_id
   → recordings.id
@@ -606,7 +642,9 @@ cos storage profile: recording_profile_id
 recording file: relative_path
 recorder event: event_id
 full-recording publication: (recording_id, platform)
+upload-source publication: (upload_source_id, platform)
 COS copy: (cos_storage_profile_id, recording_file_id)
+upload-source COS copy: (cos_storage_profile_id, upload_source_id)
 Job: business_key when non-null
 session: token_digest
 ```

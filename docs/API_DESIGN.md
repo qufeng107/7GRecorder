@@ -212,6 +212,17 @@ GET/PUT /api/v1/recording-profiles/{id}/songs/settings
 
 未配置或 `enabled=false` 时，对应 Reconciler 不创建 Job。
 
+Early upload-module bootstrap implements credential metadata creation and module configuration:
+
+- `GET /api/v1/credentials` lists credential metadata only; encrypted secrets are never returned.
+- `POST /api/v1/credentials` creates a USER or SYSTEM credential and stores the submitted secret encrypted with the
+  server master key.
+- `GET/PUT /api/v1/recording-profiles/{id}/publishing/bilibili` reads or saves the Bilibili publishing profile.
+- `GET/PUT /api/v1/recording-profiles/{id}/storage/cos` reads or saves the COS storage profile.
+- `POST /api/v1/upload-modules/actions/reconcile` is SUPER_ADMIN-only and creates idempotent Bilibili/COS upload jobs
+  for `READY_TO_UPLOAD` upload sources. The first bootstrap creates jobs only; external upload execution is added after
+  pinned biliup/COS fixtures are captured.
+
 ### Recordings
 
 ```text
