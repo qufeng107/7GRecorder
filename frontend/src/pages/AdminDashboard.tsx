@@ -449,6 +449,15 @@ const uiCopy = {
     unprotect: "取消保护",
     protect: "保护",
     download: "下载",
+    details: "详情",
+    recordingDetails: "录像详情",
+    shortRecording: "短片段",
+    recordingStatus: "录像状态",
+    localStorageStatus: "本地状态",
+    file: "文件",
+    fileKind: "文件类型",
+    fileSize: "文件大小",
+    filePath: "文件路径",
     loadingRecordings: "正在加载录像。",
     noRecordings: "暂无已索引录像。",
     api: "API",
@@ -628,6 +637,15 @@ const uiCopy = {
     unprotect: "Unprotect",
     protect: "Protect",
     download: "Download",
+    details: "Details",
+    recordingDetails: "Recording Details",
+    shortRecording: "Short segment",
+    recordingStatus: "Recording Status",
+    localStorageStatus: "Local Status",
+    file: "File",
+    fileKind: "File Type",
+    fileSize: "File Size",
+    filePath: "File Path",
     loadingRecordings: "Loading recordings.",
     noRecordings: "No recordings indexed yet.",
     api: "API",
@@ -2544,6 +2562,8 @@ function RecordingsPanel(props: {
   onSortChange: (value: RecordingSortKey) => void;
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
+  const [selectedRecording, setSelectedRecording] = useState<RecordingItem | null>(null);
+
   return (
     <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2609,13 +2629,26 @@ function RecordingsPanel(props: {
             {props.recordings.map((recording) => {
               const file = recording.files?.[0];
               const canUseLocalFile = recording.local_storage_status !== "DELETED";
+              const durationMs = recording.duration_ms || file?.duration_ms || 0;
+              const isShortRecording = durationMs > 0 && durationMs < 3 * 60 * 1000;
               return (
                 <tr key={recording.id} className="bg-white">
                   <td className="px-3 py-3">
                     <div className="flex items-start gap-2">
                       <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                       <div>
-                        <p className="font-semibold text-ink">{recording.title || file?.original_name || props.labels.untitled}</p>
+                        <button
+                          className="text-left font-semibold text-ink hover:text-accent"
+                          type="button"
+                          onClick={() => setSelectedRecording(recording)}
+                        >
+                          {recording.title || file?.original_name || props.labels.untitled}
+                        </button>
+                        {isShortRecording ? (
+                          <span className="ml-2 inline-flex rounded-md border border-amber-300 px-2 py-0.5 text-xs font-medium text-amber-800">
+                            {props.labels.shortRecording}
+                          </span>
+                        ) : null}
                         <p className="mt-1 text-xs text-muted">
                           {props.labels.completedAt}: {formatDateTime(recording.completed_at || file?.closed_at || "", props.labels)}
                         </p>
@@ -2633,7 +2666,7 @@ function RecordingsPanel(props: {
                     {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
                   </td>
                   <td className="px-3 py-3 text-muted">
-                    {formatDuration(recording.duration_ms || file?.duration_ms || 0)}
+                    {formatDuration(durationMs)}
                   </td>
                   <td className="px-3 py-3 text-muted">{formatBytes(file?.size_bytes ?? 0)}</td>
                   <td className="max-w-md px-3 py-3 text-xs text-muted">
@@ -2642,6 +2675,13 @@ function RecordingsPanel(props: {
                   <td className="px-3 py-3">
                     {props.canManageLocalFiles ? (
                       <div className="flex flex-col items-start gap-2">
+                        <button
+                          className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                          type="button"
+                          onClick={() => setSelectedRecording(recording)}
+                        >
+                          {props.labels.details}
+                        </button>
                         {canUseLocalFile ? (
                           <button
                             className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
@@ -2688,7 +2728,117 @@ function RecordingsPanel(props: {
           </tbody>
         </table>
       </div>
+      {selectedRecording ? (
+        <RecordingDetailsDialog
+          canManageLocalFiles={props.canManageLocalFiles}
+          labels={props.labels}
+          recording={selectedRecording}
+          protectPending={props.protectPending}
+          onClose={() => setSelectedRecording(null)}
+          onToggleProtect={props.onToggleProtect}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function RecordingDetailsDialog(props: {
+  canManageLocalFiles: boolean;
+  labels: AdminCopy;
+  protectPending: boolean;
+  recording: RecordingItem;
+  onClose: () => void;
+  onToggleProtect: (recording: RecordingItem) => void;
+}) {
+  const file = props.recording.files?.[0];
+  const durationMs = props.recording.duration_ms || file?.duration_ms || 0;
+  const isShortRecording = durationMs > 0 && durationMs < 3 * 60 * 1000;
+  const canUseLocalFile = props.recording.local_storage_status !== "DELETED";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
+      <section className="w-full max-w-2xl rounded-md border border-border bg-panel p-4 shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border pb-3">
+          <div>
+            <h2 className="text-base font-semibold">{props.labels.recordingDetails}</h2>
+            <p className="mt-1 text-sm font-semibold text-ink">
+              {props.recording.title || file?.original_name || props.labels.untitled}
+            </p>
+          </div>
+          <button
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
+            type="button"
+            onClick={props.onClose}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+            <span className="sr-only">{props.labels.close}</span>
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <Metric label={props.labels.profile} value={`${props.recording.profile_name} / ${props.recording.room_id}`} />
+          <Metric label={props.labels.streamer} value={props.recording.streamer_name || "-"} />
+          <Metric label={props.labels.startTime} value={formatDateTime(props.recording.started_at, props.labels)} />
+          <Metric label={props.labels.completedAt} value={formatDateTime(props.recording.completed_at || file?.closed_at || "", props.labels)} />
+          <Metric label={props.labels.duration} value={formatDuration(durationMs)} />
+          <Metric label={props.labels.fileSize} value={formatBytes(file?.size_bytes ?? 0)} />
+          <Metric label={props.labels.recordingStatus} value={props.recording.recording_status} />
+          <Metric label={props.labels.localStorageStatus} value={props.recording.local_storage_status} />
+          <Metric label={props.labels.fileStatus} value={file?.file_status ?? props.labels.noFile} />
+          <Metric label={props.labels.fileKind} value={file?.kind ?? "-"} />
+        </div>
+
+        {isShortRecording ? (
+          <p className="mt-4 inline-flex rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-800">
+            {props.labels.shortRecording}
+          </p>
+        ) : null}
+
+        <div className="mt-4 rounded-md border border-border bg-white p-3">
+          <p className="text-xs uppercase text-muted">{props.labels.filePath}</p>
+          <p className="mt-1 break-all text-sm text-ink">{file?.relative_path ?? "-"}</p>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <div className="text-sm text-muted">
+            {props.recording.local_protected ? props.labels.protected : props.labels.localStorageStatus}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {props.canManageLocalFiles && canUseLocalFile ? (
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                disabled={props.protectPending}
+                type="button"
+                onClick={() => props.onToggleProtect(props.recording)}
+              >
+                {props.recording.local_protected ? (
+                  <Unlock className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Lock className="h-4 w-4" aria-hidden="true" />
+                )}
+                {props.recording.local_protected ? props.labels.unprotect : props.labels.protect}
+              </button>
+            ) : null}
+            {file && file.file_status === "CLOSED" ? (
+              <a
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent"
+                href={`/api/v1/recording-files/${file.id}/download`}
+              >
+                <Download className="h-4 w-4" aria-hidden="true" />
+                {props.labels.download}
+              </a>
+            ) : null}
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-md bg-ink px-3 text-sm font-medium text-white"
+              type="button"
+              onClick={props.onClose}
+            >
+              {props.labels.close}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

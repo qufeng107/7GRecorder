@@ -16,6 +16,10 @@
 
 - Recording start time is a first-class table column.
 - Displayed recording timestamps use `Asia/Shanghai` and include the visible China Time label.
+- Each recording row can open a details dialog with profile, streamer, China-time timestamps, duration, local status,
+  file metadata, file path, protect action, and download action.
+- Completed recordings shorter than three minutes are marked as short segments. This is an observation label only;
+  it must not merge, delete, or hide files.
 
 ## Jobs
 
