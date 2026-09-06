@@ -344,6 +344,7 @@ const uiCopy = {
     newPasswordHint: "留空表示不修改密码。",
     saveAccount: "保存账号",
     currentAccount: "当前账号",
+    noAction: "无可用操作",
     disable: "停用",
     enable: "启用",
     editProfiles: "编辑录制配置",
@@ -499,6 +500,7 @@ const uiCopy = {
     newPasswordHint: "Leave blank to keep the current password.",
     saveAccount: "Save Account",
     currentAccount: "Current account",
+    noAction: "No actions",
     disable: "Disable",
     enable: "Enable",
     editProfiles: "Edit profiles",
@@ -643,6 +645,16 @@ function accountUpdatePayload(form: AccountEditForm) {
   };
 }
 
+function hasManagerPermission(user: User | undefined, policy: ManagerPolicy | undefined, key: PolicyFlag): boolean {
+  if (!user) {
+    return false;
+  }
+  if (user.role === "SUPER_ADMIN") {
+    return true;
+  }
+  return Boolean(policy?.[key]);
+}
+
 function includesSearch(value: string | number | undefined, search: string): boolean {
   return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase());
 }
@@ -748,6 +760,9 @@ export function AdminDashboard() {
   const user = meQuery.data?.user;
   const ownPolicy = meQuery.data?.policy;
   const canManageSystemSettings = user?.role === "SUPER_ADMIN";
+  const canEditRecordingProfiles = hasManagerPermission(user, ownPolicy, "can_edit_recording_profile");
+  const canManageLocalFiles = hasManagerPermission(user, ownPolicy, "can_manage_local_files");
+  const canScanLocalFiles = Boolean(canManageSystemSettings);
   const ui = uiCopy[language];
 
   const healthQuery = useQuery({
@@ -1119,6 +1134,7 @@ export function AdminDashboard() {
             {activePage === "profiles" ? (
               <ProfileListPanel
                 labels={ui}
+                canEdit={canEditRecordingProfiles}
                 profiles={visibleProfiles}
                 search={profileSearch}
                 selectedProfileId={selectedProfileId}
@@ -1127,11 +1143,17 @@ export function AdminDashboard() {
                 visibleTotal={visibleProfiles.length}
                 showOwner={Boolean(canManageSystemSettings)}
                 onCreate={() => {
+                  if (!canEditRecordingProfiles) {
+                    return;
+                  }
                   setSelectedProfileId(null);
                   setProfileForm({ ...emptyProfileForm, owner_user_id: String(user.id) });
                   setProfileEditorOpen(true);
                 }}
                 onSelect={(profile) => {
+                  if (!canEditRecordingProfiles) {
+                    return;
+                  }
                   setSelectedProfileId(profile.id);
                   setProfileForm(profileToForm(profile));
                   setProfileEditorOpen(true);
@@ -1234,6 +1256,8 @@ export function AdminDashboard() {
               <RecordingsPanel
                 isLoading={recordingsQuery.isLoading}
                 labels={ui}
+                canManageLocalFiles={canManageLocalFiles}
+                canScanLocalFiles={canScanLocalFiles}
                 protectPending={protectRecordingMutation.isPending}
                 reconcileError={reconcileMutation.isError}
                 reconcilePending={reconcileMutation.isPending}
@@ -1973,6 +1997,7 @@ function AccountEditorDialog(props: {
 }
 
 function ProfileListPanel(props: {
+  canEdit: boolean;
   labels: AdminCopy;
   profiles: RecordingProfile[];
   search: string;
@@ -1992,14 +2017,16 @@ function ProfileListPanel(props: {
         <h2 className="text-sm font-semibold">{props.labels.recordingProfiles}</h2>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</span>
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white"
-            type="button"
-            onClick={props.onCreate}
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            {props.labels.new}
-          </button>
+          {props.canEdit ? (
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white"
+              type="button"
+              onClick={props.onCreate}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {props.labels.new}
+            </button>
+          ) : null}
         </div>
       </div>
       <TableToolbar
@@ -2032,7 +2059,15 @@ function ProfileListPanel(props: {
                 className={profile.id === props.selectedProfileId ? "bg-[#f4f7f1]" : "bg-white"}
               >
                 <td className="px-3 py-3">
-                  <button className="font-semibold text-ink hover:text-accent" type="button" onClick={() => props.onSelect(profile)}>
+                  <button
+                    className={`font-semibold ${props.canEdit ? "text-ink hover:text-accent" : "cursor-default text-ink"}`}
+                    type="button"
+                    onClick={() => {
+                      if (props.canEdit) {
+                        props.onSelect(profile);
+                      }
+                    }}
+                  >
                     {profile.name}
                   </button>
                   <p className="mt-1 text-xs text-muted">{profile.streamer_name}</p>
@@ -2044,7 +2079,9 @@ function ProfileListPanel(props: {
                 <td className="px-3 py-3 text-muted">{profile.runtime.recorder_status}</td>
                 <td className="px-3 py-3 text-muted">{profile.runtime.sync_status}</td>
                 <td className="px-3 py-3">
-                  {profile.archived_at ? (
+                  {!props.canEdit ? (
+                    <span className="text-xs text-muted">{props.labels.noAction}</span>
+                  ) : profile.archived_at ? (
                     <span className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted">
                       {props.labels.archived}
                     </span>
@@ -2278,6 +2315,8 @@ function TableToolbar(props: {
 }
 
 function RecordingsPanel(props: {
+  canManageLocalFiles: boolean;
+  canScanLocalFiles: boolean;
   isLoading: boolean;
   labels: AdminCopy;
   protectPending: boolean;
@@ -2301,15 +2340,17 @@ function RecordingsPanel(props: {
           <h2 className="text-sm font-semibold">{props.labels.recordings}</h2>
           <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
         </div>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-          disabled={props.reconcilePending}
-          type="button"
-          onClick={props.onReconcile}
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {props.labels.scan}
-        </button>
+        {props.canScanLocalFiles ? (
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={props.reconcilePending}
+            type="button"
+            onClick={props.onReconcile}
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {props.labels.scan}
+          </button>
+        ) : null}
       </div>
 
       {props.reconcileResult ? (
@@ -2387,30 +2428,34 @@ function RecordingsPanel(props: {
                     <span className="break-all">{file?.relative_path ?? "-"}</span>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="flex flex-col items-start gap-2">
-                      <button
-                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                        disabled={props.protectPending}
-                        type="button"
-                        onClick={() => props.onToggleProtect(recording)}
-                      >
-                        {recording.local_protected ? (
-                          <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
-                        ) : (
-                          <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                        )}
-                        {recording.local_protected ? props.labels.unprotect : props.labels.protect}
-                      </button>
-                      {file && file.file_status !== "WRITING" ? (
-                        <a
-                          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                          href={`/api/v1/recording-files/${file.id}/download`}
+                    {props.canManageLocalFiles ? (
+                      <div className="flex flex-col items-start gap-2">
+                        <button
+                          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                          disabled={props.protectPending}
+                          type="button"
+                          onClick={() => props.onToggleProtect(recording)}
                         >
-                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                          {props.labels.download}
-                        </a>
-                      ) : null}
-                    </div>
+                          {recording.local_protected ? (
+                            <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
+                          ) : (
+                            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {recording.local_protected ? props.labels.unprotect : props.labels.protect}
+                        </button>
+                        {file && file.file_status !== "WRITING" ? (
+                          <a
+                            className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                            href={`/api/v1/recording-files/${file.id}/download`}
+                          >
+                            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                            {props.labels.download}
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted">{props.labels.noAction}</span>
+                    )}
                   </td>
                 </tr>
               );
