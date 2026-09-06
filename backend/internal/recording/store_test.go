@@ -601,6 +601,17 @@ func TestDiscoverUploadSourcesPersistsContinuousSegments(t *testing.T) {
 	if len(source.Segments) != 2 || source.Segments[1].TimelineStartMs != 180000 || source.Segments[1].TimelineEndMs != 360000 {
 		t.Fatalf("unexpected upload source segments: %#v", source.Segments)
 	}
+	var jobType string
+	if err := database.QueryRowContext(ctx, `
+		SELECT type
+		FROM jobs
+		WHERE business_key = 'upload-source:1:merge'
+	`).Scan(&jobType); err != nil {
+		t.Fatalf("query merge job returned error: %v", err)
+	}
+	if jobType != "MERGE_UPLOAD_SOURCE" {
+		t.Fatalf("unexpected merge job type: %s", jobType)
+	}
 }
 
 func TestDiscoverUploadSourcesMarksSingleSegmentReady(t *testing.T) {

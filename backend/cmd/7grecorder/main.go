@@ -49,7 +49,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer database.Close()
-		worker.New(database, recorder.NewHTTPClient(cfg)).Run(ctx)
+		worker.New(database, recorder.NewHTTPClient(cfg), cfg).Run(ctx)
 	case "version":
 		fmt.Println(version.Info())
 	default:

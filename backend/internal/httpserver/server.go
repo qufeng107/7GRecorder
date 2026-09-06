@@ -91,7 +91,7 @@ func startWorker(ctx context.Context, cfg config.Config) {
 		<-ctx.Done()
 		_ = database.Close()
 	}()
-	go worker.New(database, recorder.NewHTTPClient(cfg)).Run(ctx)
+	go worker.New(database, recorder.NewHTTPClient(cfg), cfg).Run(ctx)
 }
 
 func readiness(ctx context.Context, cfg config.Config) error {
@@ -100,6 +100,7 @@ func readiness(ctx context.Context, cfg config.Config) error {
 		filepath.Dir(cfg.SQLitePath),
 		cfg.TempRoot,
 		filepath.Join(cfg.DataRoot, "recordings"),
+		filepath.Join(cfg.DataRoot, "upload-sources"),
 		filepath.Join(cfg.DataRoot, "songs"),
 		filepath.Join(cfg.DataRoot, "backups", "db"),
 	} {
