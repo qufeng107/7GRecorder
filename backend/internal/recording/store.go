@@ -727,17 +727,17 @@ type uploadSourceMetadata struct {
 }
 
 type uploadSourceMetadataSegment struct {
-	RecordingID           int64  `json:"recording_id"`
-	RecordingFileID       int64  `json:"recording_file_id"`
-	SourceStartedAt       string `json:"source_started_at"`
-	SourceCompletedAt     string `json:"source_completed_at"`
+	RecordingID          int64  `json:"recording_id"`
+	RecordingFileID      int64  `json:"recording_file_id"`
+	SourceStartedAt      string `json:"source_started_at"`
+	SourceCompletedAt    string `json:"source_completed_at"`
 	SourceStartedChina   string `json:"source_started_china"`
 	SourceCompletedChina string `json:"source_completed_china"`
-	TimelineStartMs       int64  `json:"timeline_start_ms"`
-	TimelineEndMs         int64  `json:"timeline_end_ms"`
-	RelativePath          string `json:"relative_path"`
-	SizeBytes             int64  `json:"size_bytes"`
-	DurationMs            int64  `json:"duration_ms"`
+	TimelineStartMs      int64  `json:"timeline_start_ms"`
+	TimelineEndMs        int64  `json:"timeline_end_ms"`
+	RelativePath         string `json:"relative_path"`
+	SizeBytes            int64  `json:"size_bytes"`
+	DurationMs           int64  `json:"duration_ms"`
 }
 
 func uploadSourceSummary(recordings []Recording, thresholdSeconds int64) uploadSourceMetadata {
@@ -779,17 +779,17 @@ func uploadSourceSummary(recordings []Recording, thresholdSeconds int64) uploadS
 			}
 		}
 		segment := uploadSourceMetadataSegment{
-			RecordingID:           item.ID,
-			RecordingFileID:       file.ID,
-			SourceStartedAt:       item.StartedAt,
-			SourceCompletedAt:     completed.UTC().Format(time.RFC3339),
+			RecordingID:          item.ID,
+			RecordingFileID:      file.ID,
+			SourceStartedAt:      item.StartedAt,
+			SourceCompletedAt:    completed.UTC().Format(time.RFC3339),
 			SourceStartedChina:   formatChinaTimestamp(item.StartedAt),
 			SourceCompletedChina: formatChinaTimestamp(completed.UTC().Format(time.RFC3339)),
-			TimelineStartMs:       timeline,
-			TimelineEndMs:         timeline + durationMs,
-			RelativePath:          file.RelativePath,
-			SizeBytes:             file.SizeBytes,
-			DurationMs:            durationMs,
+			TimelineStartMs:      timeline,
+			TimelineEndMs:        timeline + durationMs,
+			RelativePath:         file.RelativePath,
+			SizeBytes:            file.SizeBytes,
+			DurationMs:           durationMs,
 		}
 		summary.Segments = append(summary.Segments, segment)
 		summary.TotalBytes += file.SizeBytes
