@@ -2794,9 +2794,51 @@ function RecordingDetailsDialog(props: {
           </p>
         ) : null}
 
-        <div className="mt-4 rounded-md border border-border bg-white p-3">
-          <p className="text-xs uppercase text-muted">{props.labels.filePath}</p>
-          <p className="mt-1 break-all text-sm text-ink">{file?.relative_path ?? "-"}</p>
+        <div className="mt-4 overflow-hidden rounded-md border border-border">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
+              <tr>
+                <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.fileKind}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.fileStatus}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.fileSize}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(props.recording.files ?? []).map((item) => (
+                <tr key={item.id} className="bg-white align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-ink">{item.original_name}</p>
+                    <p className="mt-1 break-all text-xs text-muted">{item.relative_path}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{item.kind}</td>
+                  <td className="px-3 py-3 text-muted">{item.file_status}</td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(item.size_bytes)}</td>
+                  <td className="px-3 py-3">
+                    {item.file_status === "CLOSED" ? (
+                      <a
+                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                        href={`/api/v1/recording-files/${item.id}/download`}
+                      >
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        {props.labels.download}
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted">{props.labels.noAction}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {(props.recording.files ?? []).length === 0 ? (
+                <tr>
+                  <td className="px-3 py-6 text-center text-muted" colSpan={5}>
+                    {props.labels.noFile}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
