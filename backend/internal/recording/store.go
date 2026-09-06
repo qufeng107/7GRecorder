@@ -112,6 +112,17 @@ type CleanupCandidateList struct {
 	PreviewReclaimableBytes int64              `json:"preview_reclaimable_bytes"`
 }
 
+type CleanupRunRequest struct {
+	MaxRecordings int `json:"max_recordings"`
+}
+
+type CleanupRunResult struct {
+	DeletedRecordings int   `json:"deleted_recordings"`
+	DeletedFiles      int   `json:"deleted_files"`
+	ReclaimedBytes    int64 `json:"reclaimed_bytes"`
+	SkippedRecordings int   `json:"skipped_recordings"`
+}
+
 type Store struct {
 	db  *sql.DB
 	cfg config.Config
@@ -255,12 +266,7 @@ func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit 
 	if actor.Role != account.RoleSuperAdmin {
 		return CleanupCandidateList{}, ErrForbidden
 	}
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 50 {
-		limit = 50
-	}
+	limit = normalizeCleanupLimit(limit)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT rec.id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
@@ -278,6 +284,22 @@ func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit 
 			AND rec.local_storage_status != 'DELETED'
 			AND rec.local_deleted_at IS NULL
 			AND rec.local_protected = 0
+			AND NOT EXISTS (
+				SELECT 1 FROM recording_files wf
+				WHERE wf.recording_id = rec.id
+					AND wf.deleted_at IS NULL
+					AND wf.file_status = 'WRITING'
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM jobs j
+				WHERE j.status = 'RUNNING'
+					AND (
+						j.recording_id = rec.id
+						OR j.recording_file_id IN (
+							SELECT id FROM recording_files WHERE recording_id = rec.id
+						)
+					)
+			)
 		GROUP BY rec.id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			rec.title, rec.started_at, rec.completed_at, rec.duration_ms
 		HAVING SUM(CASE
@@ -321,6 +343,44 @@ func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit 
 		Total:                   len(items),
 		PreviewReclaimableBytes: previewReclaimableBytes,
 	}, nil
+}
+
+func (s Store) RunLocalCleanup(ctx context.Context, actor account.User, req CleanupRunRequest) (CleanupRunResult, error) {
+	if actor.Role != account.RoleSuperAdmin {
+		return CleanupRunResult{}, ErrForbidden
+	}
+	limit := normalizeCleanupLimit(req.MaxRecordings)
+	status, err := s.LocalStorageStatus(ctx, actor)
+	if err != nil {
+		return CleanupRunResult{}, err
+	}
+	if status.NeedReclaimBytes <= 0 {
+		return CleanupRunResult{}, nil
+	}
+
+	candidates, err := s.CleanupCandidates(ctx, actor, limit)
+	if err != nil {
+		return CleanupRunResult{}, err
+	}
+
+	result := CleanupRunResult{}
+	for _, candidate := range candidates.Items {
+		if result.ReclaimedBytes >= status.NeedReclaimBytes {
+			break
+		}
+		deletedFiles, reclaimedBytes, deleted, err := s.deleteLocalRecordingFiles(ctx, candidate.RecordingID)
+		if err != nil {
+			return CleanupRunResult{}, err
+		}
+		if !deleted {
+			result.SkippedRecordings++
+			continue
+		}
+		result.DeletedRecordings++
+		result.DeletedFiles += deletedFiles
+		result.ReclaimedBytes += reclaimedBytes
+	}
+	return result, nil
 }
 
 func (s Store) localStorageSettings(ctx context.Context, diskTotalBytes int64) (LocalStorageSettings, bool, error) {
@@ -407,6 +467,170 @@ func maxInt64(values ...int64) int64 {
 		}
 	}
 	return result
+}
+
+func normalizeCleanupLimit(limit int) int {
+	if limit <= 0 {
+		return 10
+	}
+	if limit > 50 {
+		return 50
+	}
+	return limit
+}
+
+type cleanupFileRef struct {
+	ID           int64
+	RelativePath string
+	SizeBytes    int64
+}
+
+func (s Store) deleteLocalRecordingFiles(ctx context.Context, recordingID int64) (int, int64, bool, error) {
+	if !s.recordingCleanupEligible(ctx, recordingID) {
+		return 0, 0, false, nil
+	}
+	files, err := s.cleanupFiles(ctx, recordingID)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if len(files) == 0 {
+		return 0, 0, false, nil
+	}
+
+	var reclaimedBytes int64
+	for _, file := range files {
+		absolutePath, err := resolveWithinRoot(s.cfg.DataRoot, file.RelativePath)
+		if err != nil {
+			return 0, 0, false, fmt.Errorf("resolve cleanup file: %w", err)
+		}
+		info, err := os.Lstat(absolutePath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, 0, false, fmt.Errorf("stat cleanup file: %w", err)
+		}
+		if info.IsDir() {
+			return 0, 0, false, fmt.Errorf("cleanup target is directory: %w", ErrValidation)
+		}
+		if err := os.Remove(absolutePath); err != nil {
+			return 0, 0, false, fmt.Errorf("delete cleanup file: %w", err)
+		}
+		reclaimedBytes += file.SizeBytes
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("begin cleanup metadata update: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, file := range files {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE recording_files
+			SET file_status = 'DELETED', deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND file_status = 'CLOSED' AND deleted_at IS NULL
+		`, file.ID); err != nil {
+			return 0, 0, false, fmt.Errorf("mark cleanup file deleted: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE recordings
+		SET local_storage_status = 'DELETED', local_deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, recordingID); err != nil {
+		return 0, 0, false, fmt.Errorf("mark recording locally deleted: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, false, fmt.Errorf("commit cleanup metadata update: %w", err)
+	}
+	return len(files), reclaimedBytes, true, nil
+}
+
+func (s Store) recordingCleanupEligible(ctx context.Context, recordingID int64) bool {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM recordings rec
+		WHERE rec.id = ?
+			AND rec.recording_status = 'COMPLETED'
+			AND rec.local_storage_status != 'DELETED'
+			AND rec.local_deleted_at IS NULL
+			AND rec.local_protected = 0
+			AND NOT EXISTS (
+				SELECT 1 FROM recording_files wf
+				WHERE wf.recording_id = rec.id
+					AND wf.deleted_at IS NULL
+					AND wf.file_status = 'WRITING'
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM jobs j
+				WHERE j.status = 'RUNNING'
+					AND (
+						j.recording_id = rec.id
+						OR j.recording_file_id IN (
+							SELECT id FROM recording_files WHERE recording_id = rec.id
+						)
+					)
+			)
+	`, recordingID).Scan(&count)
+	return err == nil && count == 1
+}
+
+func (s Store) cleanupFiles(ctx context.Context, recordingID int64) ([]cleanupFileRef, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, relative_path, COALESCE(size_bytes, 0)
+		FROM recording_files
+		WHERE recording_id = ?
+			AND kind = 'video'
+			AND file_status = 'CLOSED'
+			AND deleted_at IS NULL
+		ORDER BY id ASC
+	`, recordingID)
+	if err != nil {
+		return nil, fmt.Errorf("list cleanup files: %w", err)
+	}
+	defer rows.Close()
+
+	files := make([]cleanupFileRef, 0)
+	for rows.Next() {
+		var file cleanupFileRef
+		if err := rows.Scan(&file.ID, &file.RelativePath, &file.SizeBytes); err != nil {
+			return nil, fmt.Errorf("scan cleanup file: %w", err)
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cleanup files: %w", err)
+	}
+	return files, nil
+}
+
+func resolveWithinRoot(root string, relativePath string) (string, error) {
+	if relativePath == "" || filepath.IsAbs(relativePath) {
+		return "", ErrValidation
+	}
+	cleaned := filepath.Clean(relativePath)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", ErrValidation
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	candidate := filepath.Join(rootAbs, cleaned)
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(rootAbs, candidateAbs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", ErrValidation
+	}
+	return candidateAbs, nil
 }
 
 func (s Store) SetLocalProtected(ctx context.Context, actor account.User, recordingID int64, protected bool) (Recording, error) {

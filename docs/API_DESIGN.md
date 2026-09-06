@@ -236,6 +236,18 @@ Early production bootstrap implements `protect-local` and `unprotect-local` only
 `recordings.local_protected` and must not delete or move files. `delete-local` remains reserved for the later
 rolling cleanup workflow.
 
+Early production bootstrap implements system-level manual local cleanup as:
+
+```text
+POST /api/v1/storage/local/actions/cleanup
+```
+
+The endpoint is SUPER_ADMIN-only. It executes the same oldest completed, unprotected local cleanup policy shown by
+`cleanup-candidates`, but only when the current storage policy reports bytes need to be reclaimed. Each run is bounded
+by `max_recordings` and must re-check that the recording is completed, unprotected, not already locally deleted, has no
+WRITING files, and is not referenced by RUNNING jobs before deleting local video files. Metadata is retained and marked
+`DELETED`.
+
 Early production bootstrap also exposes:
 
 ```text

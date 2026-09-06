@@ -16,6 +16,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -321,5 +322,97 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("Recording Time")).toBeInTheDocument();
     expect(await screen.findByText("test recording")).toBeInTheDocument();
     expect((await screen.findAllByText(/China Time/)).length).toBeGreaterThan(0);
+  });
+
+  it("runs local cleanup from the system storage page after confirmation", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = input instanceof Request ? input.url : input.toString();
+      if (path.endsWith("/api/v1/me")) {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 1, username: "admin", role: "SUPER_ADMIN", enabled: true }
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/storage/local")) {
+        return {
+          ok: true,
+          json: async () => ({
+            data_root: "/data/7grecorder",
+            disk_total_bytes: 100,
+            disk_free_bytes: 10,
+            disk_available_bytes: 10,
+            indexed_video_bytes: 90,
+            indexed_video_files: 1,
+            protected_recordings: 0,
+            completed_recordings: 1,
+            settings_configured: true,
+            health: "WARNING",
+            need_reclaim_bytes: 40,
+            target_video_bytes: 50,
+            settings: {
+              max_recording_bytes: 80,
+              min_system_free_bytes: 20,
+              cleanup_target_ratio: 0.5,
+              absolute_emergency_free_bytes: 10
+            }
+          })
+        } as Response;
+      }
+      if (path.includes("/api/v1/storage/local/cleanup-candidates")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                recording_id: 1,
+                profile_name: "7G",
+                room_id: "1741048619",
+                streamer_name: "streamer",
+                title: "old recording",
+                started_at: "2026-09-05T15:00:00Z",
+                completed_at: "2026-09-05T16:00:00Z",
+                duration_ms: 3600000,
+                file_count: 1,
+                reclaimable_bytes: 40
+              }
+            ],
+            total: 1,
+            preview_reclaimable_bytes: 40
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/storage/local/actions/cleanup")) {
+        return {
+          ok: true,
+          json: async () => ({
+            deleted_recordings: 1,
+            deleted_files: 1,
+            reclaimed_bytes: 40,
+            skipped_recordings: 0
+          })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ items: [], total: 0, status: "ok", release_sha: "test" })
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderWithClient();
+    await switchToEnglish();
+
+    fireEvent.click(await screen.findByRole("button", { name: /system settings/i }));
+    await screen.findByText("old recording");
+    fireEvent.click(await screen.findByRole("button", { name: "Run Cleanup" }));
+
+    expect(await screen.findByText(/Cleanup finished/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/storage/local/actions/cleanup",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 });

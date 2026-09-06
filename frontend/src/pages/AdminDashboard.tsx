@@ -18,6 +18,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Trash2,
   Unlock,
   UserCircle,
   UserPlus,
@@ -180,6 +181,13 @@ type CleanupCandidateListResponse = {
   items: CleanupCandidate[] | null;
   total?: number;
   preview_reclaimable_bytes: number;
+};
+
+type CleanupRunResult = {
+  deleted_recordings: number;
+  deleted_files: number;
+  reclaimed_bytes: number;
+  skipped_recordings: number;
 };
 
 type ProfileForm = {
@@ -378,6 +386,11 @@ const uiCopy = {
     reclaimable: "可回收",
     untitled: "未命名",
     noCleanupCandidates: "暂无可清理候选。",
+    runCleanup: "执行清理",
+    cleanupConfirm: "将删除最旧的未保护已完成录像文件，并保留数据库记录。确认执行？",
+    cleanupResult: (recordings: number, files: number, bytes: string, skipped: number) =>
+      `清理完成：删除 ${recordings} 条录像、${files} 个文件，回收 ${bytes}，跳过 ${skipped} 条。`,
+    cleanupFailed: "清理失败，请查看服务器日志。",
     recordings: "录像文件",
     scan: "扫描",
     scanResult: (imported: number, updated: number, skipped: number) =>
@@ -536,6 +549,11 @@ const uiCopy = {
     reclaimable: "Reclaimable",
     untitled: "Untitled",
     noCleanupCandidates: "No cleanup candidates.",
+    runCleanup: "Run Cleanup",
+    cleanupConfirm: "This will delete the oldest unprotected completed local recording files while keeping database records. Continue?",
+    cleanupResult: (recordings: number, files: number, bytes: string, skipped: number) =>
+      `Cleanup finished: deleted ${recordings} recordings, ${files} files, reclaimed ${bytes}, skipped ${skipped}.`,
+    cleanupFailed: "Cleanup failed. Check server logs.",
     recordings: "Recordings",
     scan: "Scan",
     scanResult: (imported: number, updated: number, skipped: number) =>
@@ -973,6 +991,19 @@ export function AdminDashboard() {
     }
   });
 
+  const cleanupMutation = useMutation({
+    mutationFn: () =>
+      requestJson<CleanupRunResult>("/api/v1/storage/local/actions/cleanup", {
+        method: "POST",
+        body: JSON.stringify({ max_recordings: Math.max(1, Math.min(5, cleanupCandidatesQuery.data?.items?.length ?? 5)) })
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+      void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
+    }
+  });
+
   const archiveProfileMutation = useMutation({
     mutationFn: (profileId: number) =>
       requestJson<RecordingProfile>(`/api/v1/recording-profiles/${profileId}`, {
@@ -1242,12 +1273,20 @@ export function AdminDashboard() {
                 candidates={cleanupCandidatesQuery.data?.items ?? []}
                 previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
                 form={storageForm}
+                cleanupError={cleanupMutation.isError}
+                cleanupPending={cleanupMutation.isPending}
+                cleanupResult={cleanupMutation.data}
                 isLoading={localStorageQuery.isLoading}
                 isSaving={saveStorageSettingsMutation.isPending}
                 labels={ui}
                 saveError={saveStorageSettingsMutation.isError}
                 status={localStorageQuery.data}
                 onFormChange={setStorageForm}
+                onRunCleanup={() => {
+                  if (window.confirm(ui.cleanupConfirm)) {
+                    cleanupMutation.mutate();
+                  }
+                }}
                 onSave={() => saveStorageSettingsMutation.mutate()}
               />
             ) : null}
@@ -2113,6 +2152,9 @@ function ProfileListPanel(props: {
 
 function StoragePanel(props: {
   candidates: CleanupCandidate[];
+  cleanupError: boolean;
+  cleanupPending: boolean;
+  cleanupResult?: CleanupRunResult;
   form: {
     maxRecordingGB: number;
     minFreeGB: number;
@@ -2131,6 +2173,7 @@ function StoragePanel(props: {
     emergencyFreeGB: number;
     cleanupTargetPercent: number;
   }) => void;
+  onRunCleanup: () => void;
   onSave: () => void;
 }) {
   const usedPercent =
@@ -2222,9 +2265,33 @@ function StoragePanel(props: {
 
       <div className="mt-5 border-t border-border pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold">{props.labels.cleanupPreview}</h3>
-          <span className="text-xs text-muted">{props.labels.oldestUnprotected}</span>
+          <div>
+            <h3 className="text-sm font-semibold">{props.labels.cleanupPreview}</h3>
+            <span className="text-xs text-muted">{props.labels.oldestUnprotected}</span>
+          </div>
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-300 px-3 text-sm font-semibold text-red-700 hover:border-red-500 disabled:opacity-50"
+            disabled={props.cleanupPending || props.candidates.length === 0 || (props.status?.need_reclaim_bytes ?? 0) <= 0}
+            type="button"
+            onClick={props.onRunCleanup}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            {props.labels.runCleanup}
+          </button>
         </div>
+        {props.cleanupResult ? (
+          <p className="mt-3 text-sm text-muted">
+            {props.labels.cleanupResult(
+              props.cleanupResult.deleted_recordings,
+              props.cleanupResult.deleted_files,
+              formatBytes(props.cleanupResult.reclaimed_bytes),
+              props.cleanupResult.skipped_recordings
+            )}
+          </p>
+        ) : null}
+        {props.cleanupError ? (
+          <p className="mt-3 text-sm text-red-700">{props.labels.cleanupFailed}</p>
+        ) : null}
         <div className="mt-3 overflow-hidden rounded-md border border-border">
           <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
@@ -2397,6 +2464,7 @@ function RecordingsPanel(props: {
           <tbody>
             {props.recordings.map((recording) => {
               const file = recording.files?.[0];
+              const canUseLocalFile = recording.local_storage_status !== "DELETED";
               return (
                 <tr key={recording.id} className="bg-white">
                   <td className="px-3 py-3">
@@ -2430,20 +2498,22 @@ function RecordingsPanel(props: {
                   <td className="px-3 py-3">
                     {props.canManageLocalFiles ? (
                       <div className="flex flex-col items-start gap-2">
-                        <button
-                          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                          disabled={props.protectPending}
-                          type="button"
-                          onClick={() => props.onToggleProtect(recording)}
-                        >
-                          {recording.local_protected ? (
-                            <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
-                          ) : (
-                            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                          )}
-                          {recording.local_protected ? props.labels.unprotect : props.labels.protect}
-                        </button>
-                        {file && file.file_status !== "WRITING" ? (
+                        {canUseLocalFile ? (
+                          <button
+                            className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                            disabled={props.protectPending}
+                            type="button"
+                            onClick={() => props.onToggleProtect(recording)}
+                          >
+                            {recording.local_protected ? (
+                              <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
+                            ) : (
+                              <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                            )}
+                            {recording.local_protected ? props.labels.unprotect : props.labels.protect}
+                          </button>
+                        ) : null}
+                        {file && file.file_status === "CLOSED" ? (
                           <a
                             className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
                             href={`/api/v1/recording-files/${file.id}/download`}
