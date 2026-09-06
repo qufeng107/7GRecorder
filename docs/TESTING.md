@@ -188,8 +188,8 @@ song processing FAILED
 - Recording group diagnostics cover adjacent same-profile grouping, real-gap splitting, short-segment flags, and
   read-only behavior before FFmpeg merge jobs exist.
 - Upload source discovery covers the shared merge gap threshold, waiting until a profile is no longer recording,
-  idempotent source creation, single-segment `READY_TO_UPLOAD`, multi-segment `MERGE_PENDING`, and segment timeline
-  metadata.
+  idempotent source creation, single-segment `READY_TO_UPLOAD`, multi-segment `MERGE_PENDING`, backfilled missing merge
+  jobs, and segment timeline metadata.
 - Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
   `READY_TO_UPLOAD`, and terminal failure visibility.
 

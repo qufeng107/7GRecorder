@@ -125,6 +125,7 @@ type UploadSourceList struct {
 type UploadSourceDiscoverResult struct {
 	Created                  int   `json:"created"`
 	Ignored                  int   `json:"ignored"`
+	MergeJobsEnqueued        int   `json:"merge_jobs_enqueued"`
 	MergeGapThresholdSeconds int64 `json:"merge_gap_threshold_seconds"`
 }
 
@@ -602,7 +603,41 @@ func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64
 	if err := flush(); err != nil {
 		return UploadSourceDiscoverResult{}, err
 	}
+	mergeJobsEnqueued, err := s.ensureUploadSourceMergeJobs(ctx)
+	if err != nil {
+		return UploadSourceDiscoverResult{}, err
+	}
+	result.MergeJobsEnqueued = mergeJobsEnqueued
 	return result, nil
+}
+
+func (s Store) ensureUploadSourceMergeJobs(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO jobs
+			(recording_profile_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT us.recording_profile_id,
+			'MERGE_UPLOAD_SOURCE',
+			'MEDIA',
+			'upload-source:' || us.id || ':merge',
+			'{"upload_source_id":' || us.id || '}',
+			'PENDING',
+			60,
+			3
+		FROM upload_sources us
+		WHERE us.status = 'MERGE_PENDING'
+			AND us.recording_count > 1
+			AND EXISTS (
+				SELECT 1 FROM upload_source_segments uss WHERE uss.upload_source_id = us.id
+			)
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("ensure upload source merge jobs: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read ensured merge job count: %w", err)
+	}
+	return int(changed), nil
 }
 
 func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) ([]Recording, error) {

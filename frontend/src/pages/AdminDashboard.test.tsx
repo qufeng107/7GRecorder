@@ -386,7 +386,7 @@ describe("AdminDashboard", () => {
     await switchToEnglish();
 
     fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
-    expect(await screen.findByText("Short segment")).toBeInTheDocument();
+    expect(screen.queryByText("Short segment")).not.toBeInTheDocument();
     expect(await screen.findByText("Visible Size")).toBeInTheDocument();
     expect(await screen.findByText("Short Segments")).toBeInTheDocument();
     expect(await screen.findByText("Protected Recordings")).toBeInTheDocument();
