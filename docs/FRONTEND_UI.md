@@ -20,6 +20,8 @@
   all indexed files, per-file paths, protect action, and per-file download actions.
 - Completed recordings shorter than three minutes are marked as short segments. This is an observation label only;
   it must not merge, delete, or hide files.
+- The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
+  protected recording count.
 
 ## Jobs
 

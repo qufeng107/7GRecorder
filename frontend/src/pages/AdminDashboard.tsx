@@ -458,6 +458,9 @@ const uiCopy = {
     fileKind: "文件类型",
     fileSize: "文件大小",
     filePath: "文件路径",
+    visibleSize: "当前列表大小",
+    shortSegments: "短片段",
+    protectedRecordings: "受保护录像",
     loadingRecordings: "正在加载录像。",
     noRecordings: "暂无已索引录像。",
     api: "API",
@@ -646,6 +649,9 @@ const uiCopy = {
     fileKind: "File Type",
     fileSize: "File Size",
     filePath: "File Path",
+    visibleSize: "Visible Size",
+    shortSegments: "Short Segments",
+    protectedRecordings: "Protected Recordings",
     loadingRecordings: "Loading recordings.",
     noRecordings: "No recordings indexed yet.",
     api: "API",
@@ -2563,6 +2569,15 @@ function RecordingsPanel(props: {
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
   const [selectedRecording, setSelectedRecording] = useState<RecordingItem | null>(null);
+  const visibleSizeBytes = props.recordings.reduce((total, recording) => {
+    return total + (recording.files ?? []).reduce((fileTotal, file) => fileTotal + file.size_bytes, 0);
+  }, 0);
+  const shortSegmentCount = props.recordings.filter((recording) => {
+    const file = recording.files?.[0];
+    const durationMs = recording.duration_ms || file?.duration_ms || 0;
+    return durationMs > 0 && durationMs < 3 * 60 * 1000;
+  }).length;
+  const protectedCount = props.recordings.filter((recording) => recording.local_protected).length;
 
   return (
     <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
@@ -2582,6 +2597,12 @@ function RecordingsPanel(props: {
             {props.labels.scan}
           </button>
         ) : null}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Metric label={props.labels.visibleSize} value={formatBytes(visibleSizeBytes)} />
+        <Metric label={props.labels.shortSegments} value={String(shortSegmentCount)} />
+        <Metric label={props.labels.protectedRecordings} value={String(protectedCount)} />
       </div>
 
       {props.reconcileResult ? (
