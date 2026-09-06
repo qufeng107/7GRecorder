@@ -302,6 +302,35 @@ func (s Store) UpsertPolicy(ctx context.Context, actor User, userID int64, req P
 	return s.Policy(ctx, actor, userID)
 }
 
+func (s Store) ResetPassword(ctx context.Context, username string, password string) (User, error) {
+	username = strings.TrimSpace(username)
+	if username == "" || password == "" {
+		return User{}, ErrValidation
+	}
+	user, err := s.UserByUsername(ctx, username)
+	if err != nil {
+		return User{}, err
+	}
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE users
+		SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, passwordHash, user.ID); err != nil {
+		return User{}, fmt.Errorf("reset password: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO audit_logs (actor_user_id, action, resource_type, resource_id, summary)
+		VALUES (NULL, 'ACCOUNT_PASSWORD_RESET', 'user', ?, ?)
+	`, user.ID, "Reset password via server CLI"); err != nil {
+		return User{}, fmt.Errorf("write audit log: %w", err)
+	}
+	return s.UserByID(ctx, user.ID)
+}
+
 func (s Store) BootstrapSuperAdmin(ctx context.Context, username string, password string) (User, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -428,6 +457,24 @@ func (s Store) Logout(ctx context.Context, token string) error {
 		return fmt.Errorf("delete session: %w", err)
 	}
 	return nil
+}
+
+func (s Store) UserByUsername(ctx context.Context, username string) (User, error) {
+	var user User
+	var enabled int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, username, role, enabled, created_at, updated_at
+		FROM users
+		WHERE username = ?
+	`, strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &user.Role, &enabled, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("load user: %w", err)
+	}
+	user.Enabled = enabled == 1
+	return user, nil
 }
 
 func (s Store) UserByID(ctx context.Context, id int64) (User, error) {

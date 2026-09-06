@@ -89,6 +89,44 @@ func TestSuperAdminCanUpdateManagerPolicy(t *testing.T) {
 	}
 }
 
+func TestResetPasswordChangesLoginPassword(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	store := NewStore(database)
+	bootstrapTestAdmin(t, ctx, database)
+
+	updated, err := store.ResetPassword(ctx, "admin", "new correct horse battery staple")
+	if err != nil {
+		t.Fatalf("ResetPassword returned error: %v", err)
+	}
+	if updated.Username != "admin" {
+		t.Fatalf("expected admin, got %q", updated.Username)
+	}
+
+	_, _, _, err = store.Login(ctx, "admin", "correct horse battery staple", 0)
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected old password to fail, got %v", err)
+	}
+	user, _, _, err := store.Login(ctx, "admin", "new correct horse battery staple", 0)
+	if err != nil {
+		t.Fatalf("Login with new password returned error: %v", err)
+	}
+	if user.Username != "admin" {
+		t.Fatalf("expected admin login, got %q", user.Username)
+	}
+}
+
+func TestResetPasswordRejectsMissingUser(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	store := NewStore(database)
+
+	_, err := store.ResetPassword(ctx, "missing", "new correct horse battery staple")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func openTestDB(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 	root := t.TempDir()
