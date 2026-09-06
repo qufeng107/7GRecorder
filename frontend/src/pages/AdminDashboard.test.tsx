@@ -124,4 +124,40 @@ describe("AdminDashboard", () => {
     expect(await screen.findByRole("heading", { name: "Accounts" })).toBeInTheDocument();
     expect(await screen.findByText("manager")).toBeInTheDocument();
   });
+
+  it("renders the current manager account and policy", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = input instanceof Request ? input.url : input.toString();
+        if (path.endsWith("/api/v1/me")) {
+          return {
+            ok: true,
+            json: async () => ({
+              user: { id: 2, username: "manager", role: "MANAGER", enabled: true },
+              policy: {
+                can_edit_recording_profile: true,
+                can_edit_bilibili_module: false,
+                can_edit_cos_module: false,
+                can_edit_netease_module: false,
+                can_manage_local_files: true
+              }
+            })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ items: [], total: 0, status: "ok", release_sha: "test" })
+        } as Response;
+      })
+    );
+
+    renderWithClient();
+
+    fireEvent.click(await screen.findByRole("button", { name: /my account/i }));
+    expect(await screen.findByRole("heading", { name: "My Account" })).toBeInTheDocument();
+    expect(await screen.findByText("MANAGER")).toBeInTheDocument();
+    expect(await screen.findByText("Recording Profiles")).toBeInTheDocument();
+    expect(await screen.findByText("Local Files")).toBeInTheDocument();
+  });
 });

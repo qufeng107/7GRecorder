@@ -131,6 +131,8 @@ POST /api/v1/auth/logout
 GET  /api/v1/me
 ```
 
+`GET /api/v1/me` returns the current session user. For MANAGER accounts it also returns the account's `policy` so the UI can render account-level capabilities without granting access to global account management.
+
 ### Accounts / Policy
 
 SUPER_ADMIN：
