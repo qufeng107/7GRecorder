@@ -399,6 +399,32 @@ describe("AdminDashboard", () => {
 
   it("renders multi-segment upload sources for merge planning", async () => {
     mockSuperAdminFetch((path) => {
+      if (path.includes("/api/v1/jobs?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 1,
+                recording_profile_id: 1,
+                type: "MERGE_UPLOAD_SOURCE",
+                resource_class: "MEDIA",
+                business_key: "upload-source:1:merge",
+                status: "RUNNING",
+                priority: 60,
+                attempts: 1,
+                max_attempts: 3,
+                run_after: "2026-09-06T10:09:00Z",
+                created_at: "2026-09-06T10:09:00Z",
+                updated_at: "2026-09-06T10:10:00Z",
+                profile_name: "7G",
+                owner_username: "admin"
+              }
+            ],
+            total: 1
+          })
+        } as Response;
+      }
       if (path.includes("/api/v1/upload-sources")) {
         return {
           ok: true,
@@ -465,7 +491,7 @@ describe("AdminDashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
     expect(await screen.findByText("Upload Sources")).toBeInTheDocument();
-    expect(await screen.findByText("Pending merge")).toBeInTheDocument();
+    expect(await screen.findByText("Merging")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(await screen.findByText("recordings/1741048619/part1.flv")).toBeInTheDocument();
     expect(await screen.findByText("recordings/1741048619/part2.flv")).toBeInTheDocument();
@@ -631,7 +657,9 @@ describe("AdminDashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
     expect(await screen.findByRole("heading", { name: "Jobs" })).toBeInTheDocument();
-    expect(await screen.findByText("SYNC_RECORDER_PROFILE")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    expect(await screen.findByText("Sync recording profile")).toBeInTheDocument();
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
     expect(await screen.findByText("temporary recorder sync failure")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
