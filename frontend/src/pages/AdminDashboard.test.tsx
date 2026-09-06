@@ -156,7 +156,7 @@ describe("AdminDashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /my account/i }));
     expect(await screen.findByRole("heading", { name: "My Account" })).toBeInTheDocument();
-    expect(await screen.findByText("MANAGER")).toBeInTheDocument();
+    expect(await screen.findAllByText("MANAGER")).toHaveLength(2);
     expect(await screen.findByText("Recording Profiles")).toBeInTheDocument();
     expect(await screen.findByText("Local Files")).toBeInTheDocument();
   });
