@@ -26,6 +26,12 @@ import {
   X
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  flexRender,
+  getCoreRowModel,
+  useReactTable
+} from "@tanstack/react-table";
+import type { ColumnDef, ColumnSizingState } from "@tanstack/react-table";
 
 type User = {
   id: number;
@@ -439,7 +445,8 @@ const uiCopy = {
     scanResult: (imported: number, updated: number, skipped: number) =>
       `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
     scanFailed: "扫描失败，请查看服务器日志。",
-    startTime: "录制时间",
+    startDate: "录制日期",
+    startTime: "录制时间（中国时间）",
     completedAt: "完成时间",
     duration: "时长",
     size: "大小",
@@ -630,7 +637,8 @@ const uiCopy = {
     scanResult: (imported: number, updated: number, skipped: number) =>
       `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
     scanFailed: "Scan failed. Check server logs.",
-    startTime: "Recording Time",
+    startDate: "Recording Date",
+    startTime: "Time (China Time)",
     completedAt: "Completed",
     duration: "Duration",
     size: "Size",
@@ -2569,6 +2577,7 @@ function RecordingsPanel(props: {
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
   const [selectedRecording, setSelectedRecording] = useState<RecordingItem | null>(null);
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const visibleSizeBytes = props.recordings.reduce((total, recording) => {
     return total + (recording.files ?? []).reduce((fileTotal, file) => fileTotal + file.size_bytes, 0);
   }, 0);
@@ -2578,6 +2587,175 @@ function RecordingsPanel(props: {
     return durationMs > 0 && durationMs < 3 * 60 * 1000;
   }).length;
   const protectedCount = props.recordings.filter((recording) => recording.local_protected).length;
+  const columns: Array<ColumnDef<RecordingItem>> = [
+    {
+      id: "recording",
+      header: props.labels.recording,
+      size: 300,
+      minSize: 220,
+      cell: ({ row }) => {
+        const recording = row.original;
+        const file = recording.files?.[0];
+        const durationMs = recording.duration_ms || file?.duration_ms || 0;
+        const isShortRecording = durationMs > 0 && durationMs < 3 * 60 * 1000;
+        const completedAt = formatChinaDateParts(recording.completed_at || file?.closed_at || "");
+        return (
+          <div className="flex items-start gap-2">
+            <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+            <div>
+              <button
+                className="text-left font-semibold text-ink hover:text-accent"
+                type="button"
+                onClick={() => setSelectedRecording(recording)}
+              >
+                {recording.title || file?.original_name || props.labels.untitled}
+              </button>
+              {isShortRecording ? (
+                <span className="ml-2 inline-flex rounded-md border border-amber-300 px-2 py-0.5 text-xs font-medium text-amber-800">
+                  {props.labels.shortRecording}
+                </span>
+              ) : null}
+              <p className="mt-1 text-xs text-muted">
+                {props.labels.completedAt}: {completedAt.date} {completedAt.time}
+              </p>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      id: "date",
+      header: props.labels.startDate,
+      size: 120,
+      minSize: 110,
+      cell: ({ row }) => <span className="text-xs text-muted">{formatChinaDateParts(row.original.started_at).date}</span>
+    },
+    {
+      id: "time",
+      header: props.labels.startTime,
+      size: 150,
+      minSize: 140,
+      cell: ({ row }) => <span className="text-xs text-muted">{formatChinaDateParts(row.original.started_at).time}</span>
+    },
+    {
+      id: "profile",
+      header: props.labels.profile,
+      size: 140,
+      minSize: 120,
+      cell: ({ row }) => (
+        <div>
+          <p className="font-medium text-ink">{row.original.profile_name}</p>
+          <p className="mt-1 text-xs text-muted">{row.original.room_id}</p>
+        </div>
+      )
+    },
+    {
+      id: "status",
+      header: props.labels.status,
+      size: 130,
+      minSize: 120,
+      cell: ({ row }) => {
+        const recording = row.original;
+        const file = recording.files?.[0];
+        return (
+          <div className="text-muted">
+            <p>{recording.recording_status}</p>
+            <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>
+            {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
+          </div>
+        );
+      }
+    },
+    {
+      id: "duration",
+      header: props.labels.duration,
+      size: 100,
+      minSize: 90,
+      cell: ({ row }) => {
+        const file = row.original.files?.[0];
+        return <span className="text-muted">{formatDuration(row.original.duration_ms || file?.duration_ms || 0)}</span>;
+      }
+    },
+    {
+      id: "size",
+      header: props.labels.size,
+      size: 90,
+      minSize: 80,
+      cell: ({ row }) => <span className="text-muted">{formatBytes(row.original.files?.[0]?.size_bytes ?? 0)}</span>
+    },
+    {
+      id: "path",
+      header: props.labels.path,
+      size: 360,
+      minSize: 220,
+      cell: ({ row }) => <span className="break-all text-xs text-muted">{row.original.files?.[0]?.relative_path ?? "-"}</span>
+    },
+    {
+      id: "actions",
+      header: props.labels.actions,
+      size: 140,
+      minSize: 132,
+      enableResizing: false,
+      cell: ({ row }) => {
+        const recording = row.original;
+        const file = recording.files?.[0];
+        const canUseLocalFile = recording.local_storage_status !== "DELETED";
+        if (!props.canManageLocalFiles) {
+          return <span className="text-xs text-muted">{props.labels.noAction}</span>;
+        }
+        return (
+          <div className="flex flex-col items-start gap-2">
+            <button
+              className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+              type="button"
+              onClick={() => setSelectedRecording(recording)}
+            >
+              {props.labels.details}
+            </button>
+            {canUseLocalFile ? (
+              <button
+                className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                disabled={props.protectPending}
+                type="button"
+                onClick={() => props.onToggleProtect(recording)}
+              >
+                {recording.local_protected ? (
+                  <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {recording.local_protected ? props.labels.unprotect : props.labels.protect}
+              </button>
+            ) : null}
+            {file && file.file_status === "CLOSED" ? (
+              <a
+                className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                href={`/api/v1/recording-files/${file.id}/download`}
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                {props.labels.download}
+              </a>
+            ) : null}
+          </div>
+        );
+      }
+    }
+  ];
+  const table = useReactTable({
+    data: props.recordings,
+    columns,
+    columnResizeMode: "onChange",
+    defaultColumn: {
+      minSize: 80,
+      size: 140,
+      maxSize: 640
+    },
+    state: {
+      columnSizing
+    },
+    onColumnSizingChange: setColumnSizing,
+    getCoreRowModel: getCoreRowModel()
+  });
 
   return (
     <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
@@ -2632,112 +2810,49 @@ function RecordingsPanel(props: {
         onSortChange={(value) => props.onSortChange(value as RecordingSortKey)}
       />
 
-      <div className="mt-4 overflow-hidden rounded-md border border-border">
-        <table className="w-full border-collapse text-left text-sm">
+      <div className="mt-4 overflow-auto rounded-md border border-border">
+        <table className="border-collapse text-left text-sm" style={{ minWidth: table.getCenterTotalSize() }}>
           <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.recording}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.startTime}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.profile}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.path}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
-            </tr>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <th
+                    key={header.id}
+                    className="relative px-3 py-2 font-semibold"
+                    style={{ width: header.getSize() }}
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate">
+                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                      </span>
+                      {header.column.getCanResize() ? (
+                        <button
+                          aria-label={`Resize ${header.column.id}`}
+                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-transparent hover:border-accent"
+                          type="button"
+                          onMouseDown={header.getResizeHandler()}
+                          onTouchStart={header.getResizeHandler()}
+                        />
+                      ) : null}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            ))}
           </thead>
           <tbody>
-            {props.recordings.map((recording) => {
-              const file = recording.files?.[0];
-              const canUseLocalFile = recording.local_storage_status !== "DELETED";
-              const durationMs = recording.duration_ms || file?.duration_ms || 0;
-              const isShortRecording = durationMs > 0 && durationMs < 3 * 60 * 1000;
-              return (
-                <tr key={recording.id} className="bg-white">
-                  <td className="px-3 py-3">
-                    <div className="flex items-start gap-2">
-                      <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-                      <div>
-                        <button
-                          className="text-left font-semibold text-ink hover:text-accent"
-                          type="button"
-                          onClick={() => setSelectedRecording(recording)}
-                        >
-                          {recording.title || file?.original_name || props.labels.untitled}
-                        </button>
-                        {isShortRecording ? (
-                          <span className="ml-2 inline-flex rounded-md border border-amber-300 px-2 py-0.5 text-xs font-medium text-amber-800">
-                            {props.labels.shortRecording}
-                          </span>
-                        ) : null}
-                        <p className="mt-1 text-xs text-muted">
-                          {props.labels.completedAt}: {formatDateTime(recording.completed_at || file?.closed_at || "", props.labels)}
-                        </p>
-                      </div>
-                    </div>
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id} className="bg-white">
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-3 py-3" style={{ width: cell.column.getSize() }}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
-                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(recording.started_at, props.labels)}</td>
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{recording.profile_name}</p>
-                    <p className="mt-1 text-xs text-muted">{recording.room_id}</p>
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    <p>{recording.recording_status}</p>
-                    <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>
-                    {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    {formatDuration(durationMs)}
-                  </td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(file?.size_bytes ?? 0)}</td>
-                  <td className="max-w-md px-3 py-3 text-xs text-muted">
-                    <span className="break-all">{file?.relative_path ?? "-"}</span>
-                  </td>
-                  <td className="px-3 py-3">
-                    {props.canManageLocalFiles ? (
-                      <div className="flex flex-col items-start gap-2">
-                        <button
-                          className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                          type="button"
-                          onClick={() => setSelectedRecording(recording)}
-                        >
-                          {props.labels.details}
-                        </button>
-                        {canUseLocalFile ? (
-                          <button
-                            className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                            disabled={props.protectPending}
-                            type="button"
-                            onClick={() => props.onToggleProtect(recording)}
-                          >
-                            {recording.local_protected ? (
-                              <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
-                            ) : (
-                              <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                            )}
-                            {recording.local_protected ? props.labels.unprotect : props.labels.protect}
-                          </button>
-                        ) : null}
-                        {file && file.file_status === "CLOSED" ? (
-                          <a
-                            className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                            href={`/api/v1/recording-files/${file.id}/download`}
-                          >
-                            <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                            {props.labels.download}
-                          </a>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted">{props.labels.noAction}</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {props.recordings.length === 0 ? (
+                ))}
+              </tr>
+            ))}
+            {table.getRowModel().rows.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={8}>
+                <td className="px-3 py-8 text-center text-muted" colSpan={table.getAllLeafColumns().length}>
                   {props.isLoading
                     ? props.labels.loadingRecordings
                     : props.recordings.length === 0 && props.search
@@ -3111,6 +3226,31 @@ function formatDateTime(value: string, labels: AdminCopy): string {
     hour12: false
   }).format(date);
   return `${formatted} ${labels.chinaTime}`;
+}
+
+function formatChinaDateParts(value: string): { date: string; time: string } {
+  if (!value) {
+    return { date: "-", time: "-" };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { date: value, time: "-" };
+  }
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const valueFor = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    date: `${valueFor("year")}/${valueFor("month")}/${valueFor("day")}`,
+    time: `${valueFor("hour")}:${valueFor("minute")}:${valueFor("second")}`
+  };
 }
 
 function NumberField(props: { label: string; max?: number; min: number; value: number; onChange: (value: number) => void }) {
