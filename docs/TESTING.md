@@ -187,6 +187,9 @@ song processing FAILED
 - Admin Jobs UI covers list rendering and retry action wiring.
 - Recording group diagnostics cover adjacent same-profile grouping, real-gap splitting, short-segment flags, and
   read-only behavior before FFmpeg merge jobs exist.
+- Upload source discovery covers the shared merge gap threshold, waiting until a profile is no longer recording,
+  idempotent source creation, single-segment `READY_TO_UPLOAD`, multi-segment `MERGE_PENDING`, and segment timeline
+  metadata.
 
 ---
 

@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
+	"github.com/7grecorder/7grecorder/backend/internal/recording"
 )
 
 type Worker struct {
@@ -61,6 +63,9 @@ func (w Worker) Run(ctx context.Context) {
 func (w Worker) RunOnce(ctx context.Context) error {
 	job, err := w.claimSyncJob(ctx)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return w.discoverUploadSources(ctx)
+		}
 		return err
 	}
 
@@ -73,6 +78,11 @@ func (w Worker) RunOnce(ctx context.Context) error {
 		return w.failJob(ctx, job, "TRANSIENT", err)
 	}
 	return w.succeedJob(ctx, job, status)
+}
+
+func (w Worker) discoverUploadSources(ctx context.Context) error {
+	_, err := recording.NewStore(w.db, config.Config{}).DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds)
+	return err
 }
 
 func (w Worker) claimSyncJob(ctx context.Context) (syncJob, error) {

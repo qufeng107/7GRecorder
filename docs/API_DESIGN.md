@@ -262,7 +262,7 @@ move, upload, or otherwise mutate recording files.
 Recording group diagnostics:
 
 ```text
-GET /api/v1/recording-groups?max_gap_seconds=120&short_threshold_seconds=180
+GET /api/v1/recording-groups?max_gap_seconds=600&short_threshold_seconds=180
 ```
 
 This endpoint computes read-only groups from visible completed local recordings. Adjacent recordings from the same
@@ -270,6 +270,18 @@ profile are grouped when the gap from previous completion to next start is less 
 threshold. It returns source recordings, group time window, segment/file counts, total size, total duration, max gap,
 short-segment signal, and whether the group is eligible for a later merge job. It must not merge, move, upload, delete,
 or rewrite files.
+
+Upload sources are the durable upload-facing recording list:
+
+```text
+GET  /api/v1/upload-sources?merge_gap_seconds=600
+POST /api/v1/upload-sources/actions/discover?merge_gap_seconds=600
+```
+
+Discovery is SUPER_ADMIN-only and idempotent. It creates upload sources only when a profile is not currently live or
+recording and the newest segment in a continuous group has been completed for longer than the merge gap threshold. The
+same threshold controls both grouping adjacent segments and waiting before finalizing a group. Optional upload modules
+must process only upload sources whose status is `READY_TO_UPLOAD`.
 
 ### Files / Download
 

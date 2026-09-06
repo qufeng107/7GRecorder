@@ -671,8 +671,13 @@ COS object binary
 ## 16. SQLite Backup
 
 Recording groups are currently computed from existing `recordings` and `recording_files` rows. No dedicated group table
-is introduced for the read-only diagnostics step. If a later FFmpeg merge job creates durable upload assets, the schema
-must be updated first to record derived source metadata and source recording IDs.
+is introduced for the read-only diagnostics step.
+
+Durable upload sources are represented by `upload_sources` and `upload_source_segments`. `upload_sources` is the unit
+that optional upload modules consume. `upload_source_segments` records the original child recordings/files, source
+recording timestamps, relative paths, and each segment's timeline interval inside the upload source. Multi-segment
+sources remain `MERGE_PENDING` until a later FFmpeg job creates a derived file; single-segment sources can reference the
+existing closed video file and become `READY_TO_UPLOAD`.
 
 备份写入：
 
