@@ -382,12 +382,15 @@ describe("AdminDashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
     expect(await screen.findByText("Short segment")).toBeInTheDocument();
+    expect(await screen.findByText("Visible Size")).toBeInTheDocument();
+    expect(await screen.findByText("Short Segments")).toBeInTheDocument();
+    expect(await screen.findByText("Protected Recordings")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(await screen.findByRole("heading", { name: "Recording Details" })).toBeInTheDocument();
     expect((await screen.findAllByText("recordings/1741048619/short.flv")).length).toBeGreaterThan(1);
     expect(await screen.findByText("recordings/1741048619/short.xml")).toBeInTheDocument();
-    expect(await screen.findByText("File Size")).toBeInTheDocument();
+    expect((await screen.findAllByText("File Size")).length).toBeGreaterThan(1);
   });
 
   it("runs local cleanup from the system storage page after confirmation", async () => {
