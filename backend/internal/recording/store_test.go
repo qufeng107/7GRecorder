@@ -656,6 +656,82 @@ func TestDiscoverUploadSourcesMarksSingleSegmentReady(t *testing.T) {
 	}
 }
 
+func TestDiscoverUploadSourcesBackfillsMissingMergeJobs(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-05T10:00:00Z",
+		CompletedAt: "2026-09-05T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-05T10:04:00Z",
+		CompletedAt: "2026-09-05T10:07:00Z",
+		DurationMs:  180000,
+		SizeBytes:   30,
+	})
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, total_bytes, recording_count, file_count,
+				max_gap_seconds, merge_gap_threshold_seconds)
+		VALUES (1, 1, 'profile:1:1:2', 'parts', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:07:00Z', 360000, 'MERGE_PENDING',
+			50, 2, 2, 60, 600)
+	`); err != nil {
+		t.Fatalf("insert upload source returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_source_segments
+			(upload_source_id, recording_id, recording_file_id, sort_order, source_started_at,
+				source_completed_at, timeline_start_ms, timeline_end_ms, relative_path, size_bytes, duration_ms)
+		VALUES
+			(1, 1, 1, 0, '2026-09-05T10:00:00Z', '2026-09-05T10:03:00Z', 0, 180000,
+				'recordings/1741048619-Streamer/part 1.flv', 20, 180000),
+			(1, 2, 2, 1, '2026-09-05T10:04:00Z', '2026-09-05T10:07:00Z', 180000, 360000,
+				'recordings/1741048619-Streamer/part 2.flv', 30, 180000)
+	`); err != nil {
+		t.Fatalf("insert upload source segments returned error: %v", err)
+	}
+
+	result, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+	if err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if result.Created != 0 || result.MergeJobsEnqueued != 1 {
+		t.Fatalf("expected one backfilled merge job, got %#v", result)
+	}
+	var jobType string
+	if err := database.QueryRowContext(ctx, `
+		SELECT type
+		FROM jobs
+		WHERE business_key = 'upload-source:1:merge'
+	`).Scan(&jobType); err != nil {
+		t.Fatalf("query merge job returned error: %v", err)
+	}
+	if jobType != "MERGE_UPLOAD_SOURCE" {
+		t.Fatalf("unexpected merge job type: %s", jobType)
+	}
+}
+
 func TestUpsertLocalStorageSettingsUpdatesPolicyPreview(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

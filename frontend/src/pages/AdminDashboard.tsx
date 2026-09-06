@@ -126,6 +126,7 @@ type RecordingItem = {
   upload_source_status?: string;
   output_recording_file_id?: number;
   output_relative_path?: string;
+  last_error?: string;
   recording_profile_id: number;
   profile_name: string;
   room_id: string;
@@ -191,6 +192,7 @@ type UploadSourceListResponse = {
 type UploadSourceDiscoverResult = {
   created: number;
   ignored: number;
+  merge_jobs_enqueued?: number;
   merge_gap_threshold_seconds: number;
 };
 
@@ -517,15 +519,14 @@ const uiCopy = {
     download: "下载",
     details: "详情",
     recordingDetails: "录像详情",
-    shortRecording: "短片段",
     uploadSources: "可上传视频",
-    uploadSourceDiscoverResult: (created: number, ignored: number) =>
-      `生成可上传视频：新增 ${created}，等待 ${ignored}。`,
-    uploadSourcePendingMerge: "待合成",
+    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number) =>
+      `生成可上传视频：新增 ${created}，等待 ${ignored}，补建合并任务 ${mergeJobsEnqueued}。`,
+    uploadSourcePendingMerge: "待合并",
     uploadSourceReady: "可上传",
-    uploadSourceMergeFailed: "合成失败",
+    uploadSourceMergeFailed: "合并失败",
     sourceSegments: "子视频",
-    timeline: "合成时间轴",
+    timeline: "合并时间轴",
     recordingStatus: "录像状态",
     localStorageStatus: "本地状态",
     file: "文件",
@@ -716,10 +717,9 @@ const uiCopy = {
     download: "Download",
     details: "Details",
     recordingDetails: "Recording Details",
-    shortRecording: "Short segment",
     uploadSources: "Upload Sources",
-    uploadSourceDiscoverResult: (created: number, ignored: number) =>
-      `Upload sources: ${created} created, ${ignored} waiting.`,
+    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number) =>
+      `Upload sources: ${created} created, ${ignored} waiting, ${mergeJobsEnqueued} merge jobs backfilled.`,
     uploadSourcePendingMerge: "Pending merge",
     uploadSourceReady: "Ready to upload",
     uploadSourceMergeFailed: "Merge failed",
@@ -853,6 +853,7 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     upload_source_status: source.status,
     output_recording_file_id: source.output_recording_file_id,
     output_relative_path: source.output_relative_path,
+    last_error: source.last_error,
     recording_profile_id: source.recording_profile_id,
     profile_name: source.profile_name,
     room_id: source.room_id,
@@ -2734,7 +2735,6 @@ function RecordingsPanel(props: {
       cell: ({ row }) => {
         const recording = row.original;
         const file = recording.files?.[0];
-        const isShortRecording = hasShortSegment(recording);
         const completedAt = formatChinaDateParts(recording.completed_at || file?.closed_at || "");
         return (
           <div className="flex items-start gap-2">
@@ -2747,11 +2747,6 @@ function RecordingsPanel(props: {
               >
                 {recording.title || file?.original_name || props.labels.untitled}
               </button>
-              {isShortRecording ? (
-                <span className="ml-2 inline-flex rounded-md border border-amber-300 px-2 py-0.5 text-xs font-medium text-amber-800">
-                  {props.labels.shortRecording}
-                </span>
-              ) : null}
               <p className="mt-1 text-xs text-muted">
                 {props.labels.completedAt}: {completedAt.date} {completedAt.time}
               </p>
@@ -2810,7 +2805,8 @@ function RecordingsPanel(props: {
         return (
           <div className="text-muted">
             <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels)}</p>
-            <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>
+            {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
+            {recording.last_error ? <p className="mt-1 break-words text-xs text-red-700">{recording.last_error}</p> : null}
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
           </div>
         );
@@ -2934,7 +2930,8 @@ function RecordingsPanel(props: {
           {" "}
           {props.labels.uploadSourceDiscoverResult(
             props.reconcileResult.discover.created,
-            props.reconcileResult.discover.ignored
+            props.reconcileResult.discover.ignored,
+            props.reconcileResult.discover.merge_jobs_enqueued ?? 0
           )}
         </p>
       ) : null}

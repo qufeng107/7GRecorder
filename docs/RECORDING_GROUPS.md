@@ -18,10 +18,13 @@ Recording Profile before later upload work.
   source recording timestamps, and their timeline interval inside the upload source.
 - Single-segment upload sources are marked `READY_TO_UPLOAD` immediately. Multi-segment upload sources are marked
   `MERGE_PENDING` until an FFmpeg concat job creates the derived file.
+- Discovery also backfills missing `MERGE_UPLOAD_SOURCE` jobs for existing `MERGE_PENDING` upload sources so records
+  created by older releases do not remain stuck without work.
 
 ## Upload Merge
 
-`MERGE_UPLOAD_SOURCE` is a MEDIA job created idempotently when a multi-segment upload source is discovered.
+`MERGE_UPLOAD_SOURCE` is a MEDIA job created idempotently when a multi-segment upload source is discovered or when
+discovery finds an older `MERGE_PENDING` source without its merge job.
 
 Rules:
 
