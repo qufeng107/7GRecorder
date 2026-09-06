@@ -190,6 +190,35 @@ type CleanupRunResult = {
   skipped_recordings: number;
 };
 
+type JobItem = {
+  id: number;
+  recording_profile_id?: number;
+  recording_id?: number;
+  recording_file_id?: number;
+  type: string;
+  resource_class: string;
+  business_key?: string;
+  status: string;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_at?: string;
+  heartbeat_at?: string;
+  locked_by?: string;
+  last_error_class?: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+  profile_name?: string;
+  owner_username?: string;
+};
+
+type JobListResponse = {
+  items: JobItem[] | null;
+  total?: number;
+};
+
 type ProfileForm = {
   owner_user_id: string;
   name: string;
@@ -207,11 +236,12 @@ type ProfileForm = {
   finalize_grace_period_sec: number;
 };
 
-type AdminPage = "overview" | "profiles" | "recordings" | "system" | "accounts" | "me";
+type AdminPage = "overview" | "profiles" | "recordings" | "jobs" | "system" | "accounts" | "me";
 type Language = "zh" | "en";
 type RecordingSortKey = "started_desc" | "started_asc" | "duration_desc" | "size_desc";
 type ProfileSortKey = "name_asc" | "room_asc";
 type AccountSortKey = "username_asc" | "role_asc";
+type JobSortKey = "updated_desc" | "run_after_asc" | "status_asc";
 
 type AccountForm = {
   username: string;
@@ -273,6 +303,7 @@ const uiCopy = {
       overview: "总览",
       profiles: "录制配置",
       recordings: "录像文件",
+      jobs: "任务",
       accounts: "账号管理",
       system: "系统设置"
     },
@@ -391,6 +422,18 @@ const uiCopy = {
     cleanupResult: (recordings: number, files: number, bytes: string, skipped: number) =>
       `清理完成：删除 ${recordings} 条录像、${files} 个文件，回收 ${bytes}，跳过 ${skipped} 条。`,
     cleanupFailed: "清理失败，请查看服务器日志。",
+    jobs: "任务",
+    job: "任务",
+    jobType: "类型",
+    resourceClass: "资源",
+    runAfter: "计划时间",
+    attempts: "尝试",
+    lastError: "最近错误",
+    retry: "重试",
+    retryJob: "重试任务",
+    cancelJob: "取消任务",
+    jobsFailed: "任务加载失败，请查看服务器日志。",
+    noJobs: "暂无任务。",
     recordings: "录像文件",
     scan: "扫描",
     scanResult: (imported: number, updated: number, skipped: number) =>
@@ -424,6 +467,9 @@ const uiCopy = {
     sortRoom: "直播间：小到大",
     sortUsername: "用户名：A 到 Z",
     sortRole: "角色：A 到 Z",
+    sortUpdated: "更新时间：新到旧",
+    sortRunAfter: "计划时间：近到远",
+    sortStatus: "状态：A 到 Z",
     emptyFiltered: "没有匹配结果。"
   },
   en: {
@@ -434,6 +480,7 @@ const uiCopy = {
       overview: "Overview",
       profiles: "Profiles",
       recordings: "Recordings",
+      jobs: "Jobs",
       accounts: "Accounts",
       system: "System Settings"
     },
@@ -554,6 +601,18 @@ const uiCopy = {
     cleanupResult: (recordings: number, files: number, bytes: string, skipped: number) =>
       `Cleanup finished: deleted ${recordings} recordings, ${files} files, reclaimed ${bytes}, skipped ${skipped}.`,
     cleanupFailed: "Cleanup failed. Check server logs.",
+    jobs: "Jobs",
+    job: "Job",
+    jobType: "Type",
+    resourceClass: "Resource",
+    runAfter: "Run After",
+    attempts: "Attempts",
+    lastError: "Last Error",
+    retry: "Retry",
+    retryJob: "Retry job",
+    cancelJob: "Cancel job",
+    jobsFailed: "Jobs failed to load. Check server logs.",
+    noJobs: "No jobs yet.",
     recordings: "Recordings",
     scan: "Scan",
     scanResult: (imported: number, updated: number, skipped: number) =>
@@ -587,6 +646,9 @@ const uiCopy = {
     sortRoom: "Room: low to high",
     sortUsername: "Username: A to Z",
     sortRole: "Role: A to Z",
+    sortUpdated: "Updated: newest",
+    sortRunAfter: "Run after: soonest",
+    sortStatus: "Status: A to Z",
     emptyFiltered: "No matching results."
   }
 } as const;
@@ -741,6 +803,32 @@ function filterRecordings(items: RecordingItem[], search: string, sort: Recordin
   });
 }
 
+function filterJobs(items: JobItem[], search: string, sort: JobSortKey): JobItem[] {
+  const filtered = items.filter((job) => {
+    if (!search.trim()) {
+      return true;
+    }
+    return (
+      includesSearch(job.type, search) ||
+      includesSearch(job.status, search) ||
+      includesSearch(job.resource_class, search) ||
+      includesSearch(job.business_key, search) ||
+      includesSearch(job.profile_name, search) ||
+      includesSearch(job.owner_username, search) ||
+      includesSearch(job.last_error, search)
+    );
+  });
+  return [...filtered].sort((left, right) => {
+    if (sort === "run_after_asc") {
+      return Date.parse(left.run_after) - Date.parse(right.run_after);
+    }
+    if (sort === "status_asc") {
+      return left.status.localeCompare(right.status) || Date.parse(right.updated_at) - Date.parse(left.updated_at);
+    }
+    return Date.parse(right.updated_at) - Date.parse(left.updated_at);
+  });
+}
+
 export function AdminDashboard() {
   const queryClient = useQueryClient();
   const [language, setLanguage] = useState<Language>("zh");
@@ -753,6 +841,8 @@ export function AdminDashboard() {
   const [recordingSort, setRecordingSort] = useState<RecordingSortKey>("started_desc");
   const [accountSearch, setAccountSearch] = useState("");
   const [accountSort, setAccountSort] = useState<AccountSortKey>("username_asc");
+  const [jobSearch, setJobSearch] = useState("");
+  const [jobSort, setJobSort] = useState<JobSortKey>("updated_desc");
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
@@ -806,6 +896,14 @@ export function AdminDashboard() {
     refetchInterval: 15000
   });
 
+  const jobsQuery = useQuery({
+    queryKey: ["jobs"],
+    queryFn: () => requestJson<JobListResponse>("/api/v1/jobs?limit=100"),
+    enabled: Boolean(meQuery.data?.user),
+    retry: false,
+    refetchInterval: 5000
+  });
+
   const accountsQuery = useQuery({
     queryKey: ["accounts"],
     queryFn: () => requestJson<AccountListResponse>("/api/v1/accounts"),
@@ -835,10 +933,13 @@ export function AdminDashboard() {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const recordings = recordingsQuery.data?.items ?? [];
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
+  const jobs = jobsQuery.data?.items ?? [];
+  const jobTotal = jobsQuery.data?.total ?? jobs.length;
   const accounts = accountsQuery.data?.items ?? [];
   const accountTotal = accountsQuery.data?.total ?? accounts.length;
   const visibleProfiles = filterProfiles(profiles, profileSearch, profileSort);
   const visibleRecordings = filterRecordings(recordings, recordingSearch, recordingSort);
+  const visibleJobs = filterJobs(jobs, jobSearch, jobSort);
   const visibleAccounts = filterAccounts(accounts, accountSearch, accountSort);
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
 
@@ -907,6 +1008,7 @@ export function AdminDashboard() {
       setAccountEditForm(emptyAccountEditForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
+      queryClient.removeQueries({ queryKey: ["jobs"] });
       queryClient.removeQueries({ queryKey: ["accounts"] });
       queryClient.removeQueries({ queryKey: ["local-storage"] });
       queryClient.removeQueries({ queryKey: ["cleanup-candidates"] });
@@ -1001,6 +1103,28 @@ export function AdminDashboard() {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
+    }
+  });
+
+  const retryJobMutation = useMutation({
+    mutationFn: (jobId: number) =>
+      requestJson<JobItem>(`/api/v1/jobs/${jobId}/actions/retry`, {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: number) =>
+      requestJson<JobItem>(`/api/v1/jobs/${jobId}/actions/cancel`, {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     }
   });
 
@@ -1314,6 +1438,25 @@ export function AdminDashboard() {
                 }
               />
             ) : null}
+
+            {activePage === "jobs" ? (
+              <JobsPanel
+                cancelPending={cancelJobMutation.isPending}
+                isLoading={jobsQuery.isLoading}
+                jobs={visibleJobs}
+                labels={ui}
+                loadError={jobsQuery.isError}
+                retryPending={retryJobMutation.isPending}
+                search={jobSearch}
+                sort={jobSort}
+                total={jobTotal}
+                visibleTotal={visibleJobs.length}
+                onCancel={(job) => cancelJobMutation.mutate(job.id)}
+                onRetry={(job) => retryJobMutation.mutate(job.id)}
+                onSearchChange={setJobSearch}
+                onSortChange={setJobSort}
+              />
+            ) : null}
           </>
         ) : null}
 
@@ -1335,7 +1478,8 @@ function AdminNav(props: {
   const items: Array<{ page: AdminPage; label: string; icon: typeof Activity }> = [
     { page: "overview", label: props.labels.nav.overview, icon: LayoutDashboard },
     { page: "profiles", label: props.labels.nav.profiles, icon: Activity },
-    { page: "recordings", label: props.labels.nav.recordings, icon: FileVideo }
+    { page: "recordings", label: props.labels.nav.recordings, icon: FileVideo },
+    { page: "jobs", label: props.labels.nav.jobs, icon: RefreshCw }
   ];
 
   if (props.canManageSystemSettings) {
@@ -2538,6 +2682,133 @@ function RecordingsPanel(props: {
                     : props.recordings.length === 0 && props.search
                       ? props.labels.emptyFiltered
                       : props.labels.noRecordings}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function JobsPanel(props: {
+  cancelPending: boolean;
+  isLoading: boolean;
+  jobs: JobItem[];
+  labels: AdminCopy;
+  loadError: boolean;
+  retryPending: boolean;
+  search: string;
+  sort: JobSortKey;
+  total: number;
+  visibleTotal: number;
+  onCancel: (job: JobItem) => void;
+  onRetry: (job: JobItem) => void;
+  onSearchChange: (value: string) => void;
+  onSortChange: (value: JobSortKey) => void;
+}) {
+  return (
+    <section id="jobs" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">{props.labels.jobs}</h2>
+          <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
+        </div>
+        <RefreshCw className="h-5 w-5 text-accent" aria-hidden="true" />
+      </div>
+
+      {props.loadError ? <p className="mt-3 text-sm text-red-700">{props.labels.jobsFailed}</p> : null}
+
+      <TableToolbar
+        labels={props.labels}
+        search={props.search}
+        sort={props.sort}
+        sortOptions={[
+          { value: "updated_desc", label: props.labels.sortUpdated },
+          { value: "run_after_asc", label: props.labels.sortRunAfter },
+          { value: "status_asc", label: props.labels.sortStatus }
+        ]}
+        onSearchChange={props.onSearchChange}
+        onSortChange={(value) => props.onSortChange(value as JobSortKey)}
+      />
+
+      <div className="mt-4 overflow-hidden rounded-md border border-border">
+        <table className="w-full border-collapse text-left text-sm">
+          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
+            <tr>
+              <th className="px-3 py-2 font-semibold">{props.labels.job}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.profile}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.attempts}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.runAfter}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.lastError}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.jobs.map((job) => {
+              const canRetry = job.status === "FAILED" || job.status === "CANCELLED";
+              const canCancel = !["SUCCEEDED", "CANCELLED", "RUNNING"].includes(job.status);
+              return (
+                <tr key={job.id} className="bg-white align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-semibold text-ink">{job.type}</p>
+                    <p className="mt-1 text-xs text-muted">{job.resource_class}</p>
+                    {job.business_key ? <p className="mt-1 break-all text-xs text-muted">{job.business_key}</p> : null}
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    <p>{job.profile_name || "-"}</p>
+                    {job.owner_username ? <p className="mt-1 text-xs">{job.owner_username}</p> : null}
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    <p>{job.status}</p>
+                    <p className="mt-1 text-xs">{formatDateTime(job.updated_at, props.labels)}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    {job.attempts} / {job.max_attempts}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(job.run_after, props.labels)}</td>
+                  <td className="max-w-md px-3 py-3 text-xs text-muted">
+                    <span className="break-words">{job.last_error || job.last_error_class || "-"}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-col items-start gap-2">
+                      {canRetry ? (
+                        <button
+                          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                          disabled={props.retryPending}
+                          type="button"
+                          onClick={() => props.onRetry(job)}
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                          {props.labels.retry}
+                        </button>
+                      ) : null}
+                      {canCancel ? (
+                        <button
+                          className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                          disabled={props.cancelPending}
+                          type="button"
+                          onClick={() => props.onCancel(job)}
+                        >
+                          {props.labels.cancel}
+                        </button>
+                      ) : null}
+                      {!canRetry && !canCancel ? <span className="text-xs text-muted">{props.labels.noAction}</span> : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {props.jobs.length === 0 ? (
+              <tr>
+                <td className="px-3 py-8 text-center text-muted" colSpan={7}>
+                  {props.isLoading
+                    ? props.labels.checking
+                    : props.jobs.length === 0 && props.search
+                      ? props.labels.emptyFiltered
+                      : props.labels.noJobs}
                 </td>
               </tr>
             ) : null}

@@ -31,6 +31,7 @@ func Run(ctx context.Context, cfg config.Config) {
 	bindAccountHandlers(cfg, s)
 	bindProfileHandlers(cfg, s)
 	bindRecordingHandlers(cfg, s)
+	bindJobHandlers(cfg, s)
 	startWorker(ctx, cfg)
 
 	s.BindHandler("/health/live", func(r *ghttp.Request) {

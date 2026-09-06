@@ -310,6 +310,11 @@ POST /api/v1/jobs/{id}/actions/retry
 POST /api/v1/jobs/{id}/actions/cancel
 ```
 
+Current admin API supports operational visibility for queued work. Super admins can list and operate on all jobs.
+Managers can list and operate only on jobs attached to their own recording profiles. `retry` is allowed only for
+`FAILED` and `CANCELLED` jobs and resets attempts, locks, and last error fields. `cancel` is allowed for queued or
+failed non-terminal jobs, but not for `RUNNING`, `SUCCEEDED`, or already `CANCELLED` jobs.
+
 ### Storage / System
 
 ```text
