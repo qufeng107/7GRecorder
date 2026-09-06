@@ -55,10 +55,10 @@ type Account struct {
 }
 
 type CreateRequest struct {
-	Username string         `json:"username"`
-	Password string         `json:"password"`
-	Role     string         `json:"role"`
-	Enabled  *bool          `json:"enabled"`
+	Username string        `json:"username"`
+	Password string        `json:"password"`
+	Role     string        `json:"role"`
+	Enabled  *bool         `json:"enabled"`
 	Policy   *PolicyUpsert `json:"policy"`
 }
 
