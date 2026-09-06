@@ -435,6 +435,28 @@ func normalizeGroupSeconds(value int64, fallback int64) int64 {
 
 func (s Store) ListUploadSources(ctx context.Context, actor account.User, thresholdSeconds int64) (UploadSourceList, error) {
 	thresholdSeconds = normalizeGroupSeconds(thresholdSeconds, DefaultMergeGapThresholdSeconds)
+	items, err := s.uploadSourcesByID(ctx, 0, &actor)
+	if err != nil {
+		return UploadSourceList{}, err
+	}
+	return UploadSourceList{Items: items, Total: len(items), MergeGapThresholdSeconds: thresholdSeconds}, nil
+}
+
+func (s Store) GetUploadSource(ctx context.Context, actor account.User, id int64) (UploadSource, error) {
+	if id <= 0 {
+		return UploadSource{}, ErrValidation
+	}
+	items, err := s.uploadSourcesByID(ctx, id, &actor)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	return items[0], nil
+}
+
+func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.User) ([]UploadSource, error) {
 	query := `
 		SELECT us.id, us.recording_profile_id, p.name, us.source_room_id, us.streamer_name_snapshot,
 			COALESCE(us.title, ''), us.started_at, us.completed_at, us.duration_ms, us.status,
@@ -451,15 +473,26 @@ func (s Store) ListUploadSources(ctx context.Context, actor account.User, thresh
 		JOIN recording_profiles p ON p.id = us.recording_profile_id
 	`
 	args := []interface{}{}
-	if actor.Role != account.RoleSuperAdmin {
-		query += " WHERE p.owner_user_id = ?"
+	conditions := make([]string, 0, 2)
+	if id > 0 {
+		conditions = append(conditions, "us.id = ?")
+		args = append(args, id)
+	}
+	if actor != nil && actor.Role != account.RoleSuperAdmin {
+		conditions = append(conditions, "p.owner_user_id = ?")
 		args = append(args, actor.ID)
 	}
-	query += " ORDER BY us.started_at DESC, us.id DESC LIMIT 100"
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY us.started_at DESC, us.id DESC"
+	if id <= 0 {
+		query += " LIMIT 100"
+	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return UploadSourceList{}, fmt.Errorf("list upload sources: %w", err)
+		return nil, fmt.Errorf("list upload sources: %w", err)
 	}
 	defer rows.Close()
 
@@ -490,19 +523,19 @@ func (s Store) ListUploadSources(ctx context.Context, actor account.User, thresh
 			&item.ReadyAt,
 			&item.LastError,
 		); err != nil {
-			return UploadSourceList{}, fmt.Errorf("scan upload source: %w", err)
+			return nil, fmt.Errorf("scan upload source: %w", err)
 		}
 		item.LocalProtected = localProtected == 1
 		item.Segments, err = s.uploadSourceSegments(ctx, item.ID)
 		if err != nil {
-			return UploadSourceList{}, err
+			return nil, err
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return UploadSourceList{}, fmt.Errorf("iterate upload sources: %w", err)
+		return nil, fmt.Errorf("iterate upload sources: %w", err)
 	}
-	return UploadSourceList{Items: items, Total: len(items), MergeGapThresholdSeconds: thresholdSeconds}, nil
+	return items, nil
 }
 
 func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64) (UploadSourceDiscoverResult, error) {
@@ -703,10 +736,79 @@ func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, t
 			return false, fmt.Errorf("insert upload source segment: %w", err)
 		}
 	}
+	if status == "MERGE_PENDING" {
+		payload, err := json.Marshal(map[string]int64{"upload_source_id": uploadSourceID})
+		if err != nil {
+			return false, fmt.Errorf("encode merge job payload: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO jobs
+				(recording_profile_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+			VALUES (?, 'MERGE_UPLOAD_SOURCE', 'MEDIA', ?, ?, 'PENDING', 60, 3)
+		`, first.RecordingProfileID, fmt.Sprintf("upload-source:%d:merge", uploadSourceID), string(payload)); err != nil {
+			return false, fmt.Errorf("enqueue upload source merge: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit upload source insert: %w", err)
 	}
 	return true, nil
+}
+
+func (s Store) UploadSourceForMerge(ctx context.Context, id int64) (UploadSource, error) {
+	if id <= 0 {
+		return UploadSource{}, ErrValidation
+	}
+	items, err := s.uploadSourcesByID(ctx, id, nil)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	return items[0], nil
+}
+
+func (s Store) MarkUploadSourceMergeSucceeded(ctx context.Context, id int64, outputRelativePath string, sizeBytes int64) error {
+	if id <= 0 || outputRelativePath == "" {
+		return ErrValidation
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = 'READY_TO_UPLOAD',
+			output_relative_path = ?,
+			output_recording_file_id = NULL,
+			total_bytes = ?,
+			ready_at = CURRENT_TIMESTAMP,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status IN ('MERGE_PENDING', 'MERGE_FAILED')
+	`, outputRelativePath, sizeBytes, id)
+	if err != nil {
+		return fmt.Errorf("mark upload source merge succeeded: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkUploadSourceMergeFailed(ctx context.Context, id int64, terminal bool, message string) error {
+	if id <= 0 {
+		return ErrValidation
+	}
+	status := "MERGE_PENDING"
+	if terminal {
+		status = "MERGE_FAILED"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = ?,
+			last_error = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status IN ('MERGE_PENDING', 'MERGE_FAILED')
+	`, status, message, id)
+	if err != nil {
+		return fmt.Errorf("mark upload source merge failed: %w", err)
+	}
+	return nil
 }
 
 type uploadSourceMetadata struct {

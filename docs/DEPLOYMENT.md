@@ -240,6 +240,7 @@ frontend/dist
 /data/7grecorder/
 ├── db/
 ├── recordings/
+├── upload-sources/
 ├── songs/
 ├── temp/
 └── backups/

@@ -6,6 +6,7 @@ install -d -m 0755 /opt/7grecorder/deploy
 install -d -m 0755 /etc/7grecorder
 install -d -m 0755 /data/7grecorder/db
 install -d -m 0755 /data/7grecorder/recordings
+install -d -m 0755 /data/7grecorder/upload-sources
 install -d -m 0755 /data/7grecorder/songs
 install -d -m 0755 /data/7grecorder/temp
 install -d -m 0755 /data/7grecorder/backups/db
@@ -30,6 +31,7 @@ TEMP_ROOT=/data/7grecorder/temp
 RECORDER_BASE_URL=http://bililiverecorder:2356
 RECORDER_BASIC_USER=change-me
 RECORDER_BASIC_PASSWORD=change-me
+FFMPEG_PATH=ffmpeg
 MASTER_KEY_PATH=/etc/7grecorder/master.key
 LOG_LEVEL=info
 

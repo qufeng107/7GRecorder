@@ -11,6 +11,7 @@ type Config struct {
 	RecorderBaseURL  string
 	RecorderUser     string
 	RecorderPassword string
+	FFmpegPath       string
 	MasterKeyPath    string
 	LogLevel         string
 }
@@ -26,6 +27,7 @@ func LoadFromEnv() Config {
 		RecorderBaseURL:  env("RECORDER_BASE_URL", "http://bililiverecorder:2356"),
 		RecorderUser:     os.Getenv("RECORDER_BASIC_USER"),
 		RecorderPassword: os.Getenv("RECORDER_BASIC_PASSWORD"),
+		FFmpegPath:       env("FFMPEG_PATH", "ffmpeg"),
 		MasterKeyPath:    env("MASTER_KEY_PATH", "/etc/7grecorder/master.key"),
 		LogLevel:         env("LOG_LEVEL", "info"),
 	}

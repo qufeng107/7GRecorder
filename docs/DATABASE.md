@@ -500,6 +500,7 @@ publication:45:bilibili:verify
 file:456:cos:upload
 song:987:cut
 recording:123:local-cleanup
+upload-source:789:merge
 ```
 
 ---
@@ -676,8 +677,9 @@ is introduced for the read-only diagnostics step.
 Durable upload sources are represented by `upload_sources` and `upload_source_segments`. `upload_sources` is the unit
 that optional upload modules consume. `upload_source_segments` records the original child recordings/files, source
 recording timestamps, relative paths, and each segment's timeline interval inside the upload source. Multi-segment
-sources remain `MERGE_PENDING` until a later FFmpeg job creates a derived file; single-segment sources can reference the
-existing closed video file and become `READY_TO_UPLOAD`.
+sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
+`upload_sources.output_relative_path`; single-segment sources can reference the existing closed video file and become
+`READY_TO_UPLOAD`. Terminal merge failures keep the source metadata and mark the source `MERGE_FAILED`.
 
 备份写入：
 

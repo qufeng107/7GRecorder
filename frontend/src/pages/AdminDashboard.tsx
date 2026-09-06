@@ -125,6 +125,7 @@ type RecordingItem = {
   upload_source_id?: number;
   upload_source_status?: string;
   output_recording_file_id?: number;
+  output_relative_path?: string;
   recording_profile_id: number;
   profile_name: string;
   room_id: string;
@@ -133,6 +134,7 @@ type RecordingItem = {
   started_at: string;
   completed_at?: string;
   duration_ms: number;
+  total_bytes?: number;
   recording_status: string;
   local_storage_status: string;
   local_protected: boolean;
@@ -521,6 +523,7 @@ const uiCopy = {
       `生成可上传视频：新增 ${created}，等待 ${ignored}。`,
     uploadSourcePendingMerge: "待合成",
     uploadSourceReady: "可上传",
+    uploadSourceMergeFailed: "合成失败",
     sourceSegments: "子视频",
     timeline: "合成时间轴",
     recordingStatus: "录像状态",
@@ -719,6 +722,7 @@ const uiCopy = {
       `Upload sources: ${created} created, ${ignored} waiting.`,
     uploadSourcePendingMerge: "Pending merge",
     uploadSourceReady: "Ready to upload",
+    uploadSourceMergeFailed: "Merge failed",
     sourceSegments: "Source Segments",
     timeline: "Timeline",
     recordingStatus: "Recording Status",
@@ -848,6 +852,7 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     upload_source_id: source.id,
     upload_source_status: source.status,
     output_recording_file_id: source.output_recording_file_id,
+    output_relative_path: source.output_relative_path,
     recording_profile_id: source.recording_profile_id,
     profile_name: source.profile_name,
     room_id: source.room_id,
@@ -856,6 +861,7 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     started_at: source.started_at,
     completed_at: source.completed_at,
     duration_ms: source.duration_ms,
+    total_bytes: source.total_bytes,
     recording_status: source.status,
     local_storage_status: source.output_relative_path ? "AVAILABLE" : source.status,
     local_protected: Boolean(source.local_protected),
@@ -2828,6 +2834,13 @@ function RecordingsPanel(props: {
         const file = recording.files?.[0];
         const canUseLocalFile = recording.local_storage_status !== "DELETED";
         const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
+        const uploadSourceDownloadHref =
+          recording.upload_source_id && recording.output_relative_path && recording.upload_source_status === "READY_TO_UPLOAD"
+            ? `/api/v1/upload-sources/${recording.upload_source_id}/download`
+            : "";
+        const recordingFileDownloadHref =
+          file && file.file_status === "CLOSED" && isSingleSegment ? `/api/v1/recording-files/${file.id}/download` : "";
+        const downloadHref = uploadSourceDownloadHref || recordingFileDownloadHref;
         if (!props.canManageLocalFiles) {
           return <span className="text-xs text-muted">{props.labels.noAction}</span>;
         }
@@ -2855,10 +2868,10 @@ function RecordingsPanel(props: {
                 {recording.local_protected ? props.labels.unprotect : props.labels.protect}
               </button>
             ) : null}
-            {file && file.file_status === "CLOSED" && isSingleSegment ? (
+            {downloadHref ? (
               <a
                 className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                href={`/api/v1/recording-files/${file.id}/download`}
+                href={downloadHref}
               >
                 <Download className="h-3.5 w-3.5" aria-hidden="true" />
                 {props.labels.download}
@@ -3227,6 +3240,9 @@ function formatBytes(value: number): string {
 }
 
 function totalRecordingBytes(recording: RecordingItem): number {
+  if (typeof recording.total_bytes === "number") {
+    return recording.total_bytes;
+  }
   return (recording.files ?? []).reduce((total, file) => total + file.size_bytes, 0);
 }
 
@@ -3253,6 +3269,9 @@ function formatUploadSourceStatus(value: string, labels: AdminCopy): string {
   }
   if (value === "MERGE_PENDING") {
     return labels.uploadSourcePendingMerge;
+  }
+  if (value === "MERGE_FAILED") {
+    return labels.uploadSourceMergeFailed;
   }
   return value || labels.unknown;
 }

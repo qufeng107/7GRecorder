@@ -141,6 +141,47 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/upload-sources/{id}/download", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			source, err := store.GetUploadSource(r.Context(), actor, id)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			if source.Status != "READY_TO_UPLOAD" || source.OutputRelativePath == "" {
+				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_READY", "Upload source is not ready.", nil)
+				return
+			}
+			relative := filepath.ToSlash(source.OutputRelativePath)
+			if !strings.HasPrefix(relative, "recordings/") && !strings.HasPrefix(relative, "upload-sources/") {
+				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_FOUND", "Upload source file was not found.", nil)
+				return
+			}
+			absolutePath, err := ResolveWithinRoot(cfg.DataRoot, source.OutputRelativePath)
+			if err != nil {
+				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_FOUND", "Upload source file was not found.", nil)
+				return
+			}
+			info, err := os.Stat(absolutePath)
+			if errors.Is(err, os.ErrNotExist) || (err == nil && info.IsDir()) {
+				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_FOUND", "Upload source file was not found.", nil)
+				return
+			}
+			if err != nil {
+				writeAPIError(r, http.StatusInternalServerError, "UPLOAD_SOURCE_UNAVAILABLE", "Upload source file is unavailable.", nil)
+				return
+			}
+			name := filepath.Base(source.OutputRelativePath)
+			r.Response.Header().Set("Content-Type", recordingContentType(name))
+			r.Response.Header().Set("Content-Disposition", contentDisposition(name))
+			r.Response.Header().Set("X-Accel-Redirect", protectedMediaPath(source.OutputRelativePath))
+		})
+	})
+
 	s.BindHandler("/api/v1/recording-files/reconcile", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodPost) {
 			return

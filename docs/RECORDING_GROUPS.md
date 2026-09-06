@@ -14,23 +14,24 @@ Recording Profile before later upload work.
 - A group is finalized only after the latest source recording has been completed for longer than the same merge gap
   threshold. This keeps "gap grouping" and "wait before finalizing" as one user-facing setting.
 - Completed recordings shorter than 180 seconds are marked as short segments.
-- The first implementation is read-only: it never merges, moves, deletes, uploads, or rewrites recording files.
 - Admin UI treats upload sources as the primary recording list. Expanding a row shows the original segments, their
   source recording timestamps, and their timeline interval inside the upload source.
 - Single-segment upload sources are marked `READY_TO_UPLOAD` immediately. Multi-segment upload sources are marked
-  `MERGE_PENDING` until a later FFmpeg concat job creates the derived file.
+  `MERGE_PENDING` until an FFmpeg concat job creates the derived file.
 
-## Later Upload Merge
+## Upload Merge
 
-The next step is a controlled FFmpeg concat job that creates a derived file for each multi-segment upload source.
+`MERGE_UPLOAD_SOURCE` is a MEDIA job created idempotently when a multi-segment upload source is discovered.
 
 Rules:
 
 - preserve every original recording file;
 - only use CLOSED local video files inside `DATA_ROOT`;
 - reject groups with missing, deleted, writing, or path-unsafe files;
-- write derived files under a managed temp/output directory;
+- write derived files under `DATA_ROOT/upload-sources/<profile-id>/<source-id>/`;
 - store enough metadata to trace the derived file back to source recording IDs and China-time windows;
+- mark the upload source `READY_TO_UPLOAD` only after the output file is written and recorded;
+- keep failed sources visible as `MERGE_PENDING` while retryable and `MERGE_FAILED` after terminal failure;
 - upload modules consume only upload sources with `READY_TO_UPLOAD` status.
 
 ## Non-Goals

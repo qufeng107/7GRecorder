@@ -190,6 +190,8 @@ song processing FAILED
 - Upload source discovery covers the shared merge gap threshold, waiting until a profile is no longer recording,
   idempotent source creation, single-segment `READY_TO_UPLOAD`, multi-segment `MERGE_PENDING`, and segment timeline
   metadata.
+- Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
+  `READY_TO_UPLOAD`, and terminal failure visibility.
 
 ---
 

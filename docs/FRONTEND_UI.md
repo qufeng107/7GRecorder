@@ -27,6 +27,8 @@
   it must not merge, delete, or hide files.
 - The recordings page uses upload sources as the primary rows. Each row represents one upload-facing video. Expanding a
   row shows child source segments with their recording timestamps, timeline intervals, sizes, and paths.
+- Multi-segment upload sources show download actions only after FFmpeg merge completes and the source becomes
+  `READY_TO_UPLOAD`.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
   protected recording count.
 - The recordings table keeps its action column sticky on the right during horizontal scrolling.
