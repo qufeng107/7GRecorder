@@ -145,6 +145,16 @@ PUT    /api/v1/accounts/{id}/policy
 
 不物理删除有历史数据的账号，使用 enabled/archived 语义。
 
+Early production bootstrap implements SUPER_ADMIN-only account management for Manager accounts:
+
+- `GET /api/v1/accounts` returns users with profile counts and ManagerPolicy values.
+- `POST /api/v1/accounts` creates MANAGER accounts with an initial password and policy.
+- `GET /api/v1/accounts/{id}` returns one account.
+- `PATCH /api/v1/accounts/{id}` updates username, password, or enabled status; the current SUPER_ADMIN cannot disable itself.
+- `PUT /api/v1/accounts/{id}/policy` updates ManagerPolicy for MANAGER accounts only.
+
+The first UI intentionally does not create additional SUPER_ADMIN accounts.
+
 ### Recording Profiles
 
 ```text

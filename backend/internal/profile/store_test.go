@@ -174,6 +174,30 @@ func TestManagerPolicyBlocksProfileCreate(t *testing.T) {
 	}
 }
 
+func TestSuperAdminCanCreateProfileForManager(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	store := NewStore(database)
+	admin := bootstrapTestAdmin(t, ctx, database)
+	manager := insertTestManager(t, ctx, database)
+
+	created, err := store.Create(ctx, admin, CreateRequest{
+		OwnerUserID:  &manager.ID,
+		Name:         "Manager room",
+		RoomID:       "123456",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if created.OwnerUserID != manager.ID {
+		t.Fatalf("expected owner %d, got %d", manager.ID, created.OwnerUserID)
+	}
+	if created.OwnerUsername != manager.Username {
+		t.Fatalf("expected owner username %q, got %q", manager.Username, created.OwnerUsername)
+	}
+}
+
 func TestUpdateSettings(t *testing.T) {
 	ctx := context.Background()
 	database := openTestDB(t, ctx)

@@ -410,6 +410,9 @@ func maxInt64(values ...int64) int64 {
 }
 
 func (s Store) SetLocalProtected(ctx context.Context, actor account.User, recordingID int64, protected bool) (Recording, error) {
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return Recording{}, err
+	}
 	query := `
 		UPDATE recordings
 		SET local_protected = ?, updated_at = CURRENT_TIMESTAMP
@@ -531,6 +534,9 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 }
 
 func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID int64) (File, error) {
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return File{}, err
+	}
 	query := `
 		SELECT f.id, f.recording_id, f.relative_path, f.original_name, f.kind, f.file_status,
 			COALESCE(f.size_bytes, 0), COALESCE(f.duration_ms, 0), COALESCE(f.closed_at, ''), f.updated_at
@@ -568,6 +574,20 @@ func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID i
 		return File{}, ErrNotReady
 	}
 	return item, nil
+}
+
+func (s Store) ensureCanManageLocalFiles(ctx context.Context, actor account.User) error {
+	if actor.Role != account.RoleManager {
+		return nil
+	}
+	policy, err := account.NewStore(s.db).Policy(ctx, actor, actor.ID)
+	if err != nil {
+		return fmt.Errorf("load local file policy: %w", err)
+	}
+	if !policy.CanManageLocalFiles {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {

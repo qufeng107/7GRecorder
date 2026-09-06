@@ -28,6 +28,7 @@ func Run(ctx context.Context, cfg config.Config) {
 	s := g.Server()
 	s.SetAddr(cfg.ListenAddr)
 	bindAuthHandlers(cfg, s)
+	bindAccountHandlers(cfg, s)
 	bindProfileHandlers(cfg, s)
 	bindRecordingHandlers(cfg, s)
 	startWorker(ctx, cfg)
