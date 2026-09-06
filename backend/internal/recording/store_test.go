@@ -333,6 +333,123 @@ func TestCleanupCandidatesExcludeProtectedRecordings(t *testing.T) {
 	}
 }
 
+func TestRunLocalCleanupDeletesOldestUnprotectedCompletedRecording(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	_, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+	if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	filePath := filepath.Join(recordingDir, "record-1741048619-20260905-224258-164-title.flv")
+	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	oldTime := closedTestTime()
+	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes returned error: %v", err)
+	}
+
+	store := NewStore(database, cfg)
+	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
+		t.Fatalf("ReconcileLocal returned error: %v", err)
+	}
+	if _, err := store.UpsertLocalStorageSettings(ctx, actor, LocalStorageSettingsUpsert{
+		MaxRecordingBytes:          1,
+		MinSystemFreeBytes:         1,
+		CleanupTargetRatio:         0.5,
+		AbsoluteEmergencyFreeBytes: 1,
+	}); err != nil {
+		t.Fatalf("UpsertLocalStorageSettings returned error: %v", err)
+	}
+
+	result, err := store.RunLocalCleanup(ctx, actor, CleanupRunRequest{MaxRecordings: 5})
+	if err != nil {
+		t.Fatalf("RunLocalCleanup returned error: %v", err)
+	}
+	if result.DeletedRecordings != 1 || result.DeletedFiles != 1 || result.ReclaimedBytes != 5 {
+		t.Fatalf("unexpected cleanup result: %#v", result)
+	}
+	if _, err := os.Stat(filePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected file to be deleted, stat err=%v", err)
+	}
+
+	items, err := store.List(ctx, actor)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].LocalStorageStatus != "DELETED" || items[0].Files[0].FileStatus != "DELETED" {
+		t.Fatalf("expected deleted metadata, got %#v", items)
+	}
+}
+
+func TestRunLocalCleanupSkipsProtectedRecording(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	_, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+	if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	filePath := filepath.Join(recordingDir, "record-1741048619-20260905-224258-164-title.flv")
+	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	oldTime := closedTestTime()
+	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes returned error: %v", err)
+	}
+
+	store := NewStore(database, cfg)
+	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
+		t.Fatalf("ReconcileLocal returned error: %v", err)
+	}
+	items, err := store.List(ctx, actor)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if _, err := store.SetLocalProtected(ctx, actor, items[0].ID, true); err != nil {
+		t.Fatalf("SetLocalProtected returned error: %v", err)
+	}
+	if _, err := store.UpsertLocalStorageSettings(ctx, actor, LocalStorageSettingsUpsert{
+		MaxRecordingBytes:          1,
+		MinSystemFreeBytes:         1,
+		CleanupTargetRatio:         0.5,
+		AbsoluteEmergencyFreeBytes: 1,
+	}); err != nil {
+		t.Fatalf("UpsertLocalStorageSettings returned error: %v", err)
+	}
+
+	result, err := store.RunLocalCleanup(ctx, actor, CleanupRunRequest{MaxRecordings: 5})
+	if err != nil {
+		t.Fatalf("RunLocalCleanup returned error: %v", err)
+	}
+	if result.DeletedRecordings != 0 || result.DeletedFiles != 0 {
+		t.Fatalf("expected protected recording to be skipped, got %#v", result)
+	}
+	if _, err := os.Stat(filePath); err != nil {
+		t.Fatalf("expected protected file to remain, stat err=%v", err)
+	}
+}
+
 func TestUpsertLocalStorageSettingsUpdatesPolicyPreview(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

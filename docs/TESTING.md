@@ -256,6 +256,13 @@ login
 
 ## 15. Release Gate
 
+Manual local cleanup coverage:
+
+- cleanup runs only when local storage policy reports reclaim is needed;
+- cleanup deletes closed video files for whole completed unprotected recordings;
+- protected, active, writing, and RUNNING-job-referenced recordings are skipped;
+- metadata is retained and marked `DELETED` after local files are removed.
+
 ```text
 Backend:
   gofmt / vet

@@ -27,3 +27,4 @@
 - Manager-only controls should be hidden or replaced with a read-only state when the current `ManagerPolicy` denies the capability.
 - Local scan remains super-admin-only because it reconciles shared server storage.
 - Recording protect/download actions follow `can_manage_local_files`.
+- Destructive local storage actions must require confirmation and show the cleanup result after completion.

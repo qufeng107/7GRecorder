@@ -57,6 +57,27 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/storage/local/actions/cleanup", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			var req recording.CleanupRunRequest
+			if len(r.GetBody()) > 0 {
+				if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+					writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+					return
+				}
+			}
+			result, err := store.RunLocalCleanup(r.Context(), actor, req)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
 	s.BindHandler("/api/v1/recordings", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return
