@@ -324,6 +324,60 @@ describe("AdminDashboard", () => {
     expect((await screen.findAllByText(/China Time/)).length).toBeGreaterThan(0);
   });
 
+  it("opens recording details and marks short segments", async () => {
+    mockSuperAdminFetch((path) => {
+      if (path.endsWith("/api/v1/recordings")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 1,
+                recording_profile_id: 1,
+                profile_name: "7G",
+                room_id: "1741048619",
+                streamer_name: "streamer",
+                title: "short clip",
+                started_at: "2026-09-05T15:55:44Z",
+                completed_at: "2026-09-05T15:57:15Z",
+                duration_ms: 91000,
+                recording_status: "COMPLETED",
+                local_storage_status: "CLOSED",
+                local_protected: false,
+                files: [
+                  {
+                    id: 1,
+                    recording_id: 1,
+                    relative_path: "recordings/1741048619/short.flv",
+                    original_name: "short.flv",
+                    kind: "VIDEO",
+                    file_status: "CLOSED",
+                    size_bytes: 1024,
+                    duration_ms: 91000,
+                    closed_at: "2026-09-05T15:57:15Z"
+                  }
+                ]
+              }
+            ],
+            total: 1
+          })
+        } as Response;
+      }
+      return undefined;
+    });
+
+    renderWithClient();
+    await switchToEnglish();
+
+    fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
+    expect(await screen.findByText("Short segment")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("heading", { name: "Recording Details" })).toBeInTheDocument();
+    expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
+    expect(await screen.findByText("File Size")).toBeInTheDocument();
+  });
+
   it("runs local cleanup from the system storage page after confirmation", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = input instanceof Request ? input.url : input.toString();
