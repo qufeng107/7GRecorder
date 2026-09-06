@@ -21,3 +21,9 @@
 
 - Super admins can open an account editor from the accounts table.
 - Empty password fields must keep the current password unchanged.
+
+## Permission-Gated UI
+
+- Manager-only controls should be hidden or replaced with a read-only state when the current `ManagerPolicy` denies the capability.
+- Local scan remains super-admin-only because it reconciles shared server storage.
+- Recording protect/download actions follow `can_manage_local_files`.
