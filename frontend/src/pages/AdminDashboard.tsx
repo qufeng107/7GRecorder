@@ -19,6 +19,8 @@ import {
   ShieldCheck,
   Unlock,
   UserCircle,
+  UserPlus,
+  Users,
   X
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,8 +32,29 @@ type User = {
   enabled: boolean;
 };
 
+type ManagerPolicy = {
+  can_edit_recording_profile: boolean;
+  can_edit_bilibili_module: boolean;
+  can_edit_cos_module: boolean;
+  can_edit_netease_module: boolean;
+  can_manage_local_files: boolean;
+  updated_at?: string;
+};
+
+type PolicyFlag = Exclude<keyof ManagerPolicy, "updated_at">;
+
+type Account = User & {
+  profile_count: number;
+  policy?: ManagerPolicy;
+};
+
 type MeResponse = {
   user: User;
+};
+
+type AccountListResponse = {
+  items: Account[] | null;
+  total?: number;
 };
 
 type HealthResponse = {
@@ -50,6 +73,8 @@ type RecordingSettings = {
 type RecordingProfile = {
   id: number;
   name: string;
+  owner_user_id: number;
+  owner_username?: string;
   platform: string;
   room_id: string;
   streamer_name: string;
@@ -156,6 +181,7 @@ type CleanupCandidateListResponse = {
 };
 
 type ProfileForm = {
+  owner_user_id: string;
   name: string;
   room_id: string;
   streamer_name: string;
@@ -171,9 +197,17 @@ type ProfileForm = {
   finalize_grace_period_sec: number;
 };
 
-type AdminPage = "overview" | "profiles" | "recordings" | "system";
+type AdminPage = "overview" | "profiles" | "recordings" | "system" | "accounts";
+
+type AccountForm = {
+  username: string;
+  password: string;
+  enabled: boolean;
+  policy: ManagerPolicy;
+};
 
 const emptyProfileForm: ProfileForm = {
+  owner_user_id: "",
   name: "",
   room_id: "",
   streamer_name: "",
@@ -197,6 +231,21 @@ const statusRows = [
   { label: "Deployment", value: "main-only production", icon: ShieldCheck }
 ];
 
+const defaultManagerPolicy: ManagerPolicy = {
+  can_edit_recording_profile: true,
+  can_edit_bilibili_module: true,
+  can_edit_cos_module: true,
+  can_edit_netease_module: true,
+  can_manage_local_files: true
+};
+
+const emptyAccountForm: AccountForm = {
+  username: "",
+  password: "",
+  enabled: true,
+  policy: defaultManagerPolicy
+};
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
@@ -213,6 +262,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 function profileToForm(profile: RecordingProfile): ProfileForm {
   return {
+    owner_user_id: String(profile.owner_user_id),
     name: profile.name,
     room_id: profile.room_id,
     streamer_name: profile.streamer_name,
@@ -231,6 +281,7 @@ function profileToForm(profile: RecordingProfile): ProfileForm {
 
 function profilePayload(form: ProfileForm) {
   return {
+    owner_user_id: form.owner_user_id ? Number(form.owner_user_id) : undefined,
     name: form.name,
     room_id: form.room_id,
     streamer_name: form.streamer_name,
@@ -262,6 +313,10 @@ export function AdminDashboard() {
     minFreeGB: 0,
     emergencyFreeGB: 0,
     cleanupTargetPercent: 85
+  });
+  const [accountForm, setAccountForm] = useState<AccountForm>({
+    ...emptyAccountForm,
+    policy: { ...defaultManagerPolicy }
   });
 
   const meQuery = useQuery({
@@ -295,6 +350,14 @@ export function AdminDashboard() {
     refetchInterval: 15000
   });
 
+  const accountsQuery = useQuery({
+    queryKey: ["accounts"],
+    queryFn: () => requestJson<AccountListResponse>("/api/v1/accounts"),
+    enabled: Boolean(canManageSystemSettings),
+    retry: false,
+    refetchInterval: 30000
+  });
+
   const localStorageQuery = useQuery({
     queryKey: ["local-storage"],
     queryFn: () => requestJson<LocalStorageStatus>("/api/v1/storage/local"),
@@ -316,9 +379,14 @@ export function AdminDashboard() {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const recordings = recordingsQuery.data?.items ?? [];
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
+  const accounts = accountsQuery.data?.items ?? [];
+  const accountTotal = accountsQuery.data?.total ?? accounts.length;
 
   useEffect(() => {
     if (activePage === "system" && user && !canManageSystemSettings) {
+      setActivePage("overview");
+    }
+    if (activePage === "accounts" && user && !canManageSystemSettings) {
       setActivePage("overview");
     }
   }, [activePage, canManageSystemSettings, user]);
@@ -369,6 +437,7 @@ export function AdminDashboard() {
       setProfileForm(emptyProfileForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
+      queryClient.removeQueries({ queryKey: ["accounts"] });
       queryClient.removeQueries({ queryKey: ["local-storage"] });
       queryClient.removeQueries({ queryKey: ["cleanup-candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
@@ -480,6 +549,46 @@ export function AdminDashboard() {
     }
   });
 
+  const createAccountMutation = useMutation({
+    mutationFn: () =>
+      requestJson<Account>("/api/v1/accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          username: accountForm.username,
+          password: accountForm.password,
+          role: "MANAGER",
+          enabled: accountForm.enabled,
+          policy: accountForm.policy
+        })
+      }),
+    onSuccess: () => {
+      setAccountForm({ ...emptyAccountForm, policy: { ...defaultManagerPolicy } });
+      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    }
+  });
+
+  const updateAccountMutation = useMutation({
+    mutationFn: (request: { accountId: number; enabled: boolean }) =>
+      requestJson<Account>(`/api/v1/accounts/${request.accountId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: request.enabled })
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    }
+  });
+
+  const updatePolicyMutation = useMutation({
+    mutationFn: (request: { accountId: number; policy: ManagerPolicy }) =>
+      requestJson<ManagerPolicy>(`/api/v1/accounts/${request.accountId}/policy`, {
+        method: "PUT",
+        body: JSON.stringify(request.policy)
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    }
+  });
+
   const onLoginSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     loginMutation.mutate();
@@ -488,6 +597,11 @@ export function AdminDashboard() {
   const onProfileSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     saveProfileMutation.mutate();
+  };
+
+  const onAccountSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    createAccountMutation.mutate();
   };
 
   return (
@@ -539,9 +653,10 @@ export function AdminDashboard() {
                 profiles={profiles}
                 selectedProfileId={selectedProfileId}
                 total={profileTotal}
+                showOwner={Boolean(canManageSystemSettings)}
                 onCreate={() => {
                   setSelectedProfileId(null);
-                  setProfileForm(emptyProfileForm);
+                  setProfileForm({ ...emptyProfileForm, owner_user_id: String(user.id) });
                   setProfileEditorOpen(true);
                 }}
                 onSelect={(profile) => {
@@ -549,6 +664,27 @@ export function AdminDashboard() {
                   setProfileForm(profileToForm(profile));
                   setProfileEditorOpen(true);
                 }}
+              />
+            ) : null}
+
+            {activePage === "accounts" && canManageSystemSettings ? (
+              <AccountsPanel
+                accountForm={accountForm}
+                accounts={accounts}
+                createError={createAccountMutation.isError}
+                createPending={createAccountMutation.isPending}
+                currentUserId={user.id}
+                policyPending={updatePolicyMutation.isPending}
+                total={accountTotal}
+                updatePending={updateAccountMutation.isPending}
+                onAccountFormChange={setAccountForm}
+                onCreate={onAccountSubmit}
+                onToggleEnabled={(account) =>
+                  updateAccountMutation.mutate({ accountId: account.id, enabled: !account.enabled })
+                }
+                onUpdatePolicy={(account, policy) =>
+                  updatePolicyMutation.mutate({ accountId: account.id, policy })
+                }
               />
             ) : null}
 
@@ -561,6 +697,8 @@ export function AdminDashboard() {
                 profile={selectedProfile}
                 restorePending={restoreProfileMutation.isPending}
                 saveError={saveProfileMutation.isError}
+                ownerAccounts={accounts}
+                showOwner={Boolean(canManageSystemSettings)}
                 onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
                 onCancel={() => {
                   setProfileEditorOpen(false);
@@ -626,6 +764,7 @@ function AdminNav(props: {
   ];
 
   if (props.canManageSystemSettings) {
+    items.push({ page: "accounts", label: "Accounts", icon: Users });
     items.push({ page: "system", label: "System Settings", icon: Settings });
   }
 
@@ -760,9 +899,11 @@ function ProfileEditorDialog(props: {
   form: ProfileForm;
   isEditing: boolean;
   isSaving: boolean;
+  ownerAccounts: Account[];
   profile?: RecordingProfile;
   restorePending: boolean;
   saveError: boolean;
+  showOwner: boolean;
   onArchive: (profileId: number) => void;
   onCancel: () => void;
   onChange: (form: ProfileForm) => void;
@@ -774,6 +915,9 @@ function ProfileEditorDialog(props: {
     props.onChange({ ...props.form, [key]: value });
   };
   const isArchived = Boolean(props.profile?.archived_at);
+  const ownerOptions = props.ownerAccounts.filter((account) => account.enabled);
+  const selectedOwnerMissing =
+    props.form.owner_user_id && !ownerOptions.some((account) => String(account.id) === props.form.owner_user_id);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
@@ -797,6 +941,23 @@ function ProfileEditorDialog(props: {
         </div>
 
         <div className="mt-4 grid gap-3">
+          {props.showOwner ? (
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Owner
+              <select
+                className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+                value={props.form.owner_user_id}
+                onChange={(event) => update("owner_user_id", event.target.value)}
+              >
+                {selectedOwnerMissing ? <option value={props.form.owner_user_id}>Current owner</option> : null}
+                {ownerOptions.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.username} ({account.role})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <TextField label="Name" value={props.form.name} onChange={(value) => update("name", value)} />
           <TextField
             label="Room ID"
@@ -929,9 +1090,173 @@ function ProfileEditorDialog(props: {
   );
 }
 
+function AccountsPanel(props: {
+  accountForm: AccountForm;
+  accounts: Account[];
+  createError: boolean;
+  createPending: boolean;
+  currentUserId: number;
+  policyPending: boolean;
+  total: number;
+  updatePending: boolean;
+  onAccountFormChange: (form: AccountForm) => void;
+  onCreate: (event: FormEvent<HTMLFormElement>) => void;
+  onToggleEnabled: (account: Account) => void;
+  onUpdatePolicy: (account: Account, policy: ManagerPolicy) => void;
+}) {
+  const updateForm = <K extends keyof AccountForm>(key: K, value: AccountForm[K]) => {
+    props.onAccountFormChange({ ...props.accountForm, [key]: value });
+  };
+  const updateFormPolicy = (key: PolicyFlag, value: boolean) => {
+    props.onAccountFormChange({
+      ...props.accountForm,
+      policy: { ...props.accountForm.policy, [key]: value }
+    });
+  };
+
+  return (
+    <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+      <form className="rounded-md border border-border bg-panel p-4 shadow-sm" onSubmit={props.onCreate}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">New Manager</h2>
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={props.createPending}
+            type="submit"
+          >
+            <UserPlus className="h-4 w-4" aria-hidden="true" />
+            Create
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3">
+          <TextField
+            autoComplete="username"
+            label="Username"
+            value={props.accountForm.username}
+            onChange={(value) => updateForm("username", value)}
+          />
+          <TextField
+            autoComplete="new-password"
+            label="Initial Password"
+            type="password"
+            value={props.accountForm.password}
+            onChange={(value) => updateForm("password", value)}
+          />
+          <ToggleField
+            label="Enabled"
+            checked={props.accountForm.enabled}
+            onChange={(value) => updateForm("enabled", value)}
+          />
+          <AccountPolicyFields
+            policy={props.accountForm.policy}
+            onChange={(key, value) => updateFormPolicy(key, value)}
+          />
+          {props.createError ? (
+            <p className="text-sm text-red-700">Account creation failed. Check username and password.</p>
+          ) : null}
+        </div>
+      </form>
+
+      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">Accounts</h2>
+          <span className="text-sm text-muted">{props.total} total</span>
+        </div>
+        <div className="mt-4 overflow-hidden rounded-md border border-border">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
+              <tr>
+                <th className="px-3 py-2 font-semibold">Account</th>
+                <th className="px-3 py-2 font-semibold">Role</th>
+                <th className="px-3 py-2 font-semibold">Profiles</th>
+                <th className="px-3 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.accounts.map((account) => (
+                <tr key={account.id} className="bg-white align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-semibold text-ink">{account.username}</p>
+                    <p className="mt-1 text-xs text-muted">ID {account.id}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{account.role}</td>
+                  <td className="px-3 py-3 text-muted">{account.profile_count}</td>
+                  <td className="px-3 py-3 text-muted">{account.enabled ? "ENABLED" : "DISABLED"}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-col items-start gap-2">
+                      <button
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                        disabled={props.updatePending || account.id === props.currentUserId}
+                        type="button"
+                        onClick={() => props.onToggleEnabled(account)}
+                      >
+                        {account.enabled ? "Disable" : "Enable"}
+                      </button>
+                      {account.policy ? (
+                        <div className="grid gap-2 pt-1">
+                          <AccountPolicyFields
+                            compact
+                            policy={account.policy}
+                            onChange={(key, value) =>
+                              props.onUpdatePolicy(account, { ...account.policy!, [key]: value })
+                            }
+                            disabled={props.policyPending}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {props.accounts.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-8 text-center text-muted" colSpan={5}>
+                    No accounts yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function AccountPolicyFields(props: {
+  compact?: boolean;
+  disabled?: boolean;
+  policy: ManagerPolicy;
+  onChange: (key: PolicyFlag, value: boolean) => void;
+}) {
+  const fields: Array<{ key: PolicyFlag; label: string }> = [
+    { key: "can_edit_recording_profile", label: "Edit profiles" },
+    { key: "can_edit_bilibili_module", label: "Bilibili config" },
+    { key: "can_edit_cos_module", label: "COS config" },
+    { key: "can_edit_netease_module", label: "NetEase config" },
+    { key: "can_manage_local_files", label: "Local files" }
+  ];
+
+  return (
+    <div className={props.compact ? "grid gap-1" : "grid gap-2"}>
+      {fields.map((field) => (
+        <ToggleField
+          key={field.key}
+          checked={Boolean(props.policy[field.key])}
+          disabled={props.disabled}
+          label={field.label}
+          onChange={(value) => props.onChange(field.key, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function ProfileListPanel(props: {
   profiles: RecordingProfile[];
   selectedProfileId: number | null;
+  showOwner: boolean;
   total: number;
   onCreate: () => void;
   onSelect: (profile: RecordingProfile) => void;
@@ -957,6 +1282,7 @@ function ProfileListPanel(props: {
           <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
             <tr>
               <th className="px-3 py-2 font-semibold">Name</th>
+              {props.showOwner ? <th className="px-3 py-2 font-semibold">Owner</th> : null}
               <th className="px-3 py-2 font-semibold">Room</th>
               <th className="px-3 py-2 font-semibold">Runtime</th>
               <th className="px-3 py-2 font-semibold">Sync</th>
@@ -975,6 +1301,9 @@ function ProfileListPanel(props: {
                   </button>
                   <p className="mt-1 text-xs text-muted">{profile.streamer_name}</p>
                 </td>
+                {props.showOwner ? (
+                  <td className="px-3 py-3 text-muted">{profile.owner_username || profile.owner_user_id}</td>
+                ) : null}
                 <td className="px-3 py-3 text-muted">{profile.room_id}</td>
                 <td className="px-3 py-3 text-muted">{profile.runtime.recorder_status}</td>
                 <td className="px-3 py-3 text-muted">{profile.runtime.sync_status}</td>
@@ -997,7 +1326,7 @@ function ProfileListPanel(props: {
             ))}
             {props.profiles.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={5}>
+                <td className="px-3 py-8 text-center text-muted" colSpan={props.showOwner ? 6 : 5}>
                   No profiles yet.
                 </td>
               </tr>
@@ -1408,13 +1737,14 @@ function SelectField(props: { label: string; value: string; onChange: (value: st
   );
 }
 
-function ToggleField(props: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+function ToggleField(props: { disabled?: boolean; label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
     <label className="flex items-center justify-between gap-3 rounded-md border border-border bg-white px-3 py-2 text-sm font-medium">
       {props.label}
       <input
         className="h-4 w-4 accent-[#16867a]"
         checked={props.checked}
+        disabled={props.disabled}
         type="checkbox"
         onChange={(event) => props.onChange(event.target.checked)}
       />

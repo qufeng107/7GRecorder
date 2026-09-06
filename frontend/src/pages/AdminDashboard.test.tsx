@@ -72,4 +72,55 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("Recording Profiles")).toBeInTheDocument();
     expect(await screen.findByText("No profiles yet.")).toBeInTheDocument();
   });
+
+  it("renders accounts for super admins", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = input instanceof Request ? input.url : input.toString();
+        if (path.endsWith("/api/v1/me")) {
+          return {
+            ok: true,
+            json: async () => ({
+              user: { id: 1, username: "admin", role: "SUPER_ADMIN", enabled: true }
+            })
+          } as Response;
+        }
+        if (path.endsWith("/api/v1/accounts")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [
+                {
+                  id: 2,
+                  username: "manager",
+                  role: "MANAGER",
+                  enabled: true,
+                  profile_count: 1,
+                  policy: {
+                    can_edit_recording_profile: true,
+                    can_edit_bilibili_module: true,
+                    can_edit_cos_module: true,
+                    can_edit_netease_module: true,
+                    can_manage_local_files: true
+                  }
+                }
+              ],
+              total: 1
+            })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ items: [], total: 0, status: "ok", release_sha: "test" })
+        } as Response;
+      })
+    );
+
+    renderWithClient();
+
+    fireEvent.click(await screen.findByRole("button", { name: /accounts/i }));
+    expect(await screen.findByRole("heading", { name: "Accounts" })).toBeInTheDocument();
+    expect(await screen.findByText("manager")).toBeInTheDocument();
+  });
 });

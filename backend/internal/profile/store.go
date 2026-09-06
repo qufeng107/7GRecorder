@@ -45,6 +45,7 @@ type Runtime struct {
 type RecordingProfile struct {
 	ID            int64             `json:"id"`
 	OwnerUserID   int64             `json:"owner_user_id"`
+	OwnerUsername string            `json:"owner_username,omitempty"`
 	Name          string            `json:"name"`
 	Platform      string            `json:"platform"`
 	RoomID        string            `json:"room_id"`
@@ -62,6 +63,7 @@ type RecordingProfile struct {
 }
 
 type CreateRequest struct {
+	OwnerUserID   *int64          `json:"owner_user_id"`
 	Name          string          `json:"name"`
 	RoomID        string          `json:"room_id"`
 	StreamerName  string          `json:"streamer_name"`
@@ -74,6 +76,7 @@ type CreateRequest struct {
 }
 
 type UpdateRequest struct {
+	OwnerUserID   *int64  `json:"owner_user_id"`
 	Name          *string `json:"name"`
 	RoomID        *string `json:"room_id"`
 	StreamerName  *string `json:"streamer_name"`
@@ -103,17 +106,18 @@ func NewStore(db *sql.DB) Store {
 
 func (s Store) List(ctx context.Context, actor account.User) ([]RecordingProfile, error) {
 	query := `
-		SELECT id, owner_user_id, name, platform, room_id, streamer_name, COALESCE(streamer_uid, ''),
-			timezone, enabled, public_enabled, COALESCE(public_slug, ''), COALESCE(archived_at, ''),
-			created_at, updated_at
-		FROM recording_profiles
+		SELECT rp.id, rp.owner_user_id, COALESCE(u.username, ''), rp.name, rp.platform, rp.room_id,
+			rp.streamer_name, COALESCE(rp.streamer_uid, ''), rp.timezone, rp.enabled, rp.public_enabled,
+			COALESCE(rp.public_slug, ''), COALESCE(rp.archived_at, ''), rp.created_at, rp.updated_at
+		FROM recording_profiles rp
+		LEFT JOIN users u ON u.id = rp.owner_user_id
 	`
 	args := []interface{}{}
 	if actor.Role != account.RoleSuperAdmin {
-		query += " WHERE owner_user_id = ?"
+		query += " WHERE rp.owner_user_id = ?"
 		args = append(args, actor.ID)
 	}
-	query += " ORDER BY archived_at IS NOT NULL ASC, updated_at DESC, id DESC"
+	query += " ORDER BY rp.archived_at IS NOT NULL ASC, rp.updated_at DESC, rp.id DESC"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -155,15 +159,12 @@ func (s Store) Create(ctx context.Context, actor account.User, req CreateRequest
 	if name == "" || roomID == "" || streamerName == "" {
 		return RecordingProfile{}, ErrValidation
 	}
-	if actor.Role == account.RoleManager {
-		var count int
-		err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM recording_profiles WHERE owner_user_id = ? AND archived_at IS NULL", actor.ID).Scan(&count)
-		if err != nil {
-			return RecordingProfile{}, fmt.Errorf("count manager profiles: %w", err)
-		}
-		if count >= 1 {
-			return RecordingProfile{}, ErrManagerLimit
-		}
+	ownerID, err := s.resolveOwnerID(ctx, actor, req.OwnerUserID)
+	if err != nil {
+		return RecordingProfile{}, err
+	}
+	if err := s.ensureOwnerCanAcceptActiveProfile(ctx, ownerID, 0, ""); err != nil {
+		return RecordingProfile{}, err
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -178,7 +179,7 @@ func (s Store) Create(ctx context.Context, actor account.User, req CreateRequest
 		INSERT INTO recording_profiles
 			(owner_user_id, name, platform, room_id, streamer_name, streamer_uid, timezone, enabled, public_enabled, public_slug)
 		VALUES (?, ?, 'bilibili', ?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''))
-	`, actor.ID, name, roomID, streamerName, strings.TrimSpace(req.StreamerUID), timezone, boolInt(enabled), boolInt(publicEnabled), strings.TrimSpace(req.PublicSlug))
+	`, ownerID, name, roomID, streamerName, strings.TrimSpace(req.StreamerUID), timezone, boolInt(enabled), boolInt(publicEnabled), strings.TrimSpace(req.PublicSlug))
 	if isUniqueConstraint(err) {
 		return RecordingProfile{}, ErrRoomInUse
 	}
@@ -269,6 +270,7 @@ func (s Store) Update(ctx context.Context, actor account.User, id int64, req Upd
 	streamerName := current.StreamerName
 	streamerUID := current.StreamerUID
 	timezone := current.Timezone
+	ownerID := current.OwnerUserID
 	enabled := current.Enabled
 	publicEnabled := current.PublicEnabled
 	publicSlug := current.PublicSlug
@@ -288,6 +290,13 @@ func (s Store) Update(ctx context.Context, actor account.User, id int64, req Upd
 	}
 	if req.Timezone != nil {
 		timezone = normalizeDefault(*req.Timezone, "Asia/Shanghai")
+	}
+	if req.OwnerUserID != nil {
+		resolvedOwnerID, err := s.resolveOwnerID(ctx, actor, req.OwnerUserID)
+		if err != nil {
+			return RecordingProfile{}, err
+		}
+		ownerID = resolvedOwnerID
 	}
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -310,6 +319,9 @@ func (s Store) Update(ctx context.Context, actor account.User, id int64, req Upd
 	if name == "" || roomID == "" || streamerName == "" {
 		return RecordingProfile{}, ErrValidation
 	}
+	if err := s.ensureOwnerCanAcceptActiveProfile(ctx, ownerID, id, archivedAt); err != nil {
+		return RecordingProfile{}, err
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -319,11 +331,11 @@ func (s Store) Update(ctx context.Context, actor account.User, id int64, req Upd
 
 	_, err = tx.ExecContext(ctx, `
 		UPDATE recording_profiles
-		SET name = ?, room_id = ?, streamer_name = ?, streamer_uid = NULLIF(?, ''), timezone = ?,
+		SET owner_user_id = ?, name = ?, room_id = ?, streamer_name = ?, streamer_uid = NULLIF(?, ''), timezone = ?,
 			enabled = ?, public_enabled = ?, public_slug = NULLIF(?, ''), archived_at = NULLIF(?, ''),
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
-	`, name, roomID, streamerName, streamerUID, timezone, boolInt(enabled), boolInt(publicEnabled), publicSlug, archivedAt, id)
+	`, ownerID, name, roomID, streamerName, streamerUID, timezone, boolInt(enabled), boolInt(publicEnabled), publicSlug, archivedAt, id)
 	if isUniqueConstraint(err) {
 		return RecordingProfile{}, ErrRoomInUse
 	}
@@ -399,11 +411,12 @@ func (s Store) UpsertSettings(ctx context.Context, actor account.User, profileID
 
 func (s Store) profileByID(ctx context.Context, id int64) (RecordingProfile, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, name, platform, room_id, streamer_name, COALESCE(streamer_uid, ''),
-			timezone, enabled, public_enabled, COALESCE(public_slug, ''), COALESCE(archived_at, ''),
-			created_at, updated_at
-		FROM recording_profiles
-		WHERE id = ?
+		SELECT rp.id, rp.owner_user_id, COALESCE(u.username, ''), rp.name, rp.platform, rp.room_id, rp.streamer_name, COALESCE(rp.streamer_uid, ''),
+			rp.timezone, rp.enabled, rp.public_enabled, COALESCE(rp.public_slug, ''), COALESCE(rp.archived_at, ''),
+			rp.created_at, rp.updated_at
+		FROM recording_profiles rp
+		LEFT JOIN users u ON u.id = rp.owner_user_id
+		WHERE rp.id = ?
 	`, id)
 	profile, err := scanProfileRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -487,6 +500,48 @@ func (s Store) ensureCanEditRecordingProfile(ctx context.Context, actor account.
 	return nil
 }
 
+func (s Store) resolveOwnerID(ctx context.Context, actor account.User, requestedOwnerID *int64) (int64, error) {
+	if requestedOwnerID == nil {
+		return actor.ID, nil
+	}
+	if actor.Role != account.RoleSuperAdmin && *requestedOwnerID != actor.ID {
+		return 0, ErrForbidden
+	}
+	owner, err := account.NewStore(s.db).UserByID(ctx, *requestedOwnerID)
+	if err != nil {
+		return 0, ErrValidation
+	}
+	if !owner.Enabled {
+		return 0, ErrValidation
+	}
+	return owner.ID, nil
+}
+
+func (s Store) ensureOwnerCanAcceptActiveProfile(ctx context.Context, ownerID int64, excludeProfileID int64, archivedAt string) error {
+	if archivedAt != "" {
+		return nil
+	}
+	owner, err := account.NewStore(s.db).UserByID(ctx, ownerID)
+	if err != nil {
+		return ErrValidation
+	}
+	if owner.Role != account.RoleManager {
+		return nil
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM recording_profiles
+		WHERE owner_user_id = ? AND archived_at IS NULL AND id != ?
+	`, ownerID, excludeProfileID).Scan(&count); err != nil {
+		return fmt.Errorf("count manager profiles: %w", err)
+	}
+	if count >= 1 {
+		return ErrManagerLimit
+	}
+	return nil
+}
+
 type txExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
@@ -559,6 +614,7 @@ func scanProfileRow(row profileScanner) (RecordingProfile, error) {
 	err := row.Scan(
 		&profile.ID,
 		&profile.OwnerUserID,
+		&profile.OwnerUsername,
 		&profile.Name,
 		&profile.Platform,
 		&profile.RoomID,
