@@ -59,7 +59,7 @@ type CreateRequest struct {
 	Password string         `json:"password"`
 	Role     string         `json:"role"`
 	Enabled  *bool          `json:"enabled"`
-	Policy   *PolicyUpsert  `json:"policy"`
+	Policy   *PolicyUpsert `json:"policy"`
 }
 
 type UpdateRequest struct {
