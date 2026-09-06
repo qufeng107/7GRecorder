@@ -670,6 +670,10 @@ COS object binary
 
 ## 16. SQLite Backup
 
+Recording groups are currently computed from existing `recordings` and `recording_files` rows. No dedicated group table
+is introduced for the read-only diagnostics step. If a later FFmpeg merge job creates durable upload assets, the schema
+must be updated first to record derived source metadata and source recording IDs.
+
 备份写入：
 
 ```text

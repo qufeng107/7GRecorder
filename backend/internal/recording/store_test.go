@@ -450,6 +450,102 @@ func TestRunLocalCleanupSkipsProtectedRecording(t *testing.T) {
 	}
 }
 
+func TestListGroupsCombinesContinuousRecordingsAndSplitsRealGaps(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-06T10:00:00Z",
+		CompletedAt: "2026-09-06T10:02:00Z",
+		DurationMs:  120000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-06T10:03:30Z",
+		CompletedAt: "2026-09-06T10:08:00Z",
+		DurationMs:  270000,
+		SizeBytes:   30,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 3",
+		StartedAt:   "2026-09-06T10:12:30Z",
+		CompletedAt: "2026-09-06T10:18:00Z",
+		DurationMs:  330000,
+		SizeBytes:   40,
+	})
+
+	groups, err := NewStore(database, cfg).ListGroups(ctx, actor, RecordingGroupListRequest{
+		MaxGapSeconds:         120,
+		ShortThresholdSeconds: 180,
+	})
+	if err != nil {
+		t.Fatalf("ListGroups returned error: %v", err)
+	}
+	if groups.Total != 2 || len(groups.Items) != 2 {
+		t.Fatalf("expected two groups, got %#v", groups)
+	}
+	newest := groups.Items[0]
+	oldest := groups.Items[1]
+	if newest.RecordingCount != 1 || newest.TotalBytes != 40 || newest.ReadyForMerge {
+		t.Fatalf("unexpected newest group: %#v", newest)
+	}
+	if oldest.RecordingCount != 2 || oldest.TotalBytes != 50 || oldest.MaxGapSeconds != 90 || !oldest.ReadyForMerge {
+		t.Fatalf("unexpected oldest group: %#v", oldest)
+	}
+	if !oldest.HasShortSegment {
+		t.Fatalf("expected oldest group to include short segment: %#v", oldest)
+	}
+}
+
+func TestListGroupsUsesDefaultThresholds(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-06T10:00:00Z",
+		CompletedAt: "2026-09-06T10:01:00Z",
+		DurationMs:  60000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-06T10:02:59Z",
+		CompletedAt: "2026-09-06T10:05:00Z",
+		DurationMs:  121000,
+		SizeBytes:   30,
+	})
+
+	groups, err := NewStore(database, cfg).ListGroups(ctx, actor, RecordingGroupListRequest{})
+	if err != nil {
+		t.Fatalf("ListGroups returned error: %v", err)
+	}
+	if groups.MaxGapSeconds != 120 || groups.ShortThresholdSeconds != 180 {
+		t.Fatalf("unexpected thresholds: %#v", groups)
+	}
+	if len(groups.Items) != 1 || groups.Items[0].RecordingCount != 2 {
+		t.Fatalf("expected default gap threshold to combine recordings, got %#v", groups)
+	}
+}
+
 func TestUpsertLocalStorageSettingsUpdatesPolicyPreview(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
@@ -475,6 +571,38 @@ func TestUpsertLocalStorageSettingsUpdatesPolicyPreview(t *testing.T) {
 	}
 	if !status.SettingsConfigured || status.Settings.MaxRecordingBytes != 1 {
 		t.Fatalf("expected configured settings, got %#v", status)
+	}
+}
+
+type insertRecordingRequest struct {
+	Title       string
+	StartedAt   string
+	CompletedAt string
+	DurationMs  int64
+	SizeBytes   int64
+}
+
+func insertRecordingMetadata(t *testing.T, ctx context.Context, database *sql.DB, req insertRecordingRequest) {
+	t.Helper()
+	result, err := database.ExecContext(ctx, `
+		INSERT INTO recordings
+			(recording_profile_id, title, started_at, completed_at, duration_ms, recording_status,
+				local_storage_status, source_room_id, streamer_name_snapshot)
+		VALUES (1, ?, ?, ?, ?, 'COMPLETED', 'AVAILABLE', '1741048619', 'Streamer')
+	`, req.Title, req.StartedAt, req.CompletedAt, req.DurationMs)
+	if err != nil {
+		t.Fatalf("insert recording returned error: %v", err)
+	}
+	recordingID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("LastInsertId returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO recording_files
+			(recording_id, relative_path, original_name, kind, file_status, size_bytes, duration_ms, closed_at)
+		VALUES (?, ?, ?, 'video', 'CLOSED', ?, ?, ?)
+	`, recordingID, "recordings/1741048619-Streamer/"+req.Title+".flv", req.Title+".flv", req.SizeBytes, req.DurationMs, req.CompletedAt); err != nil {
+		t.Fatalf("insert recording file returned error: %v", err)
 	}
 }
 

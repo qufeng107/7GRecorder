@@ -25,6 +25,8 @@
   all indexed files, per-file paths, protect action, and per-file download actions.
 - Completed recordings shorter than three minutes are marked as short segments. This is an observation label only;
   it must not merge, delete, or hide files.
+- The recordings page shows a Recording Groups panel for upload planning. It highlights adjacent recordings from the
+  same profile that are merge-ready under the current gap threshold, plus max gap and short-segment signals.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
   protected recording count.
 - The recordings table keeps its action column sticky on the right during horizontal scrolling.

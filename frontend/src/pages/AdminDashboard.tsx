@@ -139,6 +139,31 @@ type RecordingListResponse = {
   total?: number;
 };
 
+type RecordingGroup = {
+  id: string;
+  recording_profile_id: number;
+  profile_name: string;
+  room_id: string;
+  streamer_name: string;
+  started_at: string;
+  completed_at?: string;
+  recording_count: number;
+  file_count: number;
+  total_bytes: number;
+  total_duration_ms: number;
+  max_gap_seconds: number;
+  has_short_segment: boolean;
+  ready_for_merge: boolean;
+  recordings: RecordingItem[] | null;
+};
+
+type RecordingGroupListResponse = {
+  items: RecordingGroup[] | null;
+  total: number;
+  max_gap_seconds: number;
+  short_threshold_seconds: number;
+};
+
 type ReconcileResult = {
   scanned_files: number;
   imported: number;
@@ -458,6 +483,17 @@ const uiCopy = {
     details: "详情",
     recordingDetails: "录像详情",
     shortRecording: "短片段",
+    recordingGroups: "连续片段组",
+    recordingGroupsHint: "按同一配置和相邻录像间隔自动归组，用于后续上传前合并。",
+    timeWindow: "时间范围",
+    timeRangeSeparator: "至",
+    segments: "片段",
+    totalDuration: "总时长",
+    totalSize: "总大小",
+    maxGap: "最大间隔",
+    mergeReady: "可合并",
+    includesShortSegment: "包含短片段",
+    noRecordingGroups: "暂无连续片段组。",
     recordingStatus: "录像状态",
     localStorageStatus: "本地状态",
     file: "文件",
@@ -649,6 +685,17 @@ const uiCopy = {
     details: "Details",
     recordingDetails: "Recording Details",
     shortRecording: "Short segment",
+    recordingGroups: "Recording Groups",
+    recordingGroupsHint: "Grouped by profile and nearby recording gaps for pre-upload merge planning.",
+    timeWindow: "Time Window",
+    timeRangeSeparator: "to",
+    segments: "Segments",
+    totalDuration: "Total Duration",
+    totalSize: "Total Size",
+    maxGap: "Max Gap",
+    mergeReady: "Merge Ready",
+    includesShortSegment: "Includes short segment",
+    noRecordingGroups: "No recording groups yet.",
     recordingStatus: "Recording Status",
     localStorageStatus: "Local Status",
     file: "File",
@@ -926,6 +973,17 @@ export function AdminDashboard() {
     refetchInterval: 15000
   });
 
+  const recordingGroupsQuery = useQuery({
+    queryKey: ["recording-groups"],
+    queryFn: () =>
+      requestJson<RecordingGroupListResponse>(
+        "/api/v1/recording-groups?max_gap_seconds=120&short_threshold_seconds=180"
+      ),
+    enabled: Boolean(meQuery.data?.user),
+    retry: false,
+    refetchInterval: 15000
+  });
+
   const jobsQuery = useQuery({
     queryKey: ["jobs"],
     queryFn: () => requestJson<JobListResponse>("/api/v1/jobs?limit=100"),
@@ -963,6 +1021,7 @@ export function AdminDashboard() {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const recordings = recordingsQuery.data?.items ?? [];
   const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
+  const recordingGroups = recordingGroupsQuery.data?.items ?? [];
   const jobs = jobsQuery.data?.items ?? [];
   const jobTotal = jobsQuery.data?.total ?? jobs.length;
   const accounts = accountsQuery.data?.items ?? [];
@@ -1038,6 +1097,7 @@ export function AdminDashboard() {
       setAccountEditForm(emptyAccountEditForm);
       queryClient.removeQueries({ queryKey: ["recording-profiles"] });
       queryClient.removeQueries({ queryKey: ["recordings"] });
+      queryClient.removeQueries({ queryKey: ["recording-groups"] });
       queryClient.removeQueries({ queryKey: ["jobs"] });
       queryClient.removeQueries({ queryKey: ["accounts"] });
       queryClient.removeQueries({ queryKey: ["local-storage"] });
@@ -1074,6 +1134,7 @@ export function AdminDashboard() {
       setSelectedProfileId(profile.id);
       setProfileEditorOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
     }
   });
 
@@ -1085,6 +1146,7 @@ export function AdminDashboard() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
@@ -1101,6 +1163,7 @@ export function AdminDashboard() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
@@ -1169,6 +1232,7 @@ export function AdminDashboard() {
       setProfileEditorOpen(false);
       setProfileForm(emptyProfileForm);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
     }
   });
 
@@ -1183,6 +1247,7 @@ export function AdminDashboard() {
       setProfileEditorOpen(false);
       setProfileForm(profileToForm(profile));
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["recording-groups"] });
     }
   });
 
@@ -1447,6 +1512,8 @@ export function AdminDashboard() {
 
             {activePage === "recordings" ? (
               <RecordingsPanel
+                groups={recordingGroups}
+                groupsLoading={recordingGroupsQuery.isLoading}
                 isLoading={recordingsQuery.isLoading}
                 labels={ui}
                 canManageLocalFiles={canManageLocalFiles}
@@ -2574,9 +2641,88 @@ function TableDateTime(props: { value: string }) {
   );
 }
 
+function RecordingGroupsPanel(props: { groups: RecordingGroup[]; isLoading: boolean; labels: AdminCopy }) {
+  const visibleGroups = props.groups.filter((group) => group.recording_count > 1 || group.has_short_segment);
+  return (
+    <section className="mt-4 rounded-md border border-border bg-white p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">{props.labels.recordingGroups}</h3>
+          <p className="mt-1 text-xs text-muted">{props.labels.recordingGroupsHint}</p>
+        </div>
+        <p className="text-xs text-muted">{props.labels.total(visibleGroups.length)}</p>
+      </div>
+
+      <div className="mt-3 overflow-auto rounded-md border border-border">
+        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
+            <tr>
+              <th className="px-3 py-2 font-semibold">{props.labels.profile}</th>
+              <th className="px-3 py-2 font-semibold">
+                <TableTimeHeader labels={props.labels} title={props.labels.timeWindow} />
+              </th>
+              <th className="px-3 py-2 font-semibold">{props.labels.segments}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.totalDuration}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.totalSize}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.maxGap}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleGroups.map((group) => (
+              <tr key={group.id} className="bg-white align-top">
+                <td className="px-3 py-3">
+                  <p className="font-semibold text-ink">{group.profile_name}</p>
+                  <p className="mt-1 text-xs text-muted">{group.room_id}</p>
+                </td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <TableDateTime value={group.started_at} />
+                    <span className="text-muted">{props.labels.timeRangeSeparator}</span>
+                    <TableDateTime value={group.completed_at || ""} />
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-muted">
+                  {group.recording_count} / {group.file_count}
+                </td>
+                <td className="px-3 py-3 text-muted">{formatDuration(group.total_duration_ms)}</td>
+                <td className="px-3 py-3 text-muted">{formatBytes(group.total_bytes)}</td>
+                <td className="px-3 py-3 text-muted">{formatSeconds(group.max_gap_seconds)}</td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap gap-2">
+                    {group.ready_for_merge ? (
+                      <span className="inline-flex rounded-md border border-accent px-2 py-0.5 text-xs font-medium text-accent">
+                        {props.labels.mergeReady}
+                      </span>
+                    ) : null}
+                    {group.has_short_segment ? (
+                      <span className="inline-flex rounded-md border border-amber-300 px-2 py-0.5 text-xs font-medium text-amber-800">
+                        {props.labels.includesShortSegment}
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {visibleGroups.length === 0 ? (
+              <tr>
+                <td className="px-3 py-6 text-center text-muted" colSpan={7}>
+                  {props.isLoading ? props.labels.checking : props.labels.noRecordingGroups}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function RecordingsPanel(props: {
   canManageLocalFiles: boolean;
   canScanLocalFiles: boolean;
+  groups: RecordingGroup[];
+  groupsLoading: boolean;
   isLoading: boolean;
   labels: AdminCopy;
   protectPending: boolean;
@@ -2808,6 +2954,8 @@ function RecordingsPanel(props: {
       {props.reconcileError ? (
         <p className="mt-3 text-sm text-red-700">{props.labels.scanFailed}</p>
       ) : null}
+
+      <RecordingGroupsPanel groups={props.groups} isLoading={props.groupsLoading} labels={props.labels} />
 
       <TableToolbar
         labels={props.labels}
@@ -3205,6 +3353,13 @@ function bytesToGB(value: number): number {
 
 function gbToBytes(value: number): number {
   return Math.max(0, Math.round(value * 1024 * 1024 * 1024));
+}
+
+function formatSeconds(value: number): string {
+  if (!value) {
+    return "0s";
+  }
+  return formatDuration(value * 1000);
 }
 
 function formatDuration(value: number): string {
