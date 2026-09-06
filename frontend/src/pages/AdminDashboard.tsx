@@ -49,6 +49,7 @@ type Account = User & {
 };
 
 type MeResponse = {
+  policy?: ManagerPolicy;
   user: User;
 };
 
@@ -197,7 +198,7 @@ type ProfileForm = {
   finalize_grace_period_sec: number;
 };
 
-type AdminPage = "overview" | "profiles" | "recordings" | "system" | "accounts";
+type AdminPage = "overview" | "profiles" | "recordings" | "system" | "accounts" | "me";
 
 type AccountForm = {
   username: string;
@@ -325,6 +326,7 @@ export function AdminDashboard() {
     retry: false
   });
   const user = meQuery.data?.user;
+  const ownPolicy = meQuery.data?.policy;
   const canManageSystemSettings = user?.role === "SUPER_ADMIN";
 
   const healthQuery = useQuery({
@@ -615,6 +617,7 @@ export function AdminDashboard() {
             </div>
             {user ? (
               <AccountMenu
+                onAccount={() => setActivePage("me")}
                 logoutPending={logoutMutation.isPending}
                 user={user}
                 onLogout={() => logoutMutation.mutate()}
@@ -647,6 +650,14 @@ export function AdminDashboard() {
         {user ? (
           <>
             {activePage === "overview" ? <OverviewPanel statusRows={statusRows} /> : null}
+
+            {activePage === "me" ? (
+              <MyAccountPanel
+                canManageSystemSettings={Boolean(canManageSystemSettings)}
+                policy={ownPolicy}
+                user={user}
+              />
+            ) : null}
 
             {activePage === "profiles" ? (
               <ProfileListPanel
@@ -792,7 +803,7 @@ function AdminNav(props: {
   );
 }
 
-function AccountMenu(props: { logoutPending: boolean; user: User; onLogout: () => void }) {
+function AccountMenu(props: { logoutPending: boolean; user: User; onAccount: () => void; onLogout: () => void }) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-panel px-3 py-2 shadow-sm">
       <UserCircle className="h-5 w-5 text-accent" aria-hidden="true" />
@@ -800,6 +811,14 @@ function AccountMenu(props: { logoutPending: boolean; user: User; onLogout: () =
         <p className="truncate text-sm font-semibold">{props.user.username}</p>
         <p className="text-xs text-muted">{props.user.role}</p>
       </div>
+      <button
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent"
+        type="button"
+        onClick={props.onAccount}
+      >
+        <UserCircle className="h-4 w-4" aria-hidden="true" />
+        My Account
+      </button>
       <button
         className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-medium text-white disabled:opacity-60"
         disabled={props.logoutPending}
@@ -809,6 +828,57 @@ function AccountMenu(props: { logoutPending: boolean; user: User; onLogout: () =
         <LogOut className="h-4 w-4" aria-hidden="true" />
         Sign out
       </button>
+    </div>
+  );
+}
+
+function MyAccountPanel(props: {
+  canManageSystemSettings: boolean;
+  policy?: ManagerPolicy;
+  user: User;
+}) {
+  return (
+    <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">My Account</h2>
+        <div className="mt-4 grid gap-3">
+          <Metric label="Username" value={props.user.username} />
+          <Metric label="Role" value={props.user.role} />
+          <Metric label="Status" value={props.user.enabled ? "ENABLED" : "DISABLED"} />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">Access</h2>
+        {props.canManageSystemSettings ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Metric label="System Settings" value="Allowed" />
+            <Metric label="Accounts" value="Allowed" />
+            <Metric label="Profiles" value="All owners" />
+          </div>
+        ) : props.policy ? (
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <PermissionBadge label="Recording Profiles" enabled={props.policy.can_edit_recording_profile} />
+            <PermissionBadge label="Bilibili Config" enabled={props.policy.can_edit_bilibili_module} />
+            <PermissionBadge label="COS Config" enabled={props.policy.can_edit_cos_module} />
+            <PermissionBadge label="NetEase Config" enabled={props.policy.can_edit_netease_module} />
+            <PermissionBadge label="Local Files" enabled={props.policy.can_manage_local_files} />
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-muted">Access policy is not available.</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function PermissionBadge(props: { enabled: boolean; label: string }) {
+  return (
+    <div className="rounded-md border border-border bg-white px-3 py-2">
+      <p className="text-xs uppercase text-muted">{props.label}</p>
+      <p className={`mt-1 text-sm font-semibold ${props.enabled ? "text-accent" : "text-muted"}`}>
+        {props.enabled ? "Allowed" : "Blocked"}
+      </p>
     </div>
   );
 }

@@ -104,7 +104,8 @@ func bindAuthHandlers(cfg config.Config, s *ghttp.Server) {
 			return
 		}
 		defer database.Close()
-		user, err := account.NewStore(database).UserBySessionToken(r.Context(), token)
+		store := account.NewStore(database)
+		user, err := store.UserBySessionToken(r.Context(), token)
 		if errors.Is(err, account.ErrNotFound) || errors.Is(err, account.ErrDisabledUser) {
 			writeAPIError(r, http.StatusUnauthorized, "NOT_AUTHENTICATED", "Login is required.", nil)
 			return
@@ -113,7 +114,16 @@ func bindAuthHandlers(cfg config.Config, s *ghttp.Server) {
 			writeAPIError(r, http.StatusInternalServerError, "SESSION_LOOKUP_FAILED", "Session lookup failed.", nil)
 			return
 		}
-		r.Response.WriteJson(g.Map{"user": user})
+		response := g.Map{"user": user}
+		if user.Role == account.RoleManager {
+			policy, err := store.Policy(r.Context(), user, user.ID)
+			if err != nil {
+				writeAPIError(r, http.StatusInternalServerError, "POLICY_LOOKUP_FAILED", "Policy lookup failed.", nil)
+				return
+			}
+			response["policy"] = policy
+		}
+		r.Response.WriteJson(response)
 	})
 }
 
