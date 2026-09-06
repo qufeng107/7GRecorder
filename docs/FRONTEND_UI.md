@@ -4,7 +4,7 @@
 
 - The admin console defaults to Chinese.
 - The current account controls include a Chinese / English language switch.
-- Backend enum/status values may remain machine-readable until dedicated display labels are mapped.
+- User-facing tables should map backend enum/status values to localized display labels when the mapping is known.
 
 ## Table Controls
 
@@ -23,12 +23,14 @@
 - Displayed recording timestamps use `Asia/Shanghai`.
 - Each recording row can open a details dialog with profile, streamer, China-time timestamps, duration, local status,
   all indexed files, per-file paths, protect action, and per-file download actions.
-- Completed recordings shorter than three minutes are marked as short segments. This is an observation label only;
-  it must not merge, delete, or hide files.
+- Completed source segments shorter than three minutes count toward the short-segment summary. Upload-source rows do
+  not show a per-row short-segment badge.
 - The recordings page uses upload sources as the primary rows. Each row represents one upload-facing video. Expanding a
   row shows child source segments with their recording timestamps, timeline intervals, sizes, and paths.
 - Multi-segment upload sources show download actions only after FFmpeg merge completes and the source becomes
   `READY_TO_UPLOAD`.
+- Multi-segment upload sources can derive their temporary "merging" display state from matching `MERGE_UPLOAD_SOURCE`
+  jobs while the upload-source row itself is still `MERGE_PENDING`.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
   protected recording count.
 - The recordings table keeps its action column sticky on the right during horizontal scrolling.
@@ -37,6 +39,7 @@
 
 - Jobs are a separate operational page, not mixed into recording profiles.
 - The page shows job type, related profile, status, attempts, schedule time, and last error.
+- The page has an explicit refresh button in addition to automatic polling.
 - Retry is shown only for failed or cancelled jobs. Cancel is shown only for non-running, non-terminal jobs.
 - Jobs reuse the shared search and sort toolbar so later server-side filtering can replace client-side filtering cleanly.
 

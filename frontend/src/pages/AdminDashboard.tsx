@@ -493,6 +493,13 @@ const uiCopy = {
     jobs: "任务",
     job: "任务",
     jobType: "类型",
+    jobSyncRecorderProfile: "同步录制配置",
+    jobMergeUploadSource: "合并可上传视频",
+    jobStatusPending: "待开始",
+    jobStatusRunning: "运行中",
+    jobStatusSucceeded: "已成功",
+    jobStatusFailed: "失败",
+    jobStatusCancelled: "已取消",
     resourceClass: "资源",
     runAfter: "计划时间",
     attempts: "尝试",
@@ -504,6 +511,7 @@ const uiCopy = {
     noJobs: "暂无任务。",
     recordings: "录像文件",
     scan: "扫描",
+    refresh: "刷新",
     scanResult: (imported: number, updated: number, skipped: number) =>
       `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
     scanFailed: "扫描失败，请查看服务器日志。",
@@ -523,6 +531,8 @@ const uiCopy = {
     uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number) =>
       `生成可上传视频：新增 ${created}，等待 ${ignored}，补建合并任务 ${mergeJobsEnqueued}。`,
     uploadSourcePendingMerge: "待合并",
+    uploadSourceMerging: "合并中",
+    uploadSourceMergeCompleteRefreshing: "合并完成，刷新中",
     uploadSourceReady: "可上传",
     uploadSourceMergeFailed: "合并失败",
     sourceSegments: "子视频",
@@ -691,6 +701,13 @@ const uiCopy = {
     jobs: "Jobs",
     job: "Job",
     jobType: "Type",
+    jobSyncRecorderProfile: "Sync recording profile",
+    jobMergeUploadSource: "Merge upload source",
+    jobStatusPending: "Pending",
+    jobStatusRunning: "Running",
+    jobStatusSucceeded: "Succeeded",
+    jobStatusFailed: "Failed",
+    jobStatusCancelled: "Cancelled",
     resourceClass: "Resource",
     runAfter: "Run After",
     attempts: "Attempts",
@@ -702,6 +719,7 @@ const uiCopy = {
     noJobs: "No jobs yet.",
     recordings: "Recordings",
     scan: "Scan",
+    refresh: "Refresh",
     scanResult: (imported: number, updated: number, skipped: number) =>
       `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
     scanFailed: "Scan failed. Check server logs.",
@@ -721,6 +739,8 @@ const uiCopy = {
     uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number) =>
       `Upload sources: ${created} created, ${ignored} waiting, ${mergeJobsEnqueued} merge jobs backfilled.`,
     uploadSourcePendingMerge: "Pending merge",
+    uploadSourceMerging: "Merging",
+    uploadSourceMergeCompleteRefreshing: "Merge finished, refreshing",
     uploadSourceReady: "Ready to upload",
     uploadSourceMergeFailed: "Merge failed",
     sourceSegments: "Source Segments",
@@ -1207,6 +1227,7 @@ export function AdminDashboard() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     }
@@ -1572,6 +1593,7 @@ export function AdminDashboard() {
             {activePage === "recordings" ? (
               <RecordingsPanel
                 isLoading={recordingsQuery.isLoading}
+                jobs={jobs}
                 labels={ui}
                 canManageLocalFiles={canManageLocalFiles}
                 canScanLocalFiles={canScanLocalFiles}
@@ -1606,6 +1628,7 @@ export function AdminDashboard() {
                 total={jobTotal}
                 visibleTotal={visibleJobs.length}
                 onCancel={(job) => cancelJobMutation.mutate(job.id)}
+                onRefresh={() => void jobsQuery.refetch()}
                 onRetry={(job) => retryJobMutation.mutate(job.id)}
                 onSearchChange={setJobSearch}
                 onSortChange={setJobSort}
@@ -2702,6 +2725,7 @@ function RecordingsPanel(props: {
   canManageLocalFiles: boolean;
   canScanLocalFiles: boolean;
   isLoading: boolean;
+  jobs: JobItem[];
   labels: AdminCopy;
   protectPending: boolean;
   reconcileError: boolean;
@@ -2802,9 +2826,10 @@ function RecordingsPanel(props: {
       cell: ({ row }) => {
         const recording = row.original;
         const file = recording.files?.[0];
+        const mergeJob = currentUploadSourceMergeJob(recording, props.jobs);
         return (
           <div className="text-muted">
-            <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels)}</p>
+            <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels, mergeJob)}</p>
             {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
             {recording.last_error ? <p className="mt-1 break-words text-xs text-red-700">{recording.last_error}</p> : null}
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
@@ -3086,6 +3111,7 @@ function JobsPanel(props: {
   total: number;
   visibleTotal: number;
   onCancel: (job: JobItem) => void;
+  onRefresh: () => void;
   onRetry: (job: JobItem) => void;
   onSearchChange: (value: string) => void;
   onSortChange: (value: JobSortKey) => void;
@@ -3097,7 +3123,15 @@ function JobsPanel(props: {
           <h2 className="text-sm font-semibold">{props.labels.jobs}</h2>
           <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
         </div>
-        <RefreshCw className="h-5 w-5 text-accent" aria-hidden="true" />
+        <button
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+          disabled={props.isLoading}
+          type="button"
+          onClick={props.onRefresh}
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          {props.labels.refresh}
+        </button>
       </div>
 
       {props.loadError ? <p className="mt-3 text-sm text-red-700">{props.labels.jobsFailed}</p> : null}
@@ -3135,7 +3169,7 @@ function JobsPanel(props: {
               return (
                 <tr key={job.id} className="bg-white align-top">
                   <td className="px-3 py-3">
-                    <p className="font-semibold text-ink">{job.type}</p>
+                    <p className="font-semibold text-ink">{formatJobType(job.type, props.labels)}</p>
                     <p className="mt-1 text-xs text-muted">{job.resource_class}</p>
                     {job.business_key ? <p className="mt-1 break-all text-xs text-muted">{job.business_key}</p> : null}
                   </td>
@@ -3144,7 +3178,7 @@ function JobsPanel(props: {
                     {job.owner_username ? <p className="mt-1 text-xs">{job.owner_username}</p> : null}
                   </td>
                   <td className="px-3 py-3 text-muted">
-                    <p>{job.status}</p>
+                    <p>{formatJobStatus(job.status, props.labels)}</p>
                     <p className="mt-1 text-xs">{formatDateTime(job.updated_at, props.labels)}</p>
                   </td>
                   <td className="px-3 py-3 text-muted">
@@ -3260,11 +3294,54 @@ function gbToBytes(value: number): number {
   return Math.max(0, Math.round(value * 1024 * 1024 * 1024));
 }
 
-function formatUploadSourceStatus(value: string, labels: AdminCopy): string {
+function currentUploadSourceMergeJob(recording: RecordingItem, jobs: JobItem[]): JobItem | undefined {
+  if (!recording.upload_source_id) {
+    return undefined;
+  }
+  const businessKey = `upload-source:${recording.upload_source_id}:merge`;
+  return jobs.find((job) => job.type === "MERGE_UPLOAD_SOURCE" && job.business_key === businessKey);
+}
+
+function formatJobType(value: string, labels: AdminCopy): string {
+  if (value === "SYNC_RECORDER_PROFILE") {
+    return labels.jobSyncRecorderProfile;
+  }
+  if (value === "MERGE_UPLOAD_SOURCE") {
+    return labels.jobMergeUploadSource;
+  }
+  return value;
+}
+
+function formatJobStatus(value: string, labels: AdminCopy): string {
+  if (value === "PENDING") {
+    return labels.jobStatusPending;
+  }
+  if (value === "RUNNING") {
+    return labels.jobStatusRunning;
+  }
+  if (value === "SUCCEEDED") {
+    return labels.jobStatusSucceeded;
+  }
+  if (value === "FAILED") {
+    return labels.jobStatusFailed;
+  }
+  if (value === "CANCELLED") {
+    return labels.jobStatusCancelled;
+  }
+  return value;
+}
+
+function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: JobItem): string {
   if (value === "READY_TO_UPLOAD") {
     return labels.uploadSourceReady;
   }
   if (value === "MERGE_PENDING") {
+    if (mergeJob?.status === "RUNNING") {
+      return labels.uploadSourceMerging;
+    }
+    if (mergeJob?.status === "SUCCEEDED") {
+      return labels.uploadSourceMergeCompleteRefreshing;
+    }
     return labels.uploadSourcePendingMerge;
   }
   if (value === "MERGE_FAILED") {
