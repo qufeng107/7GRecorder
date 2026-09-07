@@ -394,6 +394,8 @@ describe("AdminDashboard", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(await screen.findByRole("heading", { name: "Publish Parts" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Original Segments" })).toBeInTheDocument();
+    expect(screen.queryByText("recordings/1741048619/short.flv")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Show Original Segments" }));
     expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
     expect(await screen.findAllByText("Timeline")).toHaveLength(2);
   });
@@ -494,6 +496,7 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("Upload Sources")).toBeInTheDocument();
     expect(await screen.findByText("Merging")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show Original Segments" }));
     expect(await screen.findByText("recordings/1741048619/part1.flv")).toBeInTheDocument();
     expect(await screen.findByText("recordings/1741048619/part2.flv")).toBeInTheDocument();
   });

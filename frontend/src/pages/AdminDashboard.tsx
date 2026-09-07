@@ -4,6 +4,8 @@ import {
   Activity,
   Archive,
   ArchiveRestore,
+  ChevronDown,
+  ChevronRight,
   CloudUpload,
   Database,
   Download,
@@ -675,6 +677,8 @@ const uiCopy = {
     uploadStatusFailed: "失败",
     sourceSegments: "原始片段",
     sourceOutputs: "发布分片",
+    showSourceSegments: "显示原始片段",
+    hideSourceSegments: "隐藏原始片段",
     timeline: "合并时间轴",
     recordingStatus: "录像状态",
     localStorageStatus: "本地状态",
@@ -937,6 +941,8 @@ const uiCopy = {
     uploadStatusFailed: "Failed",
     sourceSegments: "Original Segments",
     sourceOutputs: "Publish Parts",
+    showSourceSegments: "Show Original Segments",
+    hideSourceSegments: "Hide Original Segments",
     timeline: "Timeline",
     recordingStatus: "Recording Status",
     localStorageStatus: "Local Status",
@@ -3507,7 +3513,13 @@ function RecordingsPanel(props: {
   onToggleProtect: (recording: RecordingItem) => void;
 }) {
   const [expandedSourceId, setExpandedSourceId] = useState<number | null>(null);
+  const [expandedSegmentSourceId, setExpandedSegmentSourceId] = useState<number | null>(null);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  const toggleSource = (sourceId: number | undefined) => {
+    const nextSourceId = sourceId && expandedSourceId !== sourceId ? sourceId : null;
+    setExpandedSourceId(nextSourceId);
+    setExpandedSegmentSourceId(null);
+  };
   const visibleSizeBytes = props.recordings.reduce((total, recording) => {
     return total + totalRecordingBytes(recording);
   }, 0);
@@ -3532,7 +3544,7 @@ function RecordingsPanel(props: {
               <button
                 className="text-left font-semibold text-ink hover:text-accent"
                 type="button"
-                onClick={() => setExpandedSourceId(expandedSourceId === recording.upload_source_id ? null : recording.upload_source_id ?? null)}
+                onClick={() => toggleSource(recording.upload_source_id)}
               >
                 {recording.title || file?.original_name || props.labels.untitled}
               </button>
@@ -3624,11 +3636,8 @@ function RecordingsPanel(props: {
       enableResizing: false,
       cell: ({ row }) => {
         const recording = row.original;
-        const uploadSourceId = recording.upload_source_id ?? 0;
         const canUseLocalFile = recording.local_storage_status !== "DELETED";
         const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
-        const downloadableOutputs = (recording.source_outputs ?? []).filter((output) => output.cos_status === "AVAILABLE");
-        const singleDownloadOutput = uploadSourceId > 0 && downloadableOutputs.length === 1 ? downloadableOutputs[0] : null;
         const bilibiliURL = (recording.source_outputs ?? []).find((output) => output.bilibili_url)?.bilibili_url;
         if (!props.canManageLocalFiles) {
           return <span className="text-xs text-muted">{props.labels.noAction}</span>;
@@ -3638,7 +3647,7 @@ function RecordingsPanel(props: {
             <button
               className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
               type="button"
-              onClick={() => setExpandedSourceId(expandedSourceId === recording.upload_source_id ? null : recording.upload_source_id ?? null)}
+              onClick={() => toggleSource(recording.upload_source_id)}
             >
               {props.labels.details}
             </button>
@@ -3666,17 +3675,6 @@ function RecordingsPanel(props: {
               >
                 {props.labels.openBilibili}
               </a>
-            ) : null}
-            {singleDownloadOutput ? (
-              <button
-                className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.cosDownloadPending && props.cosDownloadPendingOutputId === singleDownloadOutput.id}
-                type="button"
-                onClick={() => props.onDownloadOutput(uploadSourceId, singleDownloadOutput.id)}
-              >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                {props.labels.download}
-              </button>
             ) : null}
           </div>
         );
@@ -3793,6 +3791,8 @@ function RecordingsPanel(props: {
             {table.getRowModel().rows.map((row) => {
               const recording = row.original;
               const isExpanded = expandedSourceId === recording.upload_source_id;
+              const sourceId = recording.upload_source_id ?? 0;
+              const originalSegmentsExpanded = sourceId > 0 && expandedSegmentSourceId === sourceId;
               return (
                 <Fragment key={row.id}>
                   <tr key={row.id} className="bg-white">
@@ -3807,19 +3807,35 @@ function RecordingsPanel(props: {
                     ))}
                   </tr>
                   {isExpanded ? (
-                    <tr key={`${row.id}-segments`} className="bg-[#f7f8f5]">
-                      <td className="px-3 py-3" colSpan={table.getAllLeafColumns().length}>
-                        <div className="space-y-3">
-                          <UploadSourceOutputsTable
-                            canDownload={props.canManageLocalFiles}
-                            cosDownloadPending={props.cosDownloadPending}
-                            cosDownloadPendingOutputId={props.cosDownloadPendingOutputId}
-                            labels={props.labels}
-                            outputs={recording.source_outputs ?? []}
-                            uploadSourceId={recording.upload_source_id ?? 0}
-                            onDownloadOutput={props.onDownloadOutput}
-                          />
-                          <UploadSourceSegmentsTable labels={props.labels} segments={recording.source_segments ?? []} />
+                    <tr key={`${row.id}-segments`} className="bg-[#eef7f4]">
+                      <td className="p-0" colSpan={table.getAllLeafColumns().length}>
+                        <div className="mx-3 mb-4 mt-0 rounded-md border border-accent/30 border-l-4 border-l-accent bg-[#f7fbf9] p-3 shadow-inner">
+                          <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-accent/20 pb-3">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold uppercase text-accent">{props.labels.recordingDetails}</p>
+                              <p className="mt-1 truncate text-sm font-semibold text-ink">
+                                {recording.title || recording.files?.[0]?.original_name || props.labels.untitled}
+                              </p>
+                            </div>
+                            <span className="text-xs text-muted">{recording.profile_name} · {recording.room_id}</span>
+                          </div>
+                          <div className="space-y-3">
+                            <UploadSourceOutputsTable
+                              canDownload={props.canManageLocalFiles}
+                              cosDownloadPending={props.cosDownloadPending}
+                              cosDownloadPendingOutputId={props.cosDownloadPendingOutputId}
+                              labels={props.labels}
+                              outputs={recording.source_outputs ?? []}
+                              uploadSourceId={sourceId}
+                              onDownloadOutput={props.onDownloadOutput}
+                            />
+                            <UploadSourceSegmentsTable
+                              isExpanded={originalSegmentsExpanded}
+                              labels={props.labels}
+                              segments={recording.source_segments ?? []}
+                              onToggle={() => setExpandedSegmentSourceId(originalSegmentsExpanded ? null : sourceId)}
+                            />
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -3845,48 +3861,69 @@ function RecordingsPanel(props: {
   );
 }
 
-function UploadSourceSegmentsTable(props: { labels: AdminCopy; segments: UploadSourceSegment[] }) {
+function UploadSourceSegmentsTable(props: {
+  isExpanded: boolean;
+  labels: AdminCopy;
+  segments: UploadSourceSegment[];
+  onToggle: () => void;
+}) {
   return (
     <div className="rounded-md border border-border bg-white p-3">
-      <h3 className="text-sm font-semibold">{props.labels.sourceSegments}</h3>
-      <div className="mt-3 overflow-auto">
-        <table className="w-full min-w-[720px] border-collapse text-left text-xs">
-          <thead className="bg-[#eef1eb] uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.startTime}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.completedAt}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.segments.map((segment) => (
-              <tr key={segment.id} className="align-top">
-                <td className="px-3 py-3">
-                  <p className="font-medium text-ink">{segment.relative_path.split("/").pop() ?? segment.relative_path}</p>
-                  <p className="mt-1 break-all text-muted">{segment.relative_path}</p>
-                </td>
-                <td className="px-3 py-3"><TableDateTime value={segment.source_started_at} /></td>
-                <td className="px-3 py-3"><TableDateTime value={segment.source_completed_at} /></td>
-                <td className="px-3 py-3 text-muted">
-                  {formatTimeline(segment.timeline_start_ms)} - {formatTimeline(segment.timeline_end_ms)}
-                </td>
-                <td className="px-3 py-3 text-muted">{formatDuration(segment.duration_ms)}</td>
-                <td className="px-3 py-3 text-muted">{formatBytes(segment.size_bytes)}</td>
-              </tr>
-            ))}
-            {props.segments.length === 0 ? (
-              <tr>
-                <td className="px-3 py-6 text-center text-muted" colSpan={6}>
-                  {props.labels.noFile}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold">{props.labels.sourceSegments}</h3>
+        <button
+          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+          type="button"
+          onClick={props.onToggle}
+        >
+          {props.isExpanded ? (
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {props.isExpanded ? props.labels.hideSourceSegments : props.labels.showSourceSegments}
+        </button>
       </div>
+      {props.isExpanded ? (
+        <div className="mt-3 overflow-auto">
+          <table className="w-full min-w-[720px] border-collapse text-left text-xs">
+            <thead className="bg-[#eef1eb] uppercase text-muted">
+              <tr>
+                <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.startTime}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.completedAt}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
+                <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.segments.map((segment) => (
+                <tr key={segment.id} className="align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-ink">{segment.relative_path.split("/").pop() ?? segment.relative_path}</p>
+                    <p className="mt-1 break-all text-muted">{segment.relative_path}</p>
+                  </td>
+                  <td className="px-3 py-3"><TableDateTime value={segment.source_started_at} /></td>
+                  <td className="px-3 py-3"><TableDateTime value={segment.source_completed_at} /></td>
+                  <td className="px-3 py-3 text-muted">
+                    {formatTimeline(segment.timeline_start_ms)} - {formatTimeline(segment.timeline_end_ms)}
+                  </td>
+                  <td className="px-3 py-3 text-muted">{formatDuration(segment.duration_ms)}</td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(segment.size_bytes)}</td>
+                </tr>
+              ))}
+              {props.segments.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-6 text-center text-muted" colSpan={6}>
+                    {props.labels.noFile}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </div>
   );
 }
