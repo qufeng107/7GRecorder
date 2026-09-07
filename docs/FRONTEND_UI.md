@@ -28,9 +28,10 @@
 - The recordings page uses upload sources as the primary rows. Each row represents one upload-facing video. Expanding a
   row shows child source segments with their recording timestamps, timeline intervals, sizes, and paths.
 - Upload-source downloads are shown only for publish parts with COS status `AVAILABLE`; the UI requests a short-lived
-  COS URL from the backend instead of linking to local server files. Verified Bilibili publications are shown as
-  external video links. Expanded recording rows show publish parts before original segments because downstream upload
-  actions operate on publish parts.
+  COS URL from the backend instead of linking to local server files. Parent upload-source rows never show download
+  actions, even when there is only one publish part. Verified Bilibili publications are shown as external video links.
+  Expanded recording rows show publish parts before original segments because downstream upload actions operate on
+  publish parts. Original segments are collapsed by default and can be expanded inside the nested row detail area.
 - Multi-segment upload sources can derive their temporary "merging" display state from matching `MERGE_UPLOAD_SOURCE`
   jobs while the upload-source row itself is still `MERGE_PENDING`.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
