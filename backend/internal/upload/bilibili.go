@@ -46,15 +46,15 @@ type BilibiliUploadRequest struct {
 	PublicationID      int64                      `json:"publication_id"`
 	UploadSourceID     int64                      `json:"upload_source_id"`
 	RecordingProfileID int64                      `json:"recording_profile_id"`
-	CredentialID       int64                       `json:"credential_id"`
-	Title              string                      `json:"title"`
-	Description        string                      `json:"description"`
-	Tags               []string                    `json:"tags,omitempty"`
-	Copyright          int                         `json:"copyright,omitempty"`
-	Source             string                      `json:"source,omitempty"`
-	Parts              []BilibiliUploadPart        `json:"parts"`
+	CredentialID       int64                      `json:"credential_id"`
+	Title              string                     `json:"title"`
+	Description        string                     `json:"description"`
+	Tags               []string                   `json:"tags,omitempty"`
+	Copyright          int                        `json:"copyright,omitempty"`
+	Source             string                     `json:"source,omitempty"`
+	Parts              []BilibiliUploadPart       `json:"parts"`
 	Settings           BilibiliPublishingSettings `json:"settings"`
-	Secret             json.RawMessage             `json:"-"`
+	Secret             json.RawMessage            `json:"-"`
 }
 
 type BilibiliUploadResult struct {
