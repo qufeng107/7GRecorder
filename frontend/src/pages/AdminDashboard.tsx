@@ -141,6 +141,7 @@ type RecordingItem = {
   local_storage_status: string;
   local_protected: boolean;
   source_segments?: UploadSourceSegment[];
+  source_outputs?: UploadSourceOutput[];
   files: RecordingFile[] | null;
 };
 
@@ -157,6 +158,18 @@ type UploadSourceSegment = {
   relative_path: string;
   size_bytes: number;
   duration_ms: number;
+};
+
+type UploadSourceOutput = {
+  id: number;
+  upload_source_id: number;
+  sort_order: number;
+  relative_path: string;
+  size_bytes: number;
+  duration_ms: number;
+  timeline_start_ms: number;
+  timeline_end_ms: number;
+  status: string;
 };
 
 type UploadSourceItem = {
@@ -182,6 +195,7 @@ type UploadSourceItem = {
   ready_at?: string;
   last_error?: string;
   segments: UploadSourceSegment[] | null;
+  outputs: UploadSourceOutput[] | null;
 };
 
 type UploadSourceListResponse = {
@@ -194,6 +208,7 @@ type UploadSourceDiscoverResult = {
   created: number;
   ignored: number;
   merge_jobs_enqueued?: number;
+  package_jobs_enqueued?: number;
   merge_gap_threshold_seconds: number;
 };
 
@@ -587,6 +602,7 @@ const uiCopy = {
     jobType: "类型",
     jobSyncRecorderProfile: "同步录制配置",
     jobMergeUploadSource: "合并可上传视频",
+    jobPackageUploadSource: "封装可上传视频",
     jobUploadBilibili: "上传到 Bilibili",
     jobUploadCOS: "上传到 COS",
     jobStatusPending: "待开始",
@@ -622,14 +638,19 @@ const uiCopy = {
     details: "详情",
     recordingDetails: "录像详情",
     uploadSources: "可上传视频",
-    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number) =>
-      `生成可上传视频：新增 ${created}，等待 ${ignored}，补建合并任务 ${mergeJobsEnqueued}。`,
+    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number, packageJobsEnqueued: number) =>
+      `生成可上传视频：新增 ${created}，等待 ${ignored}，补建合并任务 ${mergeJobsEnqueued}，补建封装任务 ${packageJobsEnqueued}。`,
     uploadSourcePendingMerge: "待合并",
     uploadSourceMerging: "合并中",
     uploadSourceMergeCompleteRefreshing: "合并完成，刷新中",
+    uploadSourcePendingPackage: "待封装",
+    uploadSourcePackaging: "封装中",
+    uploadSourcePackageCompleteRefreshing: "封装完成，刷新中",
     uploadSourceReady: "可上传",
     uploadSourceMergeFailed: "合并失败",
-    sourceSegments: "子视频",
+    uploadSourcePackageFailed: "封装失败",
+    sourceSegments: "整理前片段",
+    sourceOutputs: "整理后分片",
     timeline: "合并时间轴",
     recordingStatus: "录像状态",
     localStorageStatus: "本地状态",
@@ -832,6 +853,7 @@ const uiCopy = {
     jobType: "Type",
     jobSyncRecorderProfile: "Sync recording profile",
     jobMergeUploadSource: "Merge upload source",
+    jobPackageUploadSource: "Package upload source",
     jobUploadBilibili: "Upload to Bilibili",
     jobUploadCOS: "Upload to COS",
     jobStatusPending: "Pending",
@@ -867,14 +889,19 @@ const uiCopy = {
     details: "Details",
     recordingDetails: "Recording Details",
     uploadSources: "Upload Sources",
-    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number) =>
-      `Upload sources: ${created} created, ${ignored} waiting, ${mergeJobsEnqueued} merge jobs backfilled.`,
+    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number, packageJobsEnqueued: number) =>
+      `Upload sources: ${created} created, ${ignored} waiting, ${mergeJobsEnqueued} merge jobs and ${packageJobsEnqueued} package jobs backfilled.`,
     uploadSourcePendingMerge: "Pending merge",
     uploadSourceMerging: "Merging",
     uploadSourceMergeCompleteRefreshing: "Merge finished, refreshing",
+    uploadSourcePendingPackage: "Pending package",
+    uploadSourcePackaging: "Packaging",
+    uploadSourcePackageCompleteRefreshing: "Package finished, refreshing",
     uploadSourceReady: "Ready to upload",
     uploadSourceMergeFailed: "Merge failed",
-    sourceSegments: "Source Segments",
+    uploadSourcePackageFailed: "Package failed",
+    sourceSegments: "Pre-package segments",
+    sourceOutputs: "Post-package parts",
     timeline: "Timeline",
     recordingStatus: "Recording Status",
     localStorageStatus: "Local Status",
@@ -1051,6 +1078,7 @@ function includesSearch(value: string | number | undefined, search: string): boo
 
 function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
   const segments = source.segments ?? [];
+  const outputs = source.outputs ?? [];
   return {
     id: segments[0]?.recording_id ?? source.id,
     upload_source_id: source.id,
@@ -1071,6 +1099,7 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     local_storage_status: source.output_relative_path ? "AVAILABLE" : source.status,
     local_protected: Boolean(source.local_protected),
     source_segments: segments,
+    source_outputs: outputs,
     files: segments.map((segment) => ({
       id: segment.recording_file_id,
       recording_id: segment.recording_id,
@@ -3506,9 +3535,10 @@ function RecordingsPanel(props: {
         const recording = row.original;
         const file = recording.files?.[0];
         const mergeJob = currentUploadSourceMergeJob(recording, props.jobs);
+        const packageJob = currentUploadSourcePackageJob(recording, props.jobs);
         return (
           <div className="text-muted">
-            <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels, mergeJob)}</p>
+            <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels, mergeJob, packageJob)}</p>
             {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
             {recording.last_error ? <p className="mt-1 break-words text-xs text-red-700">{recording.last_error}</p> : null}
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
@@ -3635,7 +3665,8 @@ function RecordingsPanel(props: {
           {props.labels.uploadSourceDiscoverResult(
             props.reconcileResult.discover.created,
             props.reconcileResult.discover.ignored,
-            props.reconcileResult.discover.merge_jobs_enqueued ?? 0
+            props.reconcileResult.discover.merge_jobs_enqueued ?? 0,
+            props.reconcileResult.discover.package_jobs_enqueued ?? 0
           )}
         </p>
       ) : null}
@@ -3707,7 +3738,10 @@ function RecordingsPanel(props: {
                   {isExpanded ? (
                     <tr key={`${row.id}-segments`} className="bg-[#f7f8f5]">
                       <td className="px-3 py-3" colSpan={table.getAllLeafColumns().length}>
-                        <UploadSourceSegmentsTable labels={props.labels} segments={recording.source_segments ?? []} />
+                        <div className="space-y-3">
+                          <UploadSourceSegmentsTable labels={props.labels} segments={recording.source_segments ?? []} />
+                          <UploadSourceOutputsTable labels={props.labels} outputs={recording.source_outputs ?? []} />
+                        </div>
                       </td>
                     </tr>
                   ) : null}
@@ -3767,6 +3801,50 @@ function UploadSourceSegmentsTable(props: { labels: AdminCopy; segments: UploadS
             {props.segments.length === 0 ? (
               <tr>
                 <td className="px-3 py-6 text-center text-muted" colSpan={6}>
+                  {props.labels.noFile}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function UploadSourceOutputsTable(props: { labels: AdminCopy; outputs: UploadSourceOutput[] }) {
+  return (
+    <div className="rounded-md border border-border bg-white p-3">
+      <h3 className="text-sm font-semibold">{props.labels.sourceOutputs}</h3>
+      <div className="mt-3 overflow-auto">
+        <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+          <thead className="bg-[#eef1eb] uppercase text-muted">
+            <tr>
+              <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.outputs.map((output) => (
+              <tr key={output.id} className="align-top">
+                <td className="px-3 py-3">
+                  <p className="font-medium text-ink">{output.relative_path.split("/").pop() ?? output.relative_path}</p>
+                  <p className="mt-1 break-all text-muted">{output.relative_path}</p>
+                </td>
+                <td className="px-3 py-3 text-muted">
+                  {formatTimeline(output.timeline_start_ms)} - {formatTimeline(output.timeline_end_ms)}
+                </td>
+                <td className="px-3 py-3 text-muted">{formatDuration(output.duration_ms)}</td>
+                <td className="px-3 py-3 text-muted">{formatBytes(output.size_bytes)}</td>
+                <td className="px-3 py-3 text-muted">{output.status}</td>
+              </tr>
+            ))}
+            {props.outputs.length === 0 ? (
+              <tr>
+                <td className="px-3 py-6 text-center text-muted" colSpan={5}>
                   {props.labels.noFile}
                 </td>
               </tr>
@@ -3981,12 +4059,23 @@ function currentUploadSourceMergeJob(recording: RecordingItem, jobs: JobItem[]):
   return jobs.find((job) => job.type === "MERGE_UPLOAD_SOURCE" && job.business_key === businessKey);
 }
 
+function currentUploadSourcePackageJob(recording: RecordingItem, jobs: JobItem[]): JobItem | undefined {
+  if (!recording.upload_source_id) {
+    return undefined;
+  }
+  const businessKey = `upload-source:${recording.upload_source_id}:package`;
+  return jobs.find((job) => job.type === "PACKAGE_UPLOAD_SOURCE" && job.business_key === businessKey);
+}
+
 function formatJobType(value: string, labels: AdminCopy): string {
   if (value === "SYNC_RECORDER_PROFILE") {
     return labels.jobSyncRecorderProfile;
   }
   if (value === "MERGE_UPLOAD_SOURCE") {
     return labels.jobMergeUploadSource;
+  }
+  if (value === "PACKAGE_UPLOAD_SOURCE") {
+    return labels.jobPackageUploadSource;
   }
   if (value === "UPLOAD_BILIBILI") {
     return labels.jobUploadBilibili;
@@ -4016,7 +4105,7 @@ function formatJobStatus(value: string, labels: AdminCopy): string {
   return value;
 }
 
-function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: JobItem): string {
+function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: JobItem, packageJob?: JobItem): string {
   if (value === "READY_TO_UPLOAD") {
     return labels.uploadSourceReady;
   }
@@ -4031,6 +4120,18 @@ function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: J
   }
   if (value === "MERGE_FAILED") {
     return labels.uploadSourceMergeFailed;
+  }
+  if (value === "PACKAGE_PENDING") {
+    if (packageJob?.status === "RUNNING") {
+      return labels.uploadSourcePackaging;
+    }
+    if (packageJob?.status === "SUCCEEDED") {
+      return labels.uploadSourcePackageCompleteRefreshing;
+    }
+    return labels.uploadSourcePendingPackage;
+  }
+  if (value === "PACKAGE_FAILED") {
+    return labels.uploadSourcePackageFailed;
   }
   return value || labels.unknown;
 }

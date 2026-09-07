@@ -25,6 +25,7 @@ type Worker struct {
 	recorder recorder.SyncClient
 	cfg      config.Config
 	merger   media.Merger
+	packager media.Packager
 	cos      upload.COSUploader
 	lockID   string
 }
@@ -56,6 +57,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		recorder: recorderClient,
 		cfg:      cfg,
 		merger:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		packager: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		cos:      upload.NewTencentCOSUploader(),
 		lockID:   fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
@@ -64,6 +66,12 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 func NewWithMerger(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, merger media.Merger) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.merger = merger
+	return worker
+}
+
+func NewWithPackager(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, packager media.Packager) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.packager = packager
 	return worker
 }
 
@@ -105,6 +113,8 @@ func (w Worker) RunOnce(ctx context.Context) error {
 		return w.runSyncJob(ctx, job)
 	case "MERGE_UPLOAD_SOURCE":
 		return w.runMergeJob(ctx, job)
+	case "PACKAGE_UPLOAD_SOURCE":
+		return w.runPackageJob(ctx, job)
 	case "UPLOAD_COS_OBJECT":
 		return w.runCOSUploadJob(ctx, job)
 	default:
@@ -164,6 +174,45 @@ func (w Worker) runMergeJob(ctx context.Context, job workerJob) error {
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
 
+func (w Worker) runPackageJob(ctx context.Context, job workerJob) error {
+	var payload mergeJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode package payload: %w", err))
+	}
+	store := recording.NewStore(w.db, w.cfg)
+	source, err := store.UploadSourceForPackage(ctx, payload.UploadSourceID)
+	if err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	if source.Status == "READY_TO_UPLOAD" && len(source.Outputs) > 0 {
+		return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+	}
+	if source.OutputRelativePath == "" {
+		return w.failJob(ctx, job, "PERMANENT", errors.New("upload source has no package input"))
+	}
+	result, err := w.packager.Package(ctx, media.PackageRequest{
+		UploadSourceID:        source.ID,
+		InputRelativePath:     source.OutputRelativePath,
+		OutputDirRelativePath: filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", source.RecordingProfileID), fmt.Sprintf("%d", source.ID), "parts")),
+		DurationMs:            source.DurationMs,
+		SizeBytes:             source.TotalBytes,
+		MaxPartBytes:          w.cfg.UploadMaxPartBytes,
+		MaxPartDurationSecs:   w.cfg.UploadMaxPartDurationSecs,
+	})
+	if err != nil {
+		terminal := job.Attempts >= job.MaxAttempts
+		message := truncateError(err)
+		if markErr := store.MarkUploadSourcePackageFailed(ctx, source.ID, terminal, message); markErr != nil {
+			return markErr
+		}
+		return w.failJob(ctx, job, "TRANSIENT", err)
+	}
+	if err := store.MarkUploadSourcePackageSucceeded(ctx, source.ID, result.Outputs); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
 func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 	var payload upload.COSJobPayload
 	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
@@ -210,7 +259,7 @@ func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 		ORDER BY priority ASC, run_after ASC, id ASC

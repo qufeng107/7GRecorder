@@ -293,9 +293,11 @@ GET  /api/v1/upload-sources/{id}/download
 Discovery is SUPER_ADMIN-only and idempotent. It creates upload sources only when a profile is not currently live or
 recording and the newest segment in a continuous group has been completed for longer than the merge gap threshold. The
 same threshold controls both grouping adjacent segments and waiting before finalizing a group. Optional upload modules
-must process only upload sources whose status is `READY_TO_UPLOAD`. Multi-segment sources become `READY_TO_UPLOAD`
-after the `MERGE_UPLOAD_SOURCE` job writes a derived file under `DATA_ROOT/upload-sources`. Upload source download uses
-the same authenticated `X-Accel-Redirect` pattern as recording file download.
+must process only upload source output parts whose parent source status is `READY_TO_UPLOAD`. Multi-segment sources
+become `PACKAGE_PENDING` after the `MERGE_UPLOAD_SOURCE` job writes a derived file under
+`DATA_ROOT/upload-sources`; `PACKAGE_UPLOAD_SOURCE` then records one or more output parts and marks the source
+`READY_TO_UPLOAD`. Upload source download uses the same authenticated `X-Accel-Redirect` pattern as recording file
+download.
 
 ### Files / Download
 

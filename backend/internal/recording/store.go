@@ -17,6 +17,7 @@ import (
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
+	"github.com/7grecorder/7grecorder/backend/internal/media"
 )
 
 var (
@@ -99,6 +100,7 @@ type UploadSource struct {
 	ReadyAt                  string                `json:"ready_at,omitempty"`
 	LastError                string                `json:"last_error,omitempty"`
 	Segments                 []UploadSourceSegment `json:"segments"`
+	Outputs                  []UploadSourceOutput  `json:"outputs"`
 }
 
 type UploadSourceSegment struct {
@@ -116,6 +118,18 @@ type UploadSourceSegment struct {
 	DurationMs        int64  `json:"duration_ms"`
 }
 
+type UploadSourceOutput struct {
+	ID              int64  `json:"id"`
+	UploadSourceID  int64  `json:"upload_source_id"`
+	SortOrder       int    `json:"sort_order"`
+	RelativePath    string `json:"relative_path"`
+	SizeBytes       int64  `json:"size_bytes"`
+	DurationMs      int64  `json:"duration_ms"`
+	TimelineStartMs int64  `json:"timeline_start_ms"`
+	TimelineEndMs   int64  `json:"timeline_end_ms"`
+	Status          string `json:"status"`
+}
+
 type UploadSourceList struct {
 	Items                    []UploadSource `json:"items"`
 	Total                    int            `json:"total"`
@@ -126,6 +140,7 @@ type UploadSourceDiscoverResult struct {
 	Created                  int   `json:"created"`
 	Ignored                  int   `json:"ignored"`
 	MergeJobsEnqueued        int   `json:"merge_jobs_enqueued"`
+	PackageJobsEnqueued      int   `json:"package_jobs_enqueued"`
 	MergeGapThresholdSeconds int64 `json:"merge_gap_threshold_seconds"`
 }
 
@@ -531,6 +546,10 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 		if err != nil {
 			return nil, err
 		}
+		item.Outputs, err = s.uploadSourceOutputs(ctx, item.ID)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -608,6 +627,11 @@ func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64
 		return UploadSourceDiscoverResult{}, err
 	}
 	result.MergeJobsEnqueued = mergeJobsEnqueued
+	packageJobsEnqueued, err := s.ensureUploadSourcePackageJobs(ctx)
+	if err != nil {
+		return UploadSourceDiscoverResult{}, err
+	}
+	result.PackageJobsEnqueued = packageJobsEnqueued
 	return result, nil
 }
 
@@ -636,6 +660,49 @@ func (s Store) ensureUploadSourceMergeJobs(ctx context.Context) (int, error) {
 	changed, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("read ensured merge job count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func (s Store) ensureUploadSourcePackageJobs(ctx context.Context) (int, error) {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = 'PACKAGE_PENDING',
+			ready_at = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE status = 'READY_TO_UPLOAD'
+			AND COALESCE(output_relative_path, '') != ''
+			AND NOT EXISTS (
+				SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = upload_sources.id
+			)
+	`); err != nil {
+		return 0, fmt.Errorf("mark upload sources pending package: %w", err)
+	}
+	result, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT us.recording_profile_id,
+			us.id,
+			'PACKAGE_UPLOAD_SOURCE',
+			'MEDIA',
+			'upload-source:' || us.id || ':package',
+			'{"upload_source_id":' || us.id || '}',
+			'PENDING',
+			65,
+			3
+		FROM upload_sources us
+		WHERE us.status IN ('PACKAGE_PENDING', 'READY_TO_UPLOAD')
+			AND COALESCE(us.output_relative_path, '') != ''
+			AND NOT EXISTS (
+				SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id
+			)
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("ensure upload source package jobs: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read ensured package job count: %w", err)
 	}
 	return int(changed), nil
 }
@@ -717,10 +784,9 @@ func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, t
 	var readyAt interface{}
 	if len(recordings) == 1 {
 		if file, ok := firstClosedVideo(first); ok {
-			status = "READY_TO_UPLOAD"
+			status = "PACKAGE_PENDING"
 			outputRecordingFileID = file.ID
 			outputRelativePath = file.RelativePath
-			readyAt = time.Now().UTC().Format(time.RFC3339)
 		}
 	}
 	summary := uploadSourceSummary(recordings, thresholdSeconds)
@@ -784,6 +850,19 @@ func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, t
 			return false, fmt.Errorf("enqueue upload source merge: %w", err)
 		}
 	}
+	if status == "PACKAGE_PENDING" {
+		payload, err := json.Marshal(map[string]int64{"upload_source_id": uploadSourceID})
+		if err != nil {
+			return false, fmt.Errorf("encode package job payload: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO jobs
+				(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+			VALUES (?, ?, 'PACKAGE_UPLOAD_SOURCE', 'MEDIA', ?, ?, 'PENDING', 65, 3)
+		`, first.RecordingProfileID, uploadSourceID, fmt.Sprintf("upload-source:%d:package", uploadSourceID), string(payload)); err != nil {
+			return false, fmt.Errorf("enqueue upload source package: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit upload source insert: %w", err)
 	}
@@ -804,23 +883,58 @@ func (s Store) UploadSourceForMerge(ctx context.Context, id int64) (UploadSource
 	return items[0], nil
 }
 
+func (s Store) UploadSourceForPackage(ctx context.Context, id int64) (UploadSource, error) {
+	if id <= 0 {
+		return UploadSource{}, ErrValidation
+	}
+	items, err := s.uploadSourcesByID(ctx, id, nil)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	return items[0], nil
+}
+
 func (s Store) MarkUploadSourceMergeSucceeded(ctx context.Context, id int64, outputRelativePath string, sizeBytes int64) error {
 	if id <= 0 || outputRelativePath == "" {
 		return ErrValidation
 	}
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin upload source merge success: %w", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		UPDATE upload_sources
-		SET status = 'READY_TO_UPLOAD',
+		SET status = 'PACKAGE_PENDING',
 			output_relative_path = ?,
 			output_recording_file_id = NULL,
 			total_bytes = ?,
-			ready_at = CURRENT_TIMESTAMP,
+			ready_at = NULL,
 			last_error = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status IN ('MERGE_PENDING', 'MERGE_FAILED')
 	`, outputRelativePath, sizeBytes, id)
 	if err != nil {
 		return fmt.Errorf("mark upload source merge succeeded: %w", err)
+	}
+	payload, err := json.Marshal(map[string]int64{"upload_source_id": id})
+	if err != nil {
+		return fmt.Errorf("encode package job payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT recording_profile_id, id, 'PACKAGE_UPLOAD_SOURCE', 'MEDIA', ?, ?, 'PENDING', 65, 3
+		FROM upload_sources
+		WHERE id = ?
+	`, fmt.Sprintf("upload-source:%d:package", id), string(payload), id); err != nil {
+		return fmt.Errorf("enqueue upload source package: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit upload source merge success: %w", err)
 	}
 	return nil
 }
@@ -842,6 +956,73 @@ func (s Store) MarkUploadSourceMergeFailed(ctx context.Context, id int64, termin
 	`, status, message, id)
 	if err != nil {
 		return fmt.Errorf("mark upload source merge failed: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkUploadSourcePackageSucceeded(ctx context.Context, id int64, outputs []media.PackageOutput) error {
+	if id <= 0 || len(outputs) == 0 {
+		return ErrValidation
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin upload source package success: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM upload_source_outputs WHERE upload_source_id = ?`, id); err != nil {
+		return fmt.Errorf("clear upload source outputs: %w", err)
+	}
+	var totalBytes int64
+	var totalDurationMs int64
+	for index, output := range outputs {
+		if output.RelativePath == "" || output.SizeBytes < 0 || output.DurationMs < 0 {
+			return ErrValidation
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO upload_source_outputs
+				(upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'READY_TO_UPLOAD')
+		`, id, index, output.RelativePath, output.SizeBytes, output.DurationMs, output.TimelineStartMs, output.TimelineEndMs); err != nil {
+			return fmt.Errorf("insert upload source output: %w", err)
+		}
+		totalBytes += output.SizeBytes
+		totalDurationMs += output.DurationMs
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = 'READY_TO_UPLOAD',
+			total_bytes = ?,
+			duration_ms = CASE WHEN ? > 0 THEN ? ELSE duration_ms END,
+			ready_at = CURRENT_TIMESTAMP,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status IN ('PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
+	`, totalBytes, totalDurationMs, totalDurationMs, id); err != nil {
+		return fmt.Errorf("mark upload source package succeeded: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit upload source package success: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkUploadSourcePackageFailed(ctx context.Context, id int64, terminal bool, message string) error {
+	if id <= 0 {
+		return ErrValidation
+	}
+	status := "PACKAGE_PENDING"
+	if terminal {
+		status = "PACKAGE_FAILED"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = ?,
+			last_error = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status IN ('PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
+	`, status, message, id)
+	if err != nil {
+		return fmt.Errorf("mark upload source package failed: %w", err)
 	}
 	return nil
 }
@@ -996,6 +1177,43 @@ func (s Store) uploadSourceSegments(ctx context.Context, uploadSourceID int64) (
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate upload source segments: %w", err)
+	}
+	return items, nil
+}
+
+func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([]UploadSourceOutput, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms,
+			timeline_start_ms, timeline_end_ms, status
+		FROM upload_source_outputs
+		WHERE upload_source_id = ?
+		ORDER BY sort_order ASC, id ASC
+	`, uploadSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list upload source outputs: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]UploadSourceOutput, 0)
+	for rows.Next() {
+		var item UploadSourceOutput
+		if err := rows.Scan(
+			&item.ID,
+			&item.UploadSourceID,
+			&item.SortOrder,
+			&item.RelativePath,
+			&item.SizeBytes,
+			&item.DurationMs,
+			&item.TimelineStartMs,
+			&item.TimelineEndMs,
+			&item.Status,
+		); err != nil {
+			return nil, fmt.Errorf("scan upload source output: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate upload source outputs: %w", err)
 	}
 	return items, nil
 }

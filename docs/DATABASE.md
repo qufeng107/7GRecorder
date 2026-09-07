@@ -372,6 +372,34 @@ Bilibili Publication 与 COS 副本是不同概念。
 
 ---
 
+## 8.5 Upload Source Outputs
+
+### upload_source_outputs
+
+每一条表示一个 Upload Source 的封装后分片。Bilibili 多 P 投稿和 COS 对象上传都以这些分片为输入。
+
+```text
+id
+upload_source_id
+sort_order
+relative_path
+size_bytes
+duration_ms
+timeline_start_ms
+timeline_end_ms
+status               READY_TO_UPLOAD | DELETED | SOURCE_MISSING
+created_at
+updated_at
+```
+
+约束：
+
+```text
+(upload_source_id, sort_order) UNIQUE
+```
+
+---
+
 ## 9. COS 对象
 
 ### cos_objects
@@ -413,13 +441,14 @@ status = AVAILABLE
 
 ### upload_source_cos_objects
 
-第一版上传归档以 `upload_sources` 为上传单位。每一条表示一个可上传视频在 COS 中的一份管理对象副本。
+上传归档以 `upload_source_outputs` 为上传单位。每一条表示一个封装后分片在 COS 中的一份管理对象副本。
 
 ```text
 id
 cos_storage_profile_id
 recording_profile_id
 upload_source_id
+upload_source_output_id
 object_key
 size_bytes
 checksum nullable
@@ -435,7 +464,7 @@ updated_at
 约束：
 
 ```text
-(cos_storage_profile_id, upload_source_id) UNIQUE
+(cos_storage_profile_id, upload_source_output_id) UNIQUE
 (cos_storage_profile_id, object_key) UNIQUE
 ```
 
@@ -716,12 +745,18 @@ COS object binary
 Recording groups are currently computed from existing `recordings` and `recording_files` rows. No dedicated group table
 is introduced for the read-only diagnostics step.
 
-Durable upload sources are represented by `upload_sources` and `upload_source_segments`. `upload_sources` is the unit
-that optional upload modules consume. `upload_source_segments` records the original child recordings/files, source
-recording timestamps, relative paths, and each segment's timeline interval inside the upload source. Multi-segment
-sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
-`upload_sources.output_relative_path`; single-segment sources can reference the existing closed video file and become
-`READY_TO_UPLOAD`. Terminal merge failures keep the source metadata and mark the source `MERGE_FAILED`.
+Durable upload sources are represented by `upload_sources`, `upload_source_segments`, and `upload_source_outputs`.
+`upload_sources` is the parent recording list. `upload_source_segments` records pre-package source recordings/files,
+source recording timestamps, relative paths, and each segment's timeline interval inside the upload source.
+`upload_source_outputs` records post-package upload parts. COS/Bilibili modules consume output parts from sources whose
+status is `READY_TO_UPLOAD`.
+
+Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
+`upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
+existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.
+`PACKAGE_UPLOAD_SOURCE` marks the source `READY_TO_UPLOAD` after one or more output parts are recorded. Terminal merge
+failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
+`PACKAGE_FAILED`.
 
 备份写入：
 

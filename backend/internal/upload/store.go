@@ -107,6 +107,7 @@ type ReconcileResult struct {
 type COSJobPayload struct {
 	COSObjectID    int64 `json:"cos_object_id"`
 	UploadSourceID int64 `json:"upload_source_id"`
+	OutputID       int64 `json:"output_id"`
 }
 
 func (s Store) ListCredentials(ctx context.Context, actor account.User) ([]Credential, error) {
@@ -332,7 +333,10 @@ func (s Store) createBilibiliPublications(ctx context.Context) (int, error) {
 			AND pp.enabled = 1
 			AND pp.credential_id IS NOT NULL
 		WHERE us.status = 'READY_TO_UPLOAD'
-			AND COALESCE(us.output_relative_path, '') != ''
+			AND EXISTS (
+				SELECT 1 FROM upload_source_outputs uso
+				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD'
+			)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("create bilibili publications: %w", err)
@@ -363,6 +367,10 @@ func (s Store) createBilibiliJobs(ctx context.Context) (int, error) {
 		WHERE p.platform = 'bilibili'
 			AND p.status = 'PENDING'
 			AND us.status = 'READY_TO_UPLOAD'
+			AND EXISTS (
+				SELECT 1 FROM upload_source_outputs uso
+				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD'
+			)
 			AND p.upload_source_id IS NOT NULL
 	`)
 	if err != nil {
@@ -378,18 +386,20 @@ func (s Store) createBilibiliJobs(ctx context.Context) (int, error) {
 func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO upload_source_cos_objects
-			(cos_storage_profile_id, recording_profile_id, upload_source_id, object_key, size_bytes, status)
+			(cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key, size_bytes, status)
 		SELECT csp.id,
 			us.recording_profile_id,
 			us.id,
-			csp.prefix || 'upload-sources/' || us.id || '/upload-source-' || us.id || '.flv',
-			us.total_bytes,
+			uso.id,
+			csp.prefix || 'upload-sources/' || us.id || '/' || printf('part-%03d.flv', uso.sort_order + 1),
+			uso.size_bytes,
 			'PENDING'
 		FROM upload_sources us
+		JOIN upload_source_outputs uso ON uso.upload_source_id = us.id
+			AND uso.status = 'READY_TO_UPLOAD'
 		JOIN cos_storage_profiles csp ON csp.recording_profile_id = us.recording_profile_id
 			AND csp.enabled = 1
 		WHERE us.status = 'READY_TO_UPLOAD'
-			AND COALESCE(us.output_relative_path, '') != ''
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("create cos objects: %w", err)
@@ -409,14 +419,15 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 			co.upload_source_id,
 			'UPLOAD_COS_OBJECT',
 			'NETWORK',
-			'upload-source:' || co.upload_source_id || ':cos:' || co.cos_storage_profile_id,
-			'{"cos_object_id":' || co.id || ',"upload_source_id":' || co.upload_source_id || '}',
+			'upload-source:' || co.upload_source_id || ':output:' || co.upload_source_output_id || ':cos:' || co.cos_storage_profile_id,
+			'{"cos_object_id":' || co.id || ',"upload_source_id":' || co.upload_source_id || ',"output_id":' || co.upload_source_output_id || '}',
 			'PENDING',
 			90,
 			5
 		FROM upload_source_cos_objects co
 		JOIN upload_sources us ON us.id = co.upload_source_id
 		WHERE co.status = 'PENDING'
+			AND co.upload_source_output_id IS NOT NULL
 			AND us.status = 'READY_TO_UPLOAD'
 	`)
 	if err != nil {
@@ -443,11 +454,13 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 			csp.region,
 			csp.bucket,
 			co.object_key,
-			COALESCE(us.output_relative_path, ''),
+			uso.relative_path,
 			co.size_bytes,
 			c.encrypted_secret
 		FROM upload_source_cos_objects co
 		JOIN upload_sources us ON us.id = co.upload_source_id
+		JOIN upload_source_outputs uso ON uso.id = co.upload_source_output_id
+			AND uso.status = 'READY_TO_UPLOAD'
 		JOIN cos_storage_profiles csp ON csp.id = co.cos_storage_profile_id
 		JOIN credentials c ON c.id = csp.credential_id
 		WHERE co.id = ?
@@ -473,6 +486,15 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 	}
 	if payload.UploadSourceID > 0 && payload.UploadSourceID != request.UploadSourceID {
 		return COSUploadRequest{}, ErrValidation
+	}
+	if payload.OutputID > 0 {
+		var outputID int64
+		if err := s.db.QueryRowContext(ctx, `SELECT upload_source_output_id FROM upload_source_cos_objects WHERE id = ?`, payload.COSObjectID).Scan(&outputID); err != nil {
+			return COSUploadRequest{}, fmt.Errorf("load cos output id: %w", err)
+		}
+		if outputID != payload.OutputID {
+			return COSUploadRequest{}, ErrValidation
+		}
 	}
 	sourcePath, err := resolveWithinRoot(s.cfg.DataRoot, sourceRelativePath)
 	if err != nil {

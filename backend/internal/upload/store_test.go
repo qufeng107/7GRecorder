@@ -110,7 +110,7 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 		t.Fatalf("expected idempotent reconcile, got %#v", second)
 	}
 	assertJobExists(t, ctx, database, "upload-source:1:bilibili:upload")
-	assertJobExists(t, ctx, database, "upload-source:1:cos:1")
+	assertJobExists(t, ctx, database, "upload-source:1:output:1:cos:1")
 }
 
 func openTestDB(t *testing.T, ctx context.Context) (config.Config, *sql.DB) {
@@ -158,6 +158,14 @@ func insertReadyUploadSource(t *testing.T, ctx context.Context, database *sql.DB
 			'upload-sources/1/1/upload-source-1.flv', 50, 1, 1, 0, 600, CURRENT_TIMESTAMP)
 	`); err != nil {
 		t.Fatalf("insert upload source returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, 'upload-sources/1/1/upload-source-1.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
+	`); err != nil {
+		t.Fatalf("insert upload source output returned error: %v", err)
 	}
 }
 
