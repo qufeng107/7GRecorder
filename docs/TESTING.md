@@ -194,6 +194,9 @@ song processing FAILED
   `READY_TO_UPLOAD`, and terminal failure visibility.
 - Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`
   source detection, idempotent Bilibili publication/job creation, and idempotent COS object/job creation.
+- COS upload jobs cover worker dispatch with a fake COS uploader, encrypted credential decryption, source path
+  resolution under `DATA_ROOT`, object transition to `AVAILABLE`, and job success. Real COS credentials are not used in
+  CI.
 
 ---
 

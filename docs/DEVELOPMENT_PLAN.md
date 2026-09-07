@@ -215,7 +215,8 @@ Phase 0 只搭正式部署通道，不建设 test/staging server。
 
 - CLOSED File detection；
 - `UPLOAD_COS_OBJECT`；
-- 当前先实现：扫描 `READY_TO_UPLOAD` Upload Source 并创建幂等 COS Object/Job；
+- 已实现：扫描 `READY_TO_UPLOAD` Upload Source 并创建幂等 COS Object/Job；
+- 已实现：Worker 使用官方 Go SDK 上传 Upload Source 到 COS 并更新对象状态；
 - object metadata；
 - per-profile managed usage；
 - oldest Recording COS rolling deletion；

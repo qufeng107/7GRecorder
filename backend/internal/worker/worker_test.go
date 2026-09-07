@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/media"
 	"github.com/7grecorder/7grecorder/backend/internal/profile"
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
+	"github.com/7grecorder/7grecorder/backend/internal/upload"
 )
 
 type fakeRecorder struct {
@@ -32,6 +34,17 @@ type fakeMerger struct {
 }
 
 func (f *fakeMerger) Merge(_ context.Context, request media.MergeRequest) (media.MergeResult, error) {
+	f.request = request
+	return f.result, f.err
+}
+
+type fakeCOSUploader struct {
+	request upload.COSUploadRequest
+	result  upload.COSUploadResult
+	err     error
+}
+
+func (f *fakeCOSUploader) Upload(_ context.Context, request upload.COSUploadRequest) (upload.COSUploadResult, error) {
 	f.request = request
 	return f.result, f.err
 }
@@ -167,6 +180,102 @@ func TestRunOnceMergesPendingUploadSource(t *testing.T) {
 	}
 }
 
+func TestRunOnceUploadsCOSObject(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
+		t.Fatalf("complete initial sync job returned error: %v", err)
+	}
+	sourceRelativePath := "upload-sources/1/1/upload-source-1.flv"
+	sourcePath := filepath.Join(cfg.DataRoot, sourceRelativePath)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create upload source dir returned error: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write upload source returned error: %v", err)
+	}
+	store := upload.NewStore(database, cfg)
+	credential, err := store.CreateCredential(ctx, actor, upload.CredentialCreate{
+		Scope:        "USER",
+		Platform:     "tencent_cos",
+		Purpose:      "STORAGE",
+		AccountLabel: "cos account",
+		Secret:       []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential returned error: %v", err)
+	}
+	if _, err := store.UpsertCOSConfig(ctx, actor, created.ID, upload.COSConfigUpsert{
+		CredentialID:    credential.ID,
+		Enabled:         true,
+		Region:          "ap-shanghai",
+		Bucket:          "bucket-1250000000",
+		Prefix:          "7grecorder/test/",
+		MaxManagedBytes: 1000000000,
+	}); err != nil {
+		t.Fatalf("UpsertCOSConfig returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES (1, ?, 'profile:1:1:1', '1741048619', '7G',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'READY_TO_UPLOAD',
+			?, 5, 1, 1, 0, 600, CURRENT_TIMESTAMP)
+	`, created.ID, sourceRelativePath); err != nil {
+		t.Fatalf("insert upload source returned error: %v", err)
+	}
+	result, err := store.Reconcile(ctx, actor)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.COSObjectsCreated != 1 || result.COSJobsCreated != 1 {
+		t.Fatalf("unexpected reconcile result: %#v", result)
+	}
+
+	cosUploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "etag"}}
+	if err := NewWithCOSUploader(database, &fakeRecorder{}, cfg, cosUploader).RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if cosUploader.request.ObjectID != 1 || cosUploader.request.ObjectKey != "7grecorder/test/upload-sources/1/upload-source-1.flv" {
+		t.Fatalf("unexpected cos upload request: %#v", cosUploader.request)
+	}
+	if cosUploader.request.Secret.SecretID != "id" || cosUploader.request.Secret.SecretKey != "key" {
+		t.Fatalf("unexpected cos secret: %#v", cosUploader.request.Secret)
+	}
+
+	var objectStatus string
+	var etag string
+	if err := database.QueryRowContext(ctx, `
+		SELECT status, COALESCE(etag, '')
+		FROM upload_source_cos_objects
+		WHERE id = 1
+	`).Scan(&objectStatus, &etag); err != nil {
+		t.Fatalf("query cos object returned error: %v", err)
+	}
+	if objectStatus != "AVAILABLE" || etag != "etag" {
+		t.Fatalf("unexpected cos object status=%s etag=%s", objectStatus, etag)
+	}
+
+	var jobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:cos:1'`).Scan(&jobStatus); err != nil {
+		t.Fatalf("query job returned error: %v", err)
+	}
+	if jobStatus != "SUCCEEDED" {
+		t.Fatalf("unexpected job status: %s", jobStatus)
+	}
+}
+
 func openTestDB(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 	_, database := openTestDBWithConfig(t, ctx)
@@ -176,10 +285,15 @@ func openTestDB(t *testing.T, ctx context.Context) *sql.DB {
 func openTestDBWithConfig(t *testing.T, ctx context.Context) (config.Config, *sql.DB) {
 	t.Helper()
 	root := t.TempDir()
+	masterKeyPath := filepath.Join(root, "master.key")
+	if err := os.WriteFile(masterKeyPath, []byte("test-master-key"), 0o600); err != nil {
+		t.Fatalf("write master key returned error: %v", err)
+	}
 	cfg := config.Config{
-		DataRoot:   root,
-		SQLitePath: filepath.Join(root, "7grecorder.db"),
-		TempRoot:   filepath.Join(root, "temp"),
+		DataRoot:      root,
+		SQLitePath:    filepath.Join(root, "7grecorder.db"),
+		TempRoot:      filepath.Join(root, "temp"),
+		MasterKeyPath: masterKeyPath,
 	}
 	if err := db.Migrate(ctx, cfg); err != nil {
 		t.Fatalf("Migrate returned error: %v", err)
