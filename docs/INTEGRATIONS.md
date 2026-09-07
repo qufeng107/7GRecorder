@@ -144,6 +144,9 @@ UploadAmbiguous
 Verification result
 ```
 
+7GRecorder renders Bilibili title, description, tags, and multipart file metadata before calling the adapter. The
+adapter receives a stable upload request and must not read plaintext credential files from a long-lived location.
+
 CLI 文本解析集中在 Adapter。
 
 升级 biliup 必须更新 fixture。

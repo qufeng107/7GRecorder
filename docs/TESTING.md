@@ -167,6 +167,7 @@ song processing FAILED
 ## 9. Publication
 
 - biliup CLI failure 不标成功；
+- Bilibili title/description templates render into the upload request snapshot before the uploader adapter runs;
 - upload process crash → AMBIGUOUS；
 - AMBIGUOUS 不盲目重新投稿；
 - verify 可恢复 external_id；

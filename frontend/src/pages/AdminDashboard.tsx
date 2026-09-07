@@ -416,7 +416,10 @@ type UploadSettingsForm = {
   profile_id: string;
   bilibili_enabled: boolean;
   bilibili_credential_id: string;
-  bilibili_settings: string;
+  bilibili_title_template: string;
+  bilibili_description_template: string;
+  bilibili_tags: string;
+  bilibili_copyright: number;
   cos_enabled: boolean;
   cos_credential_id: string;
   cos_region: string;
@@ -470,11 +473,18 @@ const emptyCredentialForm: CredentialForm = {
   secret: "{}"
 };
 
+const defaultBilibiliTitleTemplate = "{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播";
+const defaultBilibiliDescriptionTemplate =
+  "主播：{{streamer_name}}\n直播间：{{room_id}}\n录制时间：{{started_at_china}} - {{completed_at_china}}\n分片：{{part_count}} 个\n\n由 7GRecorder 自动归档。";
+
 const emptyUploadSettingsForm: UploadSettingsForm = {
   profile_id: "",
   bilibili_enabled: false,
   bilibili_credential_id: "",
-  bilibili_settings: "{}",
+  bilibili_title_template: defaultBilibiliTitleTemplate,
+  bilibili_description_template: defaultBilibiliDescriptionTemplate,
+  bilibili_tags: "录播,七宫筱野",
+  bilibili_copyright: 2,
   cos_enabled: false,
   cos_credential_id: "",
   cos_region: "",
@@ -730,7 +740,13 @@ const uiCopy = {
     noCredentialSelected: "未选择凭证",
     moduleEnabled: "启用模块",
     moduleDisabled: "模块未启用",
-    bilibiliSettingsJson: "Bilibili 设置 JSON",
+    bilibiliTitleTemplate: "视频标题模板",
+    bilibiliDescriptionTemplate: "视频简介模板",
+    bilibiliTags: "标签",
+    bilibiliCopyright: "版权类型",
+    bilibiliCopyrightOriginal: "自制",
+    bilibiliCopyrightRepost: "转载",
+    bilibiliTemplateHint: "可用变量：{{profile_name}}、{{streamer_name}}、{{room_id}}、{{date}}、{{date_compact}}、{{start_time}}、{{end_time}}、{{started_at_china}}、{{completed_at_china}}、{{live_ordinal}}、{{part_count}}。",
     cosRegion: "COS 地域",
     cosBucket: "COS Bucket",
     cosPrefix: "COS 前缀",
@@ -994,7 +1010,13 @@ const uiCopy = {
     noCredentialSelected: "No credential selected",
     moduleEnabled: "Module enabled",
     moduleDisabled: "Module disabled",
-    bilibiliSettingsJson: "Bilibili Settings JSON",
+    bilibiliTitleTemplate: "Video Title Template",
+    bilibiliDescriptionTemplate: "Video Description Template",
+    bilibiliTags: "Tags",
+    bilibiliCopyright: "Copyright",
+    bilibiliCopyrightOriginal: "Original",
+    bilibiliCopyrightRepost: "Repost",
+    bilibiliTemplateHint: "Variables: {{profile_name}}, {{streamer_name}}, {{room_id}}, {{date}}, {{date_compact}}, {{start_time}}, {{end_time}}, {{started_at_china}}, {{completed_at_china}}, {{live_ordinal}}, {{part_count}}.",
     cosRegion: "COS Region",
     cosBucket: "COS Bucket",
     cosPrefix: "COS Prefix",
@@ -1036,15 +1058,35 @@ function parseConfigJSON(value: string): unknown {
   return JSON.parse(trimmed) as unknown;
 }
 
-function stringifyConfigJSON(value: unknown): string {
-  if (value === undefined || value === null) {
-    return "{}";
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return "{}";
-  }
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function bilibiliSettingsFromConfig(value: unknown) {
+  const settings = isPlainObject(value) ? value : {};
+  return {
+    title_template: typeof settings.title_template === "string" ? settings.title_template : defaultBilibiliTitleTemplate,
+    description_template:
+      typeof settings.description_template === "string" ? settings.description_template : defaultBilibiliDescriptionTemplate,
+    tags: Array.isArray(settings.tags)
+      ? settings.tags.filter((tag): tag is string => typeof tag === "string").join(",")
+      : typeof settings.tags === "string"
+        ? settings.tags
+        : "录播,七宫筱野",
+    copyright: typeof settings.copyright === "number" ? settings.copyright : 2
+  };
+}
+
+function bilibiliSettingsPayload(form: UploadSettingsForm) {
+  return {
+    title_template: form.bilibili_title_template,
+    description_template: form.bilibili_description_template,
+    tags: form.bilibili_tags
+      .split(/[,\n，]/)
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+    copyright: form.bilibili_copyright
+  };
 }
 
 function profileToForm(profile: RecordingProfile): ProfileForm {
@@ -1448,11 +1490,15 @@ export function AdminDashboard() {
     if (!config) {
       return;
     }
+    const settings = bilibiliSettingsFromConfig(config.settings ?? {});
     setUploadSettingsForm((form) => ({
       ...form,
       bilibili_enabled: config.enabled,
       bilibili_credential_id: config.credential_id ? String(config.credential_id) : "",
-      bilibili_settings: stringifyConfigJSON(config.settings ?? {})
+      bilibili_title_template: settings.title_template,
+      bilibili_description_template: settings.description_template,
+      bilibili_tags: settings.tags,
+      bilibili_copyright: settings.copyright
     }));
   }, [bilibiliConfigQuery.data]);
 
@@ -1671,7 +1717,7 @@ export function AdminDashboard() {
         body: JSON.stringify({
           enabled: uploadSettingsForm.bilibili_enabled,
           credential_id: Number(uploadSettingsForm.bilibili_credential_id || 0),
-          settings: parseConfigJSON(uploadSettingsForm.bilibili_settings)
+          settings: bilibiliSettingsPayload(uploadSettingsForm)
         })
       }),
     onSuccess: () => {
@@ -3052,12 +3098,37 @@ function UploadSettingsPanel(props: {
                 value={props.settingsForm.bilibili_credential_id}
                 onChange={(value) => updateSettings("bilibili_credential_id", value)}
               />
-              <JSONTextArea
+              <TextField
                 disabled={!props.canEditBilibiliModule}
-                label={props.labels.bilibiliSettingsJson}
-                value={props.settingsForm.bilibili_settings}
-                onChange={(value) => updateSettings("bilibili_settings", value)}
+                label={props.labels.bilibiliTitleTemplate}
+                value={props.settingsForm.bilibili_title_template}
+                onChange={(value) => updateSettings("bilibili_title_template", value)}
               />
+              <TextAreaField
+                disabled={!props.canEditBilibiliModule}
+                label={props.labels.bilibiliDescriptionTemplate}
+                value={props.settingsForm.bilibili_description_template}
+                onChange={(value) => updateSettings("bilibili_description_template", value)}
+              />
+              <TextField
+                disabled={!props.canEditBilibiliModule}
+                label={props.labels.bilibiliTags}
+                value={props.settingsForm.bilibili_tags}
+                onChange={(value) => updateSettings("bilibili_tags", value)}
+              />
+              <label className="flex flex-col gap-1 text-sm font-medium">
+                {props.labels.bilibiliCopyright}
+                <select
+                  className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
+                  disabled={!props.canEditBilibiliModule}
+                  value={props.settingsForm.bilibili_copyright}
+                  onChange={(event) => updateSettings("bilibili_copyright", Number(event.target.value))}
+                >
+                  <option value={1}>{props.labels.bilibiliCopyrightOriginal}</option>
+                  <option value={2}>{props.labels.bilibiliCopyrightRepost}</option>
+                </select>
+              </label>
+              <p className="text-xs leading-5 text-muted">{props.labels.bilibiliTemplateHint}</p>
               {props.bilibiliConfigError ? (
                 <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p>
               ) : null}
@@ -4150,6 +4221,7 @@ function JobsPanel(props: {
 
 function TextField(props: {
   autoComplete?: string;
+  disabled?: boolean;
   label: string;
   type?: string;
   value: string;
@@ -4161,7 +4233,27 @@ function TextField(props: {
       <input
         className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
         autoComplete={props.autoComplete}
+        disabled={props.disabled}
         type={props.type ?? "text"}
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function TextAreaField(props: {
+  disabled?: boolean;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm font-medium">
+      {props.label}
+      <textarea
+        className="min-h-28 rounded-md border border-border bg-white px-3 py-2 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
+        disabled={props.disabled}
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
       />

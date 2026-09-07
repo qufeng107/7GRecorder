@@ -194,6 +194,10 @@ created_at
 updated_at
 ```
 
+For Bilibili, `settings_json` stores upload template settings such as `title_template`, `description_template`, `tags`,
+`copyright`, and later platform-specific biliup options. The worker renders these into
+`publications.request_snapshot_json` when an `UPLOAD_BILIBILI` job starts.
+
 建议一个 Profile 同一 platform 只保留一个 active publishing profile。
 
 ### cos_storage_profiles

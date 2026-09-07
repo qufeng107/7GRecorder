@@ -594,6 +594,10 @@ describe("AdminDashboard", () => {
     expect(await screen.findByRole("heading", { name: "Upload Settings" })).toBeInTheDocument();
     expect(await screen.findByText("Credential Vault")).toBeInTheDocument();
     expect(await screen.findByText("Bilibili Publishing")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Video Title Template")).toHaveValue("{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播");
+    const descriptionTemplate = await screen.findByLabelText("Video Description Template");
+    expect((descriptionTemplate as HTMLTextAreaElement).value).toContain("{{streamer_name}}");
+    expect(await screen.findByText(/Variables:/)).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Tencent COS" })).toBeInTheDocument();
     expect(await screen.findByText("bili account")).toBeInTheDocument();
   });

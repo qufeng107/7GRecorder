@@ -51,6 +51,8 @@
 - Bilibili and COS settings are managed from a dedicated Upload Settings page, separate from Recording Profiles and
   system-wide Local Storage settings.
 - Upload settings are scoped to a selected Recording Profile.
+- Bilibili settings expose editable title template, description template, tags, and copyright fields instead of asking
+  users to edit raw JSON for common posting metadata.
 - Credentials are created from the Upload Settings page and are displayed as metadata only after creation; plaintext
   secrets must never be shown again.
 - Managers can see the Upload Settings page only when their ManagerPolicy allows at least one upload module.
