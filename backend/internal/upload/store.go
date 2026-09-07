@@ -391,7 +391,7 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 			us.recording_profile_id,
 			us.id,
 			uso.id,
-			csp.prefix || 'upload-sources/' || us.id || '/' || printf('part-%03d.flv', uso.sort_order + 1),
+			csp.prefix || uso.relative_path,
 			uso.size_bytes,
 			'PENDING'
 		FROM upload_sources us

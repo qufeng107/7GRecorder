@@ -235,6 +235,9 @@ func TestRunOncePackagesUploadSource(t *testing.T) {
 	if packager.request.UploadSourceID != 1 || packager.request.MaxPartBytes != cfg.UploadMaxPartBytes {
 		t.Fatalf("unexpected package request: %#v", packager.request)
 	}
+	if packager.request.OutputBaseName != "7G Live-20260905-第01场直播" {
+		t.Fatalf("unexpected package output base name: %q", packager.request.OutputBaseName)
+	}
 	var status string
 	var outputCount int
 	if err := database.QueryRowContext(ctx, `

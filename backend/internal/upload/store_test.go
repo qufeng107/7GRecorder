@@ -111,6 +111,15 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	}
 	assertJobExists(t, ctx, database, "upload-source:1:bilibili:upload")
 	assertJobExists(t, ctx, database, "upload-source:1:output:1:cos:1")
+	var objectKey string
+	if err := database.QueryRowContext(ctx, `
+		SELECT object_key FROM upload_source_cos_objects WHERE upload_source_output_id = 1
+	`).Scan(&objectKey); err != nil {
+		t.Fatalf("query cos object key returned error: %v", err)
+	}
+	if objectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-第01场直播-p01.flv" {
+		t.Fatalf("unexpected cos object key: %q", objectKey)
+	}
 }
 
 func openTestDB(t *testing.T, ctx context.Context) (config.Config, *sql.DB) {
@@ -163,7 +172,7 @@ func insertReadyUploadSource(t *testing.T, ctx context.Context, database *sql.DB
 		INSERT INTO upload_source_outputs
 			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
 		VALUES
-			(1, 1, 0, 'upload-sources/1/1/upload-source-1.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
+			(1, 1, 0, 'upload-sources/1/1/parts/7G-20260905-第01场直播-p01.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
 	`); err != nil {
 		t.Fatalf("insert upload source output returned error: %v", err)
 	}

@@ -125,6 +125,8 @@ type RecordingItem = {
   id: number;
   upload_source_id?: number;
   upload_source_status?: string;
+  bilibili_status?: string;
+  cos_status?: string;
   output_recording_file_id?: number;
   output_relative_path?: string;
   last_error?: string;
@@ -183,6 +185,8 @@ type UploadSourceItem = {
   completed_at: string;
   duration_ms: number;
   status: string;
+  bilibili_status?: string;
+  cos_status?: string;
   output_relative_path?: string;
   output_recording_file_id?: number;
   total_bytes: number;
@@ -649,6 +653,15 @@ const uiCopy = {
     uploadSourceReady: "可上传",
     uploadSourceMergeFailed: "合并失败",
     uploadSourcePackageFailed: "封装失败",
+    bilibiliStatus: "Bilibili",
+    cosStatus: "COS",
+    uploadStatusDisabled: "未启用",
+    uploadStatusWaitingSource: "等待文件",
+    uploadStatusPending: "待上传",
+    uploadStatusUploading: "上传中",
+    uploadStatusAvailable: "已上传",
+    uploadStatusVerified: "已发布",
+    uploadStatusFailed: "失败",
     sourceSegments: "整理前片段",
     sourceOutputs: "整理后分片",
     timeline: "合并时间轴",
@@ -900,6 +913,15 @@ const uiCopy = {
     uploadSourceReady: "Ready to upload",
     uploadSourceMergeFailed: "Merge failed",
     uploadSourcePackageFailed: "Package failed",
+    bilibiliStatus: "Bilibili",
+    cosStatus: "COS",
+    uploadStatusDisabled: "Disabled",
+    uploadStatusWaitingSource: "Waiting for source",
+    uploadStatusPending: "Pending upload",
+    uploadStatusUploading: "Uploading",
+    uploadStatusAvailable: "Uploaded",
+    uploadStatusVerified: "Published",
+    uploadStatusFailed: "Failed",
     sourceSegments: "Pre-package segments",
     sourceOutputs: "Post-package parts",
     timeline: "Timeline",
@@ -1083,6 +1105,8 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     id: segments[0]?.recording_id ?? source.id,
     upload_source_id: source.id,
     upload_source_status: source.status,
+    bilibili_status: source.bilibili_status,
+    cos_status: source.cos_status,
     output_recording_file_id: source.output_recording_file_id,
     output_relative_path: source.output_relative_path,
     last_error: source.last_error,
@@ -3539,6 +3563,12 @@ function RecordingsPanel(props: {
         return (
           <div className="text-muted">
             <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels, mergeJob, packageJob)}</p>
+            {recording.upload_source_id ? (
+              <div className="mt-1 space-y-0.5 text-xs">
+                <p>{props.labels.bilibiliStatus}: {formatModuleUploadStatus(recording.bilibili_status, props.labels)}</p>
+                <p>{props.labels.cosStatus}: {formatModuleUploadStatus(recording.cos_status, props.labels)}</p>
+              </div>
+            ) : null}
             {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
             {recording.last_error ? <p className="mt-1 break-words text-xs text-red-700">{recording.last_error}</p> : null}
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
@@ -4132,6 +4162,31 @@ function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: J
   }
   if (value === "PACKAGE_FAILED") {
     return labels.uploadSourcePackageFailed;
+  }
+  return value || labels.unknown;
+}
+
+function formatModuleUploadStatus(value: string | undefined, labels: AdminCopy): string {
+  if (value === "DISABLED") {
+    return labels.uploadStatusDisabled;
+  }
+  if (value === "WAITING_SOURCE") {
+    return labels.uploadStatusWaitingSource;
+  }
+  if (value === "PENDING") {
+    return labels.uploadStatusPending;
+  }
+  if (value === "UPLOADING" || value === "VERIFYING") {
+    return labels.uploadStatusUploading;
+  }
+  if (value === "AVAILABLE") {
+    return labels.uploadStatusAvailable;
+  }
+  if (value === "VERIFIED") {
+    return labels.uploadStatusVerified;
+  }
+  if (value === "FAILED") {
+    return labels.uploadStatusFailed;
   }
   return value || labels.unknown;
 }

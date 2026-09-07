@@ -193,9 +193,10 @@ song processing FAILED
 - Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
   `PACKAGE_PENDING`, and terminal failure visibility.
 - Upload source package jobs cover worker dispatch, output part persistence, source transition to `READY_TO_UPLOAD`,
-  and post-package timeline metadata.
+  post-package timeline metadata, upload-facing part names, and China-time live ordinals.
 - Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`
-  source detection, idempotent Bilibili publication/job creation, and idempotent COS object/job creation.
+  source detection, idempotent Bilibili publication/job creation, idempotent COS object/job creation, and COS object
+  keys that follow post-package part paths.
 - COS upload jobs cover worker dispatch with a fake COS uploader, encrypted credential decryption, source path
   resolution under `DATA_ROOT`, object transition to `AVAILABLE`, and job success. Real COS credentials are not used in
   CI.

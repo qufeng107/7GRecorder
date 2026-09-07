@@ -296,8 +296,10 @@ same threshold controls both grouping adjacent segments and waiting before final
 must process only upload source output parts whose parent source status is `READY_TO_UPLOAD`. Multi-segment sources
 become `PACKAGE_PENDING` after the `MERGE_UPLOAD_SOURCE` job writes a derived file under
 `DATA_ROOT/upload-sources`; `PACKAGE_UPLOAD_SOURCE` then records one or more output parts and marks the source
-`READY_TO_UPLOAD`. Upload source download uses the same authenticated `X-Accel-Redirect` pattern as recording file
-download.
+`READY_TO_UPLOAD`. Output parts use upload-facing names in the form
+`<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`. Upload source rows expose independent Bilibili and COS status summaries;
+merge/package readiness is not treated as either module's upload state. Upload source download uses the same
+authenticated `X-Accel-Redirect` pattern as recording file download.
 
 ### Files / Download
 

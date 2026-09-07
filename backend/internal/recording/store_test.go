@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -614,7 +615,7 @@ func TestDiscoverUploadSourcesPersistsContinuousSegments(t *testing.T) {
 	}
 }
 
-func TestDiscoverUploadSourcesMarksSingleSegmentReady(t *testing.T) {
+func TestDiscoverUploadSourcesMarksSingleSegmentPendingPackage(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
 	actor := bootstrapTestAdmin(t, ctx, database)
@@ -652,7 +653,54 @@ func TestDiscoverUploadSourcesMarksSingleSegmentReady(t *testing.T) {
 		t.Fatalf("ListUploadSources returned error: %v", err)
 	}
 	if len(sources.Items) != 1 || sources.Items[0].Status != "PACKAGE_PENDING" || sources.Items[0].OutputRecordingFileID == 0 {
-		t.Fatalf("expected single segment to be ready, got %#v", sources)
+		t.Fatalf("expected single segment to be pending package, got %#v", sources)
+	}
+}
+
+func TestUploadSourcePackageBaseNameUsesChinaDateOrdinal(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	store := NewStore(database, cfg)
+	for _, row := range []struct {
+		ID        int64
+		StartedAt string
+	}{
+		{ID: 1, StartedAt: "2026-09-05T15:00:00Z"},
+		{ID: 2, StartedAt: "2026-09-05T16:00:00Z"},
+		{ID: 3, StartedAt: "2026-09-06T02:00:00Z"},
+	} {
+		if _, err := database.ExecContext(ctx, `
+			INSERT INTO upload_sources
+				(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+					started_at, completed_at, duration_ms, status, output_relative_path,
+					total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds)
+			VALUES (?, 1, ?, '1741048619', 'Streamer',
+				?, '2026-09-06T03:00:00Z', 1800000, 'PACKAGE_PENDING',
+				'upload-sources/1/1/upload-source-1.flv', 50, 1, 1, 0, 600)
+		`, row.ID, fmt.Sprintf("profile:1:%d:%d", row.ID, row.ID), row.StartedAt); err != nil {
+			t.Fatalf("insert upload source returned error: %v", err)
+		}
+	}
+
+	baseName, err := store.UploadSourcePackageBaseName(ctx, UploadSource{
+		ID:                 2,
+		RecordingProfileID: 1,
+		ProfileName:        "7G",
+		StartedAt:          "2026-09-05T16:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("UploadSourcePackageBaseName returned error: %v", err)
+	}
+	if baseName != "7G-20260906-第02场直播" {
+		t.Fatalf("unexpected base name: %q", baseName)
 	}
 }
 

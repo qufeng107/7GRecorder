@@ -748,8 +748,9 @@ is introduced for the read-only diagnostics step.
 Durable upload sources are represented by `upload_sources`, `upload_source_segments`, and `upload_source_outputs`.
 `upload_sources` is the parent recording list. `upload_source_segments` records pre-package source recordings/files,
 source recording timestamps, relative paths, and each segment's timeline interval inside the upload source.
-`upload_source_outputs` records post-package upload parts. COS/Bilibili modules consume output parts from sources whose
-status is `READY_TO_UPLOAD`.
+`upload_source_outputs` records post-package upload parts. Its `relative_path` is the upload-facing filename path,
+named `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv` using China-time date and the profile's live ordinal for that day.
+COS/Bilibili modules consume output parts from sources whose status is `READY_TO_UPLOAD`.
 
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
 `upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
