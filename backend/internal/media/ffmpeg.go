@@ -40,11 +40,11 @@ type PackageRequest struct {
 }
 
 type PackageOutput struct {
-	RelativePath     string
-	SizeBytes        int64
-	DurationMs       int64
-	TimelineStartMs  int64
-	TimelineEndMs    int64
+	RelativePath    string
+	SizeBytes       int64
+	DurationMs      int64
+	TimelineStartMs int64
+	TimelineEndMs   int64
 }
 
 type PackageResult struct {
