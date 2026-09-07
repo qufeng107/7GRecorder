@@ -210,6 +210,10 @@ func (s Store) UpsertBilibiliConfig(ctx context.Context, actor account.User, pro
 	if !json.Valid([]byte(settings)) {
 		return PublishingConfig{}, ErrValidation
 	}
+	normalizedSettings, err := NormalizeBilibiliSettings([]byte(settings))
+	if err != nil {
+		return PublishingConfig{}, err
+	}
 	if req.Enabled && req.CredentialID <= 0 {
 		return PublishingConfig{}, ErrValidation
 	}
@@ -218,7 +222,7 @@ func (s Store) UpsertBilibiliConfig(ctx context.Context, actor account.User, pro
 			return PublishingConfig{}, err
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO publishing_profiles
 			(recording_profile_id, platform, credential_id, enabled, settings_json)
 		VALUES (?, 'bilibili', NULLIF(?, 0), ?, ?)
@@ -227,7 +231,7 @@ func (s Store) UpsertBilibiliConfig(ctx context.Context, actor account.User, pro
 			enabled = excluded.enabled,
 			settings_json = excluded.settings_json,
 			updated_at = CURRENT_TIMESTAMP
-	`, profileID, req.CredentialID, boolInt(req.Enabled), settings)
+	`, profileID, req.CredentialID, boolInt(req.Enabled), string(normalizedSettings))
 	if err != nil {
 		return PublishingConfig{}, fmt.Errorf("upsert bilibili config: %w", err)
 	}

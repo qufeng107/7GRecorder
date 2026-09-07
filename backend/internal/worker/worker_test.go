@@ -44,6 +44,12 @@ type fakeCOSUploader struct {
 	err     error
 }
 
+type fakeBilibiliUploader struct {
+	request upload.BilibiliUploadRequest
+	result  upload.BilibiliUploadResult
+	err     error
+}
+
 type fakePackager struct {
 	request media.PackageRequest
 	result  media.PackageResult
@@ -56,6 +62,11 @@ func (f *fakePackager) Package(_ context.Context, request media.PackageRequest) 
 }
 
 func (f *fakeCOSUploader) Upload(_ context.Context, request upload.COSUploadRequest) (upload.COSUploadResult, error) {
+	f.request = request
+	return f.result, f.err
+}
+
+func (f *fakeBilibiliUploader) Upload(_ context.Context, request upload.BilibiliUploadRequest) (upload.BilibiliUploadResult, error) {
 	f.request = request
 	return f.result, f.err
 }
@@ -351,6 +362,115 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 
 	var jobStatus string
 	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:output:1:cos:1'`).Scan(&jobStatus); err != nil {
+		t.Fatalf("query job returned error: %v", err)
+	}
+	if jobStatus != "SUCCEEDED" {
+		t.Fatalf("unexpected job status: %s", jobStatus)
+	}
+}
+
+func TestRunOnceUploadsBilibiliPublication(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
+		t.Fatalf("complete initial sync job returned error: %v", err)
+	}
+	sourceRelativePath := "upload-sources/1/1/parts/7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv"
+	sourcePath := filepath.Join(cfg.DataRoot, sourceRelativePath)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create upload source dir returned error: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write upload source returned error: %v", err)
+	}
+	store := upload.NewStore(database, cfg)
+	credential, err := store.CreateCredential(ctx, actor, upload.CredentialCreate{
+		Scope:        "USER",
+		Platform:     "bilibili",
+		Purpose:      "PUBLISHER",
+		AccountLabel: "bili account",
+		Secret:       []byte(`{"cookie":"cookie"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential returned error: %v", err)
+	}
+	if _, err := store.UpsertBilibiliConfig(ctx, actor, created.ID, upload.PublishingConfigUpsert{
+		CredentialID: credential.ID,
+		Enabled:      true,
+		Settings: []byte(`{
+			"title_template":"{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播",
+			"description_template":"直播间 {{room_id}} {{started_at_china}}",
+			"tags":["录播","七宫筱野"],
+			"copyright":2
+		}`),
+	}); err != nil {
+		t.Fatalf("UpsertBilibiliConfig returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES (1, ?, 'profile:1:1:1', '1741048619', '7G',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'READY_TO_UPLOAD',
+			?, 5, 1, 1, 0, 600, CURRENT_TIMESTAMP)
+	`, created.ID, sourceRelativePath); err != nil {
+		t.Fatalf("insert upload source returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, ?, 5, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
+	`, sourceRelativePath); err != nil {
+		t.Fatalf("insert upload source output returned error: %v", err)
+	}
+	result, err := store.Reconcile(ctx, actor)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.PublicationsCreated != 1 || result.BilibiliJobsCreated != 1 {
+		t.Fatalf("unexpected reconcile result: %#v", result)
+	}
+
+	uploader := &fakeBilibiliUploader{result: upload.BilibiliUploadResult{ExternalID: "BV1test", ExternalURL: "https://www.bilibili.com/video/BV1test"}}
+	if err := NewWithBilibiliUploader(database, &fakeRecorder{}, cfg, uploader).RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if uploader.request.Title != "7G Live 20260905 \u7b2c01\u573a\u76f4\u64ad" {
+		t.Fatalf("unexpected bilibili title: %q", uploader.request.Title)
+	}
+	if len(uploader.request.Parts) != 1 || uploader.request.Parts[0].SourcePath == "" {
+		t.Fatalf("unexpected bilibili parts: %#v", uploader.request.Parts)
+	}
+	if len(uploader.request.Tags) != 2 || uploader.request.Copyright != 2 {
+		t.Fatalf("unexpected bilibili settings: %#v", uploader.request)
+	}
+
+	var publicationStatus string
+	var externalURL string
+	if err := database.QueryRowContext(ctx, `
+		SELECT status, COALESCE(external_url, '')
+		FROM publications
+		WHERE id = 1
+	`).Scan(&publicationStatus, &externalURL); err != nil {
+		t.Fatalf("query publication returned error: %v", err)
+	}
+	if publicationStatus != "VERIFIED" || externalURL != "https://www.bilibili.com/video/BV1test" {
+		t.Fatalf("unexpected publication status=%s url=%s", publicationStatus, externalURL)
+	}
+
+	var jobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:bilibili:upload'`).Scan(&jobStatus); err != nil {
 		t.Fatalf("query job returned error: %v", err)
 	}
 	if jobStatus != "SUCCEEDED" {

@@ -27,6 +27,7 @@ type Worker struct {
 	merger   media.Merger
 	packager media.Packager
 	cos      upload.COSUploader
+	bilibili upload.BilibiliUploader
 	lockID   string
 }
 
@@ -59,6 +60,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		merger:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		packager: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		cos:      upload.NewTencentCOSUploader(),
+		bilibili: upload.NewNoopBilibiliUploader(),
 		lockID:   fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
 }
@@ -78,6 +80,12 @@ func NewWithPackager(database *sql.DB, recorderClient recorder.SyncClient, cfg c
 func NewWithCOSUploader(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, cosUploader upload.COSUploader) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.cos = cosUploader
+	return worker
+}
+
+func NewWithBilibiliUploader(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, bilibiliUploader upload.BilibiliUploader) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.bilibili = bilibiliUploader
 	return worker
 }
 
@@ -123,6 +131,8 @@ func (w Worker) RunOnce(ctx context.Context) error {
 		return w.runPackageJob(ctx, job)
 	case "UPLOAD_COS_OBJECT":
 		return w.runCOSUploadJob(ctx, job)
+	case "UPLOAD_BILIBILI":
+		return w.runBilibiliUploadJob(ctx, job)
 	default:
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("unknown job type %q", job.Type))
 	}
@@ -247,6 +257,29 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
 
+func (w Worker) runBilibiliUploadJob(ctx context.Context, job workerJob) error {
+	var payload upload.BilibiliJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode bilibili upload payload: %w", err))
+	}
+	store := upload.NewStore(w.db, w.cfg)
+	request, err := store.BilibiliUploadRequest(ctx, payload)
+	if err != nil {
+		return w.failBilibiliJob(ctx, job, payload.PublicationID, classifyUploadError(err), err)
+	}
+	if err := store.MarkBilibiliUploading(ctx, request.PublicationID, request); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	result, err := w.bilibili.Upload(ctx, request)
+	if err != nil {
+		return w.failBilibiliJob(ctx, job, request.PublicationID, classifyUploadError(err), err)
+	}
+	if err := store.MarkBilibiliUploaded(ctx, request.PublicationID, result); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
 func (w Worker) discoverUploadSources(ctx context.Context) error {
 	recordingStore := recording.NewStore(w.db, w.cfg)
 	if _, err := recordingStore.ReconcileLocal(ctx, accountSuperAdmin()); err != nil {
@@ -274,7 +307,7 @@ func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT', 'UPLOAD_BILIBILI')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 		ORDER BY priority ASC, run_after ASC, id ASC
@@ -354,6 +387,15 @@ func (w Worker) succeedJob(ctx context.Context, job workerJob, status recorder.R
 func (w Worker) failUploadJob(ctx context.Context, job workerJob, objectID int64, errorClass string, cause error) error {
 	if objectID > 0 {
 		if err := upload.NewStore(w.db, w.cfg).MarkCOSObjectUploadFailed(ctx, objectID, errorClass, truncateError(cause)); err != nil {
+			return err
+		}
+	}
+	return w.failJob(ctx, job, errorClass, cause)
+}
+
+func (w Worker) failBilibiliJob(ctx context.Context, job workerJob, publicationID int64, errorClass string, cause error) error {
+	if publicationID > 0 {
+		if err := upload.NewStore(w.db, w.cfg).MarkBilibiliUploadFailed(ctx, publicationID, errorClass, truncateError(cause)); err != nil {
 			return err
 		}
 	}

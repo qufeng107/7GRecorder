@@ -185,6 +185,7 @@ Phase 0 只搭正式部署通道，不建设 test/staging server。
 - 扫描 completed + local source available；
 - `UPLOAD_BILIBILI`；
 - 当前先实现：扫描 `READY_TO_UPLOAD` Upload Source 并创建幂等 Publication/Job；
+- 已实现：Bilibili 标题/简介模板配置、上传请求快照生成和 fake uploader Worker 路径；
 - pinned biliup version + CLI fixture；
 - biliup CLI Adapter；
 - `VERIFY_BILIBILI`；
