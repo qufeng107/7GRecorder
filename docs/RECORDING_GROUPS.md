@@ -21,6 +21,9 @@ Recording Profile before later upload work.
   `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`, where the date and live ordinal use China time for that recording
   profile. If the file is already within limits, packaging creates one named part; larger or longer files are split
   under `DATA_ROOT/upload-sources/<profile-id>/<source-id>/parts/`.
+- COS may create compressed delivery derivatives from these post-package parts before upload. The derivative is a COS
+  module concern: it must not overwrite the packaged part, must not become Bilibili's default source, and must retain a
+  database link back to the post-package part and the original pre-package source timeline.
 - Multi-segment upload sources are marked `MERGE_PENDING` until an FFmpeg concat job creates the merged file, then
   `PACKAGE_PENDING` until packaging finishes.
 - Discovery also backfills missing `MERGE_UPLOAD_SOURCE` jobs for existing `MERGE_PENDING` upload sources so records
@@ -48,12 +51,18 @@ Rules:
 
 `PACKAGE_UPLOAD_SOURCE` is a MEDIA job. It applies one shared delivery boundary for COS and Bilibili:
 
-- default maximum part size is 4 GiB (`UPLOAD_MAX_PART_BYTES=4294967296`);
+- target maximum part size should be below both COS and Bilibili limits. The next implementation should replace the
+  early 4 GiB default with a safer decimal limit such as `UPLOAD_MAX_PART_BYTES=3800000000`;
 - default maximum part duration is 2 hours (`UPLOAD_MAX_PART_DURATION_SECONDS=7200`);
-- the size default stays below the current 5GB COS simple upload limit and leaves room for platform/account variation;
+- the size default stays below the current 5GB COS simple upload limit and the more restrictive Bilibili per-file
+  upload boundary, leaving room for platform/account variation;
 - output parts preserve source timeline metadata so later publisher modules can include segment provenance.
 - workers run reconciliation on a fixed interval, so local recording indexing, discovery, merge job backfill, package
   job backfill, and upload module job creation do not depend on manually pressing Scan.
+
+COS compression happens after packaging and before `UPLOAD_COS_OBJECT`. It should use a predefined FFmpeg preset such
+as `h264_crf23_medium_mp4`, write to a job temp/derived path, verify the result with ffprobe, and upload only the
+verified derivative. Compression failure marks the COS object failed and leaves the upload source output part intact.
 
 ## Non-Goals
 

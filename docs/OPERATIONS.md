@@ -326,6 +326,46 @@ Scheduler 定期清理：
 
 ---
 
+## 10.5 Disk Housekeeping
+
+Disk housekeeping 是独立的运维清理，不替代 Local Storage Guard，也不改变 Recording/Bilibili/COS/Songs
+业务状态。
+
+运行时机：
+
+```text
+每次部署前
+每次部署成功后
+每天定时一次
+磁盘 CRITICAL 时可由 SUPER_ADMIN 手动触发
+```
+
+默认安全白名单：
+
+- `/opt/7grecorder/deploy/7grecorder-release-*.tar`：保留最近少量，其余删除；
+- `/opt/7grecorder/releases/<sha>`：保留 current 和最近少量 release，其余删除；
+- Docker：删除未被容器引用的旧 `7grecorder:<sha>` image、dangling image、24 小时以前的 build cache；
+- `/data/7grecorder/temp`：删除不属于 RUNNING Job 且超过安全时间的遗留目录；
+- `/data/7grecorder/backups/db`：保留最近 14 份或配置数量，删除更旧备份；
+- apt package cache：允许 `apt-get clean`；
+- systemd journal：允许按大小/时间 vacuum，例如保留最近 7–14 天或固定上限；
+- Docker container log：优先通过 log rotation 限制，housekeeping 只检查/告警，不直接 truncate 活跃日志文件。
+
+禁止项：
+
+- 不直接删除 `/data/7grecorder/recordings`；原始录播只能通过 Local Storage Guard 的 completed/unprotected/not
+  in-use 条件删除；
+- 不直接删除 `/data/7grecorder/upload-sources` 中仍可能被 Bilibili/COS/Songs 读取的文件；
+- 不删除 BililiveRecorder 当前 image、workdir 或配置；
+- 不删除 SQLite WAL/SHM 文件来“清理空间”；
+- 不扫描 COS Bucket 删除数据库未登记对象。
+
+后续可增加 `UPLOAD_SOURCE_LOCAL_CLEANUP` / `MAINTENANCE_CLEANUP` Job：当某个 Upload Source 的 enabled
+远端模块都已经完成或进入明确终态，并且本地派生文件不再需要 retry 时，才删除 merge/package 产生的本地派生文件。
+该 Job 只删除 `DATA_ROOT/upload-sources` 下经数据库登记的派生文件，保留 source/part metadata 和远端下载链接。
+
+---
+
 ## 11. Logging
 
 应用：
@@ -378,6 +418,8 @@ audit_logs             180 days
 DB backups             14 copies
 Docker logs            rotation by size/count
 temp leftovers         cleanup after safe age
+deploy artifacts       keep current + recent releases
+Docker build cache     daily/deploy cleanup after safe age
 ```
 
 这些是默认值，不要求第一版全部做成 Admin 可配置项。

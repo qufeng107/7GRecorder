@@ -204,6 +204,12 @@ song processing FAILED
 - COS download tests must verify that only `AVAILABLE` upload source output objects can produce signed download
   requests, that profile visibility and manager policy are enforced before signing, and that old failed COS jobs do not
   make the current output summary look failed after a later successful upload.
+- COS compression tests must verify that compression writes only to controlled temp/derived paths, never overwrites
+  source output parts, validates the compressed file with ffprobe before upload, records source/uploaded sizes, and
+  marks only the COS object failed when compression fails.
+- Disk housekeeping tests must verify deploy/daily cleanup removes only whitelisted release artifacts, stale build
+  cache, old DB backups, and safe temp leftovers; it must not delete original recordings, active upload-source files,
+  BililiveRecorder workdir/images, SQLite WAL/SHM files, or unknown COS objects.
 
 ---
 
@@ -272,6 +278,8 @@ login
 - `/internal/*` 不经公网 Nginx 暴露；
 - Production Secret 不存在于 release artifact；
 - old release/image cleanup 不触碰 `/data/7grecorder`。
+- deploy/daily disk housekeeping covers stale Docker build cache and bounded backup/temp cleanup without touching
+  business media outside approved guards.
 
 ---
 
