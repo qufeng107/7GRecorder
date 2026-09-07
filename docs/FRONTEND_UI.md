@@ -43,6 +43,16 @@
 - Retry is shown only for failed or cancelled jobs. Cancel is shown only for non-running, non-terminal jobs.
 - Jobs reuse the shared search and sort toolbar so later server-side filtering can replace client-side filtering cleanly.
 
+## Upload Settings
+
+- Bilibili and COS settings are managed from a dedicated Upload Settings page, separate from Recording Profiles and
+  system-wide Local Storage settings.
+- Upload settings are scoped to a selected Recording Profile.
+- Credentials are created from the Upload Settings page and are displayed as metadata only after creation; plaintext
+  secrets must never be shown again.
+- Managers can see the Upload Settings page only when their ManagerPolicy allows at least one upload module.
+- Creating upload jobs from ready Upload Sources remains super-admin-only.
+
 ## Account Management
 
 - Super admins can open an account editor from the accounts table.

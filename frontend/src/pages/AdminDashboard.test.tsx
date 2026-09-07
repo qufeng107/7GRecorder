@@ -497,6 +497,103 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("recordings/1741048619/part2.flv")).toBeInTheDocument();
   });
 
+  it("renders upload settings for super admins", async () => {
+    mockSuperAdminFetch((path) => {
+      if (path.endsWith("/api/v1/recording-profiles")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 1,
+                name: "7G",
+                owner_user_id: 1,
+                owner_username: "admin",
+                platform: "bilibili",
+                room_id: "1741048619",
+                streamer_name: "streamer",
+                timezone: "Asia/Shanghai",
+                enabled: true,
+                public_enabled: false,
+                recording_settings: {
+                  auto_record: true,
+                  quality: "original",
+                  record_danmaku: true,
+                  segment_duration_sec: 1800,
+                  finalize_grace_period_sec: 300
+                },
+                runtime: {
+                  stream_status: "OFFLINE",
+                  recorder_status: "IDLE",
+                  sync_status: "SYNCED"
+                }
+              }
+            ],
+            total: 1
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/credentials")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 1,
+                owner_user_id: 1,
+                scope: "USER",
+                platform: "bilibili",
+                purpose: "PUBLISHER",
+                account_label: "bili account",
+                status: "UNVERIFIED",
+                created_at: "2026-09-07T00:00:00Z",
+                updated_at: "2026-09-07T00:00:00Z"
+              }
+            ],
+            total: 1
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/recording-profiles/1/publishing/bilibili")) {
+        return {
+          ok: true,
+          json: async () => ({
+            recording_profile_id: 1,
+            platform: "bilibili",
+            credential_id: 1,
+            enabled: true,
+            settings: {}
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/recording-profiles/1/storage/cos")) {
+        return {
+          ok: true,
+          json: async () => ({
+            recording_profile_id: 1,
+            credential_id: 0,
+            enabled: false,
+            region: "",
+            bucket: "",
+            prefix: "7grecorder/1/",
+            max_managed_bytes: 0
+          })
+        } as Response;
+      }
+      return undefined;
+    });
+
+    renderWithClient();
+    await switchToEnglish();
+
+    fireEvent.click(await screen.findByRole("button", { name: /upload settings/i }));
+    expect(await screen.findByRole("heading", { name: "Upload Settings" })).toBeInTheDocument();
+    expect(await screen.findByText("Credential Vault")).toBeInTheDocument();
+    expect(await screen.findByText("Bilibili Publishing")).toBeInTheDocument();
+    expect(await screen.findByText("Tencent COS")).toBeInTheDocument();
+    expect(await screen.findByText("bili account")).toBeInTheDocument();
+  });
+
   it("runs local cleanup from the system storage page after confirmation", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = input instanceof Request ? input.url : input.toString();
