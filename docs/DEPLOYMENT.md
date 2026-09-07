@@ -477,6 +477,9 @@ select previous SHA
 
 避免长期积累 Docker image 和 release tar 占满 70GB 磁盘。
 
+Deploy script may also run the same retention cleanup before building a new release so a previous failed deployment,
+old release tar, or old backend image does not block the next deploy with `No space left on device`.
+
 ---
 
 ## 14. 配置与 Secret 不随部署覆盖

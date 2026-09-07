@@ -5,7 +5,57 @@ set -euo pipefail
 : "${RELEASE_SHA:?RELEASE_SHA is required}"
 
 release_root="/opt/7grecorder/releases/${RELEASE_SHA}"
+
+cleanup_old_deploy_artifacts() {
+  local keep_releases="${KEEP_RELEASES:-3}"
+  local current_sha=""
+  if [ -f /opt/7grecorder/current-release ]; then
+    current_sha="$(cat /opt/7grecorder/current-release)"
+  fi
+
+  local release_count=0
+  local release_path=""
+  for release_path in $(ls -1dt /opt/7grecorder/releases/* 2>/dev/null || true); do
+    [ -d "${release_path}" ] || continue
+    local release_sha
+    release_sha="$(basename "${release_path}")"
+    if [ "${release_sha}" = "${RELEASE_SHA}" ] || [ "${release_sha}" = "${current_sha}" ]; then
+      continue
+    fi
+    release_count=$((release_count + 1))
+    if [ "${release_count}" -gt "${keep_releases}" ]; then
+      rm -rf "${release_path}"
+    fi
+  done
+
+  local tar_count=0
+  local tar_path=""
+  for tar_path in $(ls -1t /opt/7grecorder/deploy/7grecorder-release-*.tar 2>/dev/null || true); do
+    [ -f "${tar_path}" ] || continue
+    if [ "$(basename "${tar_path}")" = "7grecorder-release-${RELEASE_SHA}.tar" ]; then
+      continue
+    fi
+    tar_count=$((tar_count + 1))
+    if [ "${tar_count}" -gt "${keep_releases}" ]; then
+      rm -f "${tar_path}"
+    fi
+  done
+
+  local image=""
+  for image in $(docker image ls 7grecorder --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true); do
+    case "${image}" in
+      "7grecorder:${RELEASE_SHA}"|"7grecorder:${current_sha}"|"7grecorder:<none>")
+        continue
+        ;;
+    esac
+    docker image rm "${image}" >/dev/null 2>&1 || true
+  done
+
+  docker image prune -f >/dev/null 2>&1 || true
+}
+
 mkdir -p "${release_root}" /opt/7grecorder/deploy /data/7grecorder/backups/db
+cleanup_old_deploy_artifacts
 
 sha256sum -c SHA256SUMS
 tar -xf "${RELEASE_TAR}" -C "${release_root}"
@@ -34,6 +84,7 @@ for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8080/health/ready >/dev/null; then
     ln -sfn "${release_root}" /opt/7grecorder/current
     echo "${RELEASE_SHA}" > /opt/7grecorder/current-release
+    cleanup_old_deploy_artifacts
     echo "deploy ok: ${RELEASE_SHA}"
     exit 0
   fi
