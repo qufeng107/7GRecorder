@@ -82,6 +82,9 @@ func NewWithCOSUploader(database *sql.DB, recorderClient recorder.SyncClient, cf
 }
 
 func (w Worker) Run(ctx context.Context) {
+	if err := w.discoverUploadSources(ctx); err != nil {
+		log.Printf("worker reconcile failed: %v", err)
+	}
 	if err := w.RunOnce(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		log.Printf("worker run once failed: %v", err)
 	}
@@ -92,6 +95,9 @@ func (w Worker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := w.discoverUploadSources(ctx); err != nil {
+				log.Printf("worker reconcile failed: %v", err)
+			}
 			if err := w.RunOnce(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				log.Printf("worker run once failed: %v", err)
 			}
@@ -190,6 +196,10 @@ func (w Worker) runPackageJob(ctx context.Context, job workerJob) error {
 	if source.OutputRelativePath == "" {
 		return w.failJob(ctx, job, "PERMANENT", errors.New("upload source has no package input"))
 	}
+	outputBaseName, err := store.UploadSourcePackageBaseName(ctx, source)
+	if err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
 	result, err := w.packager.Package(ctx, media.PackageRequest{
 		UploadSourceID:        source.ID,
 		InputRelativePath:     source.OutputRelativePath,
@@ -198,6 +208,7 @@ func (w Worker) runPackageJob(ctx context.Context, job workerJob) error {
 		SizeBytes:             source.TotalBytes,
 		MaxPartBytes:          w.cfg.UploadMaxPartBytes,
 		MaxPartDurationSecs:   w.cfg.UploadMaxPartDurationSecs,
+		OutputBaseName:        outputBaseName,
 	})
 	if err != nil {
 		terminal := job.Attempts >= job.MaxAttempts
@@ -237,7 +248,11 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 }
 
 func (w Worker) discoverUploadSources(ctx context.Context) error {
-	if _, err := recording.NewStore(w.db, w.cfg).DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds); err != nil {
+	recordingStore := recording.NewStore(w.db, w.cfg)
+	if _, err := recordingStore.ReconcileLocal(ctx, accountSuperAdmin()); err != nil {
+		return err
+	}
+	if _, err := recordingStore.DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds); err != nil {
 		return err
 	}
 	_, err := upload.NewStore(w.db, w.cfg).Reconcile(ctx, accountSuperAdmin())

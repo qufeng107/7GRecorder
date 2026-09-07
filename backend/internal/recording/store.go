@@ -99,6 +99,8 @@ type UploadSource struct {
 	MetadataJSON             string                `json:"metadata_json,omitempty"`
 	ReadyAt                  string                `json:"ready_at,omitempty"`
 	LastError                string                `json:"last_error,omitempty"`
+	BilibiliStatus           string                `json:"bilibili_status"`
+	COSStatus                string                `json:"cos_status"`
 	Segments                 []UploadSourceSegment `json:"segments"`
 	Outputs                  []UploadSourceOutput  `json:"outputs"`
 }
@@ -484,7 +486,26 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 				WHERE uss.upload_source_id = us.id AND rec.local_protected = 1
 			) THEN 1 ELSE 0 END,
 			us.recording_count, us.file_count, us.max_gap_seconds, us.merge_gap_threshold_seconds,
-			COALESCE(us.metadata_json, ''), COALESCE(us.ready_at, ''), COALESCE(us.last_error, '')
+			COALESCE(us.metadata_json, ''), COALESCE(us.ready_at, ''), COALESCE(us.last_error, ''),
+			CASE
+				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status = 'FAILED') THEN 'FAILED'
+				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status IN ('UPLOADING', 'VERIFYING')) THEN 'UPLOADING'
+				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status = 'VERIFIED') THEN 'VERIFIED'
+				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili') THEN 'PENDING'
+				WHEN EXISTS (SELECT 1 FROM publishing_profiles pp WHERE pp.recording_profile_id = us.recording_profile_id AND pp.platform = 'bilibili' AND pp.enabled = 1 AND pp.credential_id IS NOT NULL) THEN 'WAITING_SOURCE'
+				ELSE 'DISABLED'
+			END,
+			CASE
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'FAILED') THEN 'FAILED'
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'UPLOADING') THEN 'UPLOADING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'PENDING') THEN 'PENDING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'AVAILABLE')
+					AND NOT EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
+						SELECT 1 FROM upload_source_cos_objects co2 WHERE co2.upload_source_output_id = uso.id AND co2.status = 'AVAILABLE'
+					)) THEN 'AVAILABLE'
+				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
+				ELSE 'DISABLED'
+			END
 		FROM upload_sources us
 		JOIN recording_profiles p ON p.id = us.recording_profile_id
 	`
@@ -538,6 +559,8 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 			&item.MetadataJSON,
 			&item.ReadyAt,
 			&item.LastError,
+			&item.BilibiliStatus,
+			&item.COSStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan upload source: %w", err)
 		}
@@ -897,6 +920,52 @@ func (s Store) UploadSourceForPackage(ctx context.Context, id int64) (UploadSour
 	return items[0], nil
 }
 
+func (s Store) UploadSourcePackageBaseName(ctx context.Context, source UploadSource) (string, error) {
+	started := parseRecordingTimestamp(source.StartedAt)
+	if source.ID <= 0 || source.RecordingProfileID <= 0 || started.IsZero() {
+		return "", ErrValidation
+	}
+	chinaDate := started.In(chinaLocation()).Format("20060102")
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, started_at
+		FROM upload_sources
+		WHERE recording_profile_id = ?
+		ORDER BY started_at ASC, id ASC
+	`, source.RecordingProfileID)
+	if err != nil {
+		return "", fmt.Errorf("list upload source ordinals: %w", err)
+	}
+	defer rows.Close()
+
+	ordinal := 0
+	for rows.Next() {
+		var id int64
+		var startedAt string
+		if err := rows.Scan(&id, &startedAt); err != nil {
+			return "", fmt.Errorf("scan upload source ordinal: %w", err)
+		}
+		parsed := parseRecordingTimestamp(startedAt)
+		if parsed.IsZero() || parsed.In(chinaLocation()).Format("20060102") != chinaDate {
+			continue
+		}
+		ordinal++
+		if id == source.ID {
+			name := strings.TrimSpace(source.ProfileName)
+			if name == "" {
+				name = strings.TrimSpace(source.StreamerName)
+			}
+			if name == "" {
+				name = "upload-source"
+			}
+			return fmt.Sprintf("%s-%s-第%02d场直播", name, chinaDate, ordinal), nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate upload source ordinals: %w", err)
+	}
+	return "", ErrNotFound
+}
+
 func (s Store) MarkUploadSourceMergeSucceeded(ctx context.Context, id int64, outputRelativePath string, sizeBytes int64) error {
 	if id <= 0 || outputRelativePath == "" {
 		return ErrValidation
@@ -1138,7 +1207,11 @@ func formatChinaTimestamp(value string) string {
 	if parsed.IsZero() {
 		return ""
 	}
-	return parsed.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04:05")
+	return parsed.In(chinaLocation()).Format("2006-01-02 15:04:05")
+}
+
+func chinaLocation() *time.Location {
+	return time.FixedZone("Asia/Shanghai", 8*60*60)
 }
 
 func (s Store) uploadSourceSegments(ctx context.Context, uploadSourceID int64) ([]UploadSourceSegment, error) {

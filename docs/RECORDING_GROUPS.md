@@ -17,8 +17,10 @@ Recording Profile before later upload work.
 - Admin UI treats upload sources as the primary recording list. Expanding a row shows pre-package segments, their
   source recording timestamps, and their timeline interval inside the upload source.
 - Single-segment upload sources and merged upload sources both pass through `PACKAGE_PENDING`. Packaging records the
-  post-package parts that Bilibili and COS consume. If the file is already within limits, packaging records one part
-  without copying it. Larger or longer files are split under `DATA_ROOT/upload-sources/<profile-id>/<source-id>/parts/`.
+  post-package parts that Bilibili and COS consume. Parts are named as
+  `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`, where the date and live ordinal use China time for that recording
+  profile. If the file is already within limits, packaging creates one named part; larger or longer files are split
+  under `DATA_ROOT/upload-sources/<profile-id>/<source-id>/parts/`.
 - Multi-segment upload sources are marked `MERGE_PENDING` until an FFmpeg concat job creates the merged file, then
   `PACKAGE_PENDING` until packaging finishes.
 - Discovery also backfills missing `MERGE_UPLOAD_SOURCE` jobs for existing `MERGE_PENDING` upload sources so records
@@ -50,6 +52,8 @@ Rules:
 - default maximum part duration is 2 hours (`UPLOAD_MAX_PART_DURATION_SECONDS=7200`);
 - the size default stays below the current 5GB COS simple upload limit and leaves room for platform/account variation;
 - output parts preserve source timeline metadata so later publisher modules can include segment provenance.
+- workers run reconciliation on a fixed interval, so local recording indexing, discovery, merge job backfill, package
+  job backfill, and upload module job creation do not depend on manually pressing Scan.
 
 ## Non-Goals
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,7 @@ type PackageRequest struct {
 	SizeBytes             int64
 	MaxPartBytes          int64
 	MaxPartDurationSecs   int64
+	OutputBaseName        string
 }
 
 type PackageOutput struct {
@@ -179,28 +181,51 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 	if durationMs <= 0 {
 		durationMs = maxSeconds * 1000
 	}
-	if sizeBytes <= maxBytes && durationMs <= maxSeconds*1000 {
-		return PackageResult{Outputs: []PackageOutput{{
-			RelativePath:    req.InputRelativePath,
-			SizeBytes:       sizeBytes,
-			DurationMs:      durationMs,
-			TimelineStartMs: 0,
-			TimelineEndMs:   durationMs,
-		}}}, nil
-	}
 	outputDir := req.OutputDirRelativePath
 	if outputDir == "" {
 		outputDir = filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", req.UploadSourceID), "parts"))
+	}
+	outputBaseName := sanitizePackageBaseName(req.OutputBaseName)
+	if outputBaseName == "" {
+		outputBaseName = fmt.Sprintf("upload-source-%d", req.UploadSourceID)
 	}
 	outputDirPath, err := resolveWithinRoot(m.DataRoot, outputDir)
 	if err != nil {
 		return PackageResult{}, fmt.Errorf("resolve package output dir: %w", err)
 	}
-	if err := os.RemoveAll(outputDirPath); err != nil {
-		return PackageResult{}, fmt.Errorf("clear package output dir: %w", err)
-	}
 	if err := os.MkdirAll(outputDirPath, 0o755); err != nil {
 		return PackageResult{}, fmt.Errorf("create package output dir: %w", err)
+	}
+	if err := clearPackageOutputs(outputDirPath, outputBaseName); err != nil {
+		return PackageResult{}, fmt.Errorf("clear package output dir: %w", err)
+	}
+	if sizeBytes <= maxBytes && durationMs <= maxSeconds*1000 {
+		outputRelativePath := filepath.ToSlash(filepath.Join(outputDir, fmt.Sprintf("%s-p01.flv", outputBaseName)))
+		outputPath, err := resolveWithinRoot(m.DataRoot, outputRelativePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("resolve package single output: %w", err)
+		}
+		if inputPath != outputPath {
+			if err := os.Remove(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return PackageResult{}, fmt.Errorf("clear package single output: %w", err)
+			}
+			if err := os.Link(inputPath, outputPath); err != nil {
+				if err := copyFile(inputPath, outputPath); err != nil {
+					return PackageResult{}, fmt.Errorf("copy package single output: %w", err)
+				}
+			}
+		}
+		outputInfo, err := os.Stat(outputPath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("stat package single output: %w", err)
+		}
+		return PackageResult{Outputs: []PackageOutput{{
+			RelativePath:    outputRelativePath,
+			SizeBytes:       outputInfo.Size(),
+			DurationMs:      durationMs,
+			TimelineStartMs: 0,
+			TimelineEndMs:   durationMs,
+		}}}, nil
 	}
 	segmentSeconds := maxSeconds
 	if sizeBytes > 0 && durationMs > 0 {
@@ -212,8 +237,8 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 	if segmentSeconds < 60 {
 		segmentSeconds = 60
 	}
-	pattern := filepath.Join(outputDirPath, fmt.Sprintf("upload-source-%d-part-%%03d.flv", req.UploadSourceID))
-	cmd := exec.CommandContext(ctx, m.FFmpegPath, "-hide_banner", "-loglevel", "error", "-i", inputPath, "-c", "copy", "-map", "0", "-f", "segment", "-segment_time", fmt.Sprintf("%d", segmentSeconds), "-reset_timestamps", "1", "-segment_format", "flv", "-y", pattern)
+	tempPattern := filepath.Join(outputDirPath, "part-%03d.tmp.flv")
+	cmd := exec.CommandContext(ctx, m.FFmpegPath, "-hide_banner", "-loglevel", "error", "-i", inputPath, "-c", "copy", "-map", "0", "-f", "segment", "-segment_time", fmt.Sprintf("%d", segmentSeconds), "-reset_timestamps", "1", "-segment_format", "flv", "-y", tempPattern)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
@@ -222,7 +247,7 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 		}
 		return PackageResult{}, fmt.Errorf("ffmpeg package failed: %s", message)
 	}
-	matches, err := filepath.Glob(filepath.Join(outputDirPath, fmt.Sprintf("upload-source-%d-part-*.flv", req.UploadSourceID)))
+	matches, err := filepath.Glob(filepath.Join(outputDirPath, "part-*.tmp.flv"))
 	if err != nil {
 		return PackageResult{}, fmt.Errorf("list package outputs: %w", err)
 	}
@@ -234,7 +259,11 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 		return PackageResult{}, fmt.Errorf("resolve data root: %w", err)
 	}
 	for index, path := range matches {
-		info, err := os.Stat(path)
+		target := filepath.Join(outputDirPath, fmt.Sprintf("%s-p%02d.flv", outputBaseName, index+1))
+		if err := os.Rename(path, target); err != nil {
+			return PackageResult{}, fmt.Errorf("rename package output: %w", err)
+		}
+		info, err := os.Stat(target)
 		if err != nil {
 			return PackageResult{}, fmt.Errorf("stat package output: %w", err)
 		}
@@ -245,7 +274,7 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 		if partDuration <= 0 {
 			partDuration = segmentSeconds * 1000
 		}
-		rel, err := filepath.Rel(rootAbs, path)
+		rel, err := filepath.Rel(rootAbs, target)
 		if err != nil {
 			return PackageResult{}, fmt.Errorf("rel package output: %w", err)
 		}
@@ -266,6 +295,59 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 
 func escapeConcatPath(path string) string {
 	return strings.ReplaceAll(path, "'", "'\\''")
+}
+
+func sanitizePackageBaseName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	previousDash := false
+	for _, ch := range value {
+		if ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|' || ch < 32 {
+			if !previousDash {
+				builder.WriteByte('-')
+				previousDash = true
+			}
+			continue
+		}
+		builder.WriteRune(ch)
+		previousDash = false
+	}
+	return strings.Trim(builder.String(), " .-")
+}
+
+func copyFile(source string, target string) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	output, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return err
+	}
+	return output.Close()
+}
+
+func clearPackageOutputs(outputDir string, outputBaseName string) error {
+	for _, pattern := range []string{"part-*.tmp.flv", outputBaseName + "-p*.flv"} {
+		matches, err := filepath.Glob(filepath.Join(outputDir, pattern))
+		if err != nil {
+			return err
+		}
+		for _, match := range matches {
+			if err := os.Remove(match); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func resolveWithinRoot(root string, relativePath string) (string, error) {
