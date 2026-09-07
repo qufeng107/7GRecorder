@@ -4,6 +4,7 @@ import {
   Activity,
   Archive,
   ArchiveRestore,
+  CloudUpload,
   Database,
   Download,
   FileVideo,
@@ -287,6 +288,56 @@ type JobListResponse = {
   total?: number;
 };
 
+type Credential = {
+  id: number;
+  owner_user_id?: number;
+  scope: "USER" | "SYSTEM";
+  platform: string;
+  purpose: string;
+  account_label: string;
+  external_uid?: string;
+  status: string;
+  last_verified_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type CredentialListResponse = {
+  items: Credential[] | null;
+  total?: number;
+};
+
+type BilibiliPublishingConfig = {
+  id?: number;
+  recording_profile_id: number;
+  platform: string;
+  credential_id?: number;
+  enabled: boolean;
+  settings?: unknown;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type COSStorageConfig = {
+  id?: number;
+  recording_profile_id: number;
+  credential_id?: number;
+  enabled: boolean;
+  region: string;
+  bucket: string;
+  prefix: string;
+  max_managed_bytes: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type UploadModuleReconcileResult = {
+  publications_created: number;
+  bilibili_jobs_created: number;
+  cos_objects_created: number;
+  cos_jobs_created: number;
+};
+
 type ProfileForm = {
   owner_user_id: string;
   name: string;
@@ -304,7 +355,7 @@ type ProfileForm = {
   finalize_grace_period_sec: number;
 };
 
-type AdminPage = "overview" | "profiles" | "recordings" | "jobs" | "system" | "accounts" | "me";
+type AdminPage = "overview" | "profiles" | "recordings" | "uploads" | "jobs" | "system" | "accounts" | "me";
 type Language = "zh" | "en";
 type RecordingSortKey = "started_desc" | "started_asc" | "duration_desc" | "size_desc";
 type ProfileSortKey = "name_asc" | "room_asc";
@@ -322,6 +373,26 @@ type AccountEditForm = {
   username: string;
   password: string;
   enabled: boolean;
+};
+
+type CredentialForm = {
+  platform: "bilibili" | "tencent_cos";
+  account_label: string;
+  external_uid: string;
+  secret: string;
+};
+
+type UploadSettingsForm = {
+  profile_id: string;
+  bilibili_enabled: boolean;
+  bilibili_credential_id: string;
+  bilibili_settings: string;
+  cos_enabled: boolean;
+  cos_credential_id: string;
+  cos_region: string;
+  cos_bucket: string;
+  cos_prefix: string;
+  cos_max_managed_gb: number;
 };
 
 const emptyProfileForm: ProfileForm = {
@@ -362,6 +433,26 @@ const emptyAccountEditForm: AccountEditForm = {
   enabled: true
 };
 
+const emptyCredentialForm: CredentialForm = {
+  platform: "bilibili",
+  account_label: "",
+  external_uid: "",
+  secret: "{}"
+};
+
+const emptyUploadSettingsForm: UploadSettingsForm = {
+  profile_id: "",
+  bilibili_enabled: false,
+  bilibili_credential_id: "",
+  bilibili_settings: "{}",
+  cos_enabled: false,
+  cos_credential_id: "",
+  cos_region: "",
+  cos_bucket: "",
+  cos_prefix: "",
+  cos_max_managed_gb: 100
+};
+
 const uiCopy = {
   zh: {
     appName: "7GRecorder 管理后台",
@@ -371,6 +462,7 @@ const uiCopy = {
       overview: "总览",
       profiles: "录制配置",
       recordings: "录像文件",
+      uploads: "上传设置",
       jobs: "任务",
       accounts: "账号管理",
       system: "系统设置"
@@ -569,6 +661,40 @@ const uiCopy = {
     sortUpdated: "更新时间：新到旧",
     sortRunAfter: "计划时间：近到远",
     sortStatus: "状态：A 到 Z",
+    uploadSettings: "上传设置",
+    uploadProfile: "录制配置",
+    uploadProfileHint: "Bilibili 和 COS 配置按录制配置分别保存。",
+    credentialVault: "凭证库",
+    newCredential: "新建凭证",
+    platform: "平台",
+    purpose: "用途",
+    accountLabel: "账号标识",
+    externalUid: "外部 UID",
+    credentialSecret: "凭证 JSON",
+    credentialSecretHint: "只会加密保存；保存后不会再显示明文。",
+    createCredential: "保存凭证",
+    credentialCreateFailed: "凭证保存失败，请检查 JSON 和必填项。",
+    noCredentials: "暂无凭证。",
+    bilibiliPublishing: "Bilibili 投稿",
+    cosStorage: "腾讯云 COS",
+    credential: "凭证",
+    noCredentialSelected: "未选择凭证",
+    moduleEnabled: "启用模块",
+    moduleDisabled: "模块未启用",
+    bilibiliSettingsJson: "Bilibili 设置 JSON",
+    cosRegion: "COS 地域",
+    cosBucket: "COS Bucket",
+    cosPrefix: "COS 前缀",
+    cosMaxManagedGB: "COS 托管上限 GB",
+    saveBilibiliConfig: "保存 Bilibili 配置",
+    saveCosConfig: "保存 COS 配置",
+    uploadConfigSaveFailed: "上传配置保存失败，请检查凭证、区域、Bucket 或 JSON。",
+    reconcileUploadJobs: "生成上传任务",
+    reconcileUploadHint: "只会为可上传视频补建缺失的 Bilibili/COS 任务。",
+    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number) =>
+      `上传任务：Bilibili 发布 ${publications}，Bilibili 任务 ${bilibiliJobs}，COS 对象 ${cosObjects}，COS 任务 ${cosJobs}。`,
+    uploadReconcileFailed: "上传任务生成失败，请查看服务器日志。",
+    uploadAccessBlocked: "当前账号没有上传模块配置权限。",
     emptyFiltered: "没有匹配结果。"
   },
   en: {
@@ -579,6 +705,7 @@ const uiCopy = {
       overview: "Overview",
       profiles: "Profiles",
       recordings: "Recordings",
+      uploads: "Upload Settings",
       jobs: "Jobs",
       accounts: "Accounts",
       system: "System Settings"
@@ -779,6 +906,40 @@ const uiCopy = {
     sortUpdated: "Updated: newest",
     sortRunAfter: "Run after: soonest",
     sortStatus: "Status: A to Z",
+    uploadSettings: "Upload Settings",
+    uploadProfile: "Recording Profile",
+    uploadProfileHint: "Bilibili and COS settings are saved per recording profile.",
+    credentialVault: "Credential Vault",
+    newCredential: "New Credential",
+    platform: "Platform",
+    purpose: "Purpose",
+    accountLabel: "Account Label",
+    externalUid: "External UID",
+    credentialSecret: "Credential JSON",
+    credentialSecretHint: "Stored encrypted only; plaintext is never shown after saving.",
+    createCredential: "Save Credential",
+    credentialCreateFailed: "Credential save failed. Check JSON and required fields.",
+    noCredentials: "No credentials yet.",
+    bilibiliPublishing: "Bilibili Publishing",
+    cosStorage: "Tencent COS",
+    credential: "Credential",
+    noCredentialSelected: "No credential selected",
+    moduleEnabled: "Module enabled",
+    moduleDisabled: "Module disabled",
+    bilibiliSettingsJson: "Bilibili Settings JSON",
+    cosRegion: "COS Region",
+    cosBucket: "COS Bucket",
+    cosPrefix: "COS Prefix",
+    cosMaxManagedGB: "COS Managed Limit GB",
+    saveBilibiliConfig: "Save Bilibili Config",
+    saveCosConfig: "Save COS Config",
+    uploadConfigSaveFailed: "Upload config save failed. Check credential, region, bucket, or JSON.",
+    reconcileUploadJobs: "Create Upload Jobs",
+    reconcileUploadHint: "Backfills missing Bilibili/COS jobs for ready upload sources only.",
+    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number) =>
+      `Upload jobs: ${publications} Bilibili publications, ${bilibiliJobs} Bilibili jobs, ${cosObjects} COS objects, ${cosJobs} COS jobs.`,
+    uploadReconcileFailed: "Upload job reconciliation failed. Check server logs.",
+    uploadAccessBlocked: "This account cannot configure upload modules.",
     emptyFiltered: "No matching results."
   }
 } as const;
@@ -797,6 +958,25 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`Request failed with ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+function parseConfigJSON(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {};
+  }
+  return JSON.parse(trimmed) as unknown;
+}
+
+function stringifyConfigJSON(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "{}";
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "{}";
+  }
 }
 
 function profileToForm(profile: RecordingProfile): ProfileForm {
@@ -1021,6 +1201,8 @@ export function AdminDashboard() {
     emergencyFreeGB: 0,
     cleanupTargetPercent: 85
   });
+  const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredentialForm);
+  const [uploadSettingsForm, setUploadSettingsForm] = useState<UploadSettingsForm>(emptyUploadSettingsForm);
   const [accountForm, setAccountForm] = useState<AccountForm>({
     ...emptyAccountForm,
     policy: { ...defaultManagerPolicy }
@@ -1035,6 +1217,9 @@ export function AdminDashboard() {
   const ownPolicy = meQuery.data?.policy;
   const canManageSystemSettings = user?.role === "SUPER_ADMIN";
   const canEditRecordingProfiles = hasManagerPermission(user, ownPolicy, "can_edit_recording_profile");
+  const canEditBilibiliModule = hasManagerPermission(user, ownPolicy, "can_edit_bilibili_module");
+  const canEditCosModule = hasManagerPermission(user, ownPolicy, "can_edit_cos_module");
+  const canManageUploadSettings = canEditBilibiliModule || canEditCosModule;
   const canManageLocalFiles = hasManagerPermission(user, ownPolicy, "can_manage_local_files");
   const canScanLocalFiles = Boolean(canManageSystemSettings);
   const ui = uiCopy[language];
@@ -1095,9 +1280,19 @@ export function AdminDashboard() {
     refetchInterval: 30000
   });
 
+  const credentialsQuery = useQuery({
+    queryKey: ["credentials"],
+    queryFn: () => requestJson<CredentialListResponse>("/api/v1/credentials"),
+    enabled: Boolean(meQuery.data?.user && canManageUploadSettings),
+    retry: false,
+    refetchInterval: 30000
+  });
+
   const profiles = useMemo(() => profilesQuery.data?.items ?? [], [profilesQuery.data?.items]);
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
+  const uploadProfileId = Number(uploadSettingsForm.profile_id);
+  const uploadProfile = profiles.find((profile) => profile.id === uploadProfileId);
   const recordings = useMemo(
     () => (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem),
     [recordingsQuery.data?.items]
@@ -1113,6 +1308,21 @@ export function AdminDashboard() {
   const visibleJobs = filterJobs(jobs, jobSearch, jobSort);
   const visibleAccounts = filterAccounts(accounts, accountSearch, accountSort);
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const credentials = useMemo(() => credentialsQuery.data?.items ?? [], [credentialsQuery.data?.items]);
+
+  const bilibiliConfigQuery = useQuery({
+    queryKey: ["upload-config", "bilibili", uploadProfileId],
+    queryFn: () => requestJson<BilibiliPublishingConfig>(`/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`),
+    enabled: Boolean(uploadProfileId && canEditBilibiliModule),
+    retry: false
+  });
+
+  const cosConfigQuery = useQuery({
+    queryKey: ["upload-config", "cos", uploadProfileId],
+    queryFn: () => requestJson<COSStorageConfig>(`/api/v1/recording-profiles/${uploadProfileId}/storage/cos`),
+    enabled: Boolean(uploadProfileId && canEditCosModule),
+    retry: false
+  });
 
   useEffect(() => {
     if (activePage === "system" && user && !canManageSystemSettings) {
@@ -1121,7 +1331,18 @@ export function AdminDashboard() {
     if (activePage === "accounts" && user && !canManageSystemSettings) {
       setActivePage("overview");
     }
-  }, [activePage, canManageSystemSettings, user]);
+    if (activePage === "uploads" && user && !canManageUploadSettings) {
+      setActivePage("overview");
+    }
+  }, [activePage, canManageSystemSettings, canManageUploadSettings, user]);
+
+  useEffect(() => {
+    if (uploadSettingsForm.profile_id || profiles.length === 0) {
+      return;
+    }
+    const firstAvailableProfile = profiles.find((profile) => !profile.archived_at) ?? profiles[0];
+    setUploadSettingsForm((form) => ({ ...form, profile_id: String(firstAvailableProfile.id) }));
+  }, [profiles, uploadSettingsForm.profile_id]);
 
   useEffect(() => {
     const selected = profiles.find((profile) => profile.id === selectedProfileId);
@@ -1149,6 +1370,35 @@ export function AdminDashboard() {
       cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100)
     });
   }, [localStorageSettings]);
+
+  useEffect(() => {
+    const config = bilibiliConfigQuery.data;
+    if (!config) {
+      return;
+    }
+    setUploadSettingsForm((form) => ({
+      ...form,
+      bilibili_enabled: config.enabled,
+      bilibili_credential_id: config.credential_id ? String(config.credential_id) : "",
+      bilibili_settings: stringifyConfigJSON(config.settings ?? {})
+    }));
+  }, [bilibiliConfigQuery.data]);
+
+  useEffect(() => {
+    const config = cosConfigQuery.data;
+    if (!config) {
+      return;
+    }
+    setUploadSettingsForm((form) => ({
+      ...form,
+      cos_enabled: config.enabled,
+      cos_credential_id: config.credential_id ? String(config.credential_id) : "",
+      cos_region: config.region ?? "",
+      cos_bucket: config.bucket ?? "",
+      cos_prefix: config.prefix ?? "",
+      cos_max_managed_gb: bytesToGB(config.max_managed_bytes) || form.cos_max_managed_gb
+    }));
+  }, [cosConfigQuery.data]);
 
   const loginMutation = useMutation({
     mutationFn: () =>
@@ -1178,6 +1428,8 @@ export function AdminDashboard() {
       queryClient.removeQueries({ queryKey: ["accounts"] });
       queryClient.removeQueries({ queryKey: ["local-storage"] });
       queryClient.removeQueries({ queryKey: ["cleanup-candidates"] });
+      queryClient.removeQueries({ queryKey: ["credentials"] });
+      queryClient.removeQueries({ queryKey: ["upload-config"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
     }
   });
@@ -1302,6 +1554,74 @@ export function AdminDashboard() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const createCredentialMutation = useMutation({
+    mutationFn: () => {
+      const secret = parseConfigJSON(credentialForm.secret);
+      return requestJson<Credential>("/api/v1/credentials", {
+        method: "POST",
+        body: JSON.stringify({
+          scope: "USER",
+          platform: credentialForm.platform,
+          purpose: credentialForm.platform === "bilibili" ? "PUBLISHER" : "STORAGE",
+          account_label: credentialForm.account_label,
+          external_uid: credentialForm.external_uid,
+          secret
+        })
+      });
+    },
+    onSuccess: () => {
+      setCredentialForm(emptyCredentialForm);
+      void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    }
+  });
+
+  const saveBilibiliConfigMutation = useMutation({
+    mutationFn: () =>
+      requestJson<BilibiliPublishingConfig>(`/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`, {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: uploadSettingsForm.bilibili_enabled,
+          credential_id: Number(uploadSettingsForm.bilibili_credential_id || 0),
+          settings: parseConfigJSON(uploadSettingsForm.bilibili_settings)
+        })
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["upload-config", "bilibili", uploadProfileId] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const saveCosConfigMutation = useMutation({
+    mutationFn: () =>
+      requestJson<COSStorageConfig>(`/api/v1/recording-profiles/${uploadProfileId}/storage/cos`, {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: uploadSettingsForm.cos_enabled,
+          credential_id: Number(uploadSettingsForm.cos_credential_id || 0),
+          region: uploadSettingsForm.cos_region,
+          bucket: uploadSettingsForm.cos_bucket,
+          prefix: uploadSettingsForm.cos_prefix,
+          max_managed_bytes: gbToBytes(uploadSettingsForm.cos_max_managed_gb)
+        })
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["upload-config", "cos", uploadProfileId] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const reconcileUploadModulesMutation = useMutation({
+    mutationFn: () =>
+      requestJson<UploadModuleReconcileResult>("/api/v1/upload-modules/actions/reconcile", {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
     }
   });
 
@@ -1431,6 +1751,7 @@ export function AdminDashboard() {
             <AdminNav
               activePage={activePage}
               canManageSystemSettings={Boolean(canManageSystemSettings)}
+              canManageUploadSettings={canManageUploadSettings}
               labels={ui}
               onChange={setActivePage}
             />
@@ -1594,6 +1915,38 @@ export function AdminDashboard() {
               />
             ) : null}
 
+            {activePage === "uploads" ? (
+              <UploadSettingsPanel
+                bilibiliConfigError={saveBilibiliConfigMutation.isError}
+                bilibiliConfigPending={saveBilibiliConfigMutation.isPending}
+                canEditBilibiliModule={canEditBilibiliModule}
+                canEditCosModule={canEditCosModule}
+                canReconcileUploadJobs={Boolean(canManageSystemSettings)}
+                cosConfigError={saveCosConfigMutation.isError}
+                cosConfigPending={saveCosConfigMutation.isPending}
+                credentialCreateError={createCredentialMutation.isError}
+                credentialCreatePending={createCredentialMutation.isPending}
+                credentialForm={credentialForm}
+                credentials={credentials}
+                labels={ui}
+                profiles={profiles}
+                reconcilePending={reconcileUploadModulesMutation.isPending}
+                reconcileError={reconcileUploadModulesMutation.isError}
+                reconcileResult={reconcileUploadModulesMutation.data}
+                selectedProfile={uploadProfile}
+                settingsForm={uploadSettingsForm}
+                onCredentialFormChange={setCredentialForm}
+                onCreateCredential={(event) => {
+                  event.preventDefault();
+                  createCredentialMutation.mutate();
+                }}
+                onReconcile={() => reconcileUploadModulesMutation.mutate()}
+                onSaveBilibiliConfig={() => saveBilibiliConfigMutation.mutate()}
+                onSaveCosConfig={() => saveCosConfigMutation.mutate()}
+                onSettingsFormChange={setUploadSettingsForm}
+              />
+            ) : null}
+
             {activePage === "recordings" ? (
               <RecordingsPanel
                 isLoading={recordingsQuery.isLoading}
@@ -1653,15 +2006,21 @@ export function AdminDashboard() {
 function AdminNav(props: {
   activePage: AdminPage;
   canManageSystemSettings: boolean;
+  canManageUploadSettings: boolean;
   labels: AdminCopy;
   onChange: (page: AdminPage) => void;
 }) {
   const items: Array<{ page: AdminPage; label: string; icon: typeof Activity }> = [
     { page: "overview", label: props.labels.nav.overview, icon: LayoutDashboard },
     { page: "profiles", label: props.labels.nav.profiles, icon: Activity },
-    { page: "recordings", label: props.labels.nav.recordings, icon: FileVideo },
-    { page: "jobs", label: props.labels.nav.jobs, icon: RefreshCw }
+    { page: "recordings", label: props.labels.nav.recordings, icon: FileVideo }
   ];
+
+  if (props.canManageUploadSettings) {
+    items.push({ page: "uploads", label: props.labels.nav.uploads, icon: CloudUpload });
+  }
+
+  items.push({ page: "jobs", label: props.labels.nav.jobs, icon: RefreshCw });
 
   if (props.canManageSystemSettings) {
     items.push({ page: "accounts", label: props.labels.nav.accounts, icon: Users });
@@ -2472,6 +2831,322 @@ function ProfileListPanel(props: {
         </table>
       </div>
     </section>
+  );
+}
+
+function UploadSettingsPanel(props: {
+  bilibiliConfigError: boolean;
+  bilibiliConfigPending: boolean;
+  canEditBilibiliModule: boolean;
+  canEditCosModule: boolean;
+  canReconcileUploadJobs: boolean;
+  cosConfigError: boolean;
+  cosConfigPending: boolean;
+  credentialCreateError: boolean;
+  credentialCreatePending: boolean;
+  credentialForm: CredentialForm;
+  credentials: Credential[];
+  labels: AdminCopy;
+  profiles: RecordingProfile[];
+  reconcileError: boolean;
+  reconcilePending: boolean;
+  reconcileResult?: UploadModuleReconcileResult;
+  selectedProfile?: RecordingProfile;
+  settingsForm: UploadSettingsForm;
+  onCreateCredential: (event: FormEvent<HTMLFormElement>) => void;
+  onCredentialFormChange: (form: CredentialForm) => void;
+  onReconcile: () => void;
+  onSaveBilibiliConfig: () => void;
+  onSaveCosConfig: () => void;
+  onSettingsFormChange: (form: UploadSettingsForm) => void;
+}) {
+  const updateCredential = <K extends keyof CredentialForm>(key: K, value: CredentialForm[K]) => {
+    props.onCredentialFormChange({ ...props.credentialForm, [key]: value });
+  };
+  const updateSettings = <K extends keyof UploadSettingsForm>(key: K, value: UploadSettingsForm[K]) => {
+    props.onSettingsFormChange({ ...props.settingsForm, [key]: value });
+  };
+  const bilibiliCredentials = props.credentials.filter(
+    (credential) => credential.platform === "bilibili" && credential.purpose === "PUBLISHER"
+  );
+  const cosCredentials = props.credentials.filter(
+    (credential) => credential.platform === "tencent_cos" && credential.purpose === "STORAGE"
+  );
+  const selectedProfileMissing =
+    props.settingsForm.profile_id &&
+    !props.profiles.some((profile) => String(profile.id) === props.settingsForm.profile_id);
+
+  if (!props.canEditBilibiliModule && !props.canEditCosModule) {
+    return (
+      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">{props.labels.uploadSettings}</h2>
+        <p className="mt-3 text-sm text-muted">{props.labels.uploadAccessBlocked}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section id="uploads" className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">{props.labels.uploadSettings}</h2>
+            <p className="mt-1 text-sm text-muted">{props.labels.uploadProfileHint}</p>
+          </div>
+          {props.canReconcileUploadJobs ? (
+            <div className="flex flex-col items-end gap-1">
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={props.reconcilePending}
+                type="button"
+                onClick={props.onReconcile}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {props.labels.reconcileUploadJobs}
+              </button>
+              <p className="max-w-xs text-right text-xs text-muted">{props.labels.reconcileUploadHint}</p>
+            </div>
+          ) : null}
+        </div>
+
+        {props.reconcileResult ? (
+          <p className="mt-3 text-sm text-muted">
+            {props.labels.uploadReconcileResult(
+              props.reconcileResult.publications_created,
+              props.reconcileResult.bilibili_jobs_created,
+              props.reconcileResult.cos_objects_created,
+              props.reconcileResult.cos_jobs_created
+            )}
+          </p>
+        ) : null}
+        {props.reconcileError ? <p className="mt-3 text-sm text-red-700">{props.labels.uploadReconcileFailed}</p> : null}
+
+        <label className="mt-4 flex flex-col gap-1 text-sm font-medium">
+          {props.labels.uploadProfile}
+          <select
+            className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+            value={props.settingsForm.profile_id}
+            onChange={(event) => updateSettings("profile_id", event.target.value)}
+          >
+            {selectedProfileMissing ? <option value={props.settingsForm.profile_id}>{props.labels.currentOwner}</option> : null}
+            {props.profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name} - {profile.room_id}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          <section className="rounded-md border border-border bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">{props.labels.bilibiliPublishing}</h3>
+                <p className="mt-1 text-xs text-muted">
+                  {props.settingsForm.bilibili_enabled ? props.labels.moduleEnabled : props.labels.moduleDisabled}
+                </p>
+              </div>
+              <CloudUpload className="h-5 w-5 text-accent" aria-hidden="true" />
+            </div>
+            <div className="mt-4 grid gap-3">
+              <ToggleField
+                disabled={!props.canEditBilibiliModule}
+                label={props.labels.enabled}
+                checked={props.settingsForm.bilibili_enabled}
+                onChange={(value) => updateSettings("bilibili_enabled", value)}
+              />
+              <CredentialSelect
+                credentials={bilibiliCredentials}
+                disabled={!props.canEditBilibiliModule}
+                label={props.labels.credential}
+                labels={props.labels}
+                value={props.settingsForm.bilibili_credential_id}
+                onChange={(value) => updateSettings("bilibili_credential_id", value)}
+              />
+              <JSONTextArea
+                disabled={!props.canEditBilibiliModule}
+                label={props.labels.bilibiliSettingsJson}
+                value={props.settingsForm.bilibili_settings}
+                onChange={(value) => updateSettings("bilibili_settings", value)}
+              />
+              {props.bilibiliConfigError ? (
+                <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p>
+              ) : null}
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={!props.canEditBilibiliModule || props.bilibiliConfigPending || !props.selectedProfile}
+                type="button"
+                onClick={props.onSaveBilibiliConfig}
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {props.labels.saveBilibiliConfig}
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-md border border-border bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">{props.labels.cosStorage}</h3>
+                <p className="mt-1 text-xs text-muted">
+                  {props.settingsForm.cos_enabled ? props.labels.moduleEnabled : props.labels.moduleDisabled}
+                </p>
+              </div>
+              <HardDrive className="h-5 w-5 text-accent" aria-hidden="true" />
+            </div>
+            <div className="mt-4 grid gap-3">
+              <ToggleField
+                disabled={!props.canEditCosModule}
+                label={props.labels.enabled}
+                checked={props.settingsForm.cos_enabled}
+                onChange={(value) => updateSettings("cos_enabled", value)}
+              />
+              <CredentialSelect
+                credentials={cosCredentials}
+                disabled={!props.canEditCosModule}
+                label={props.labels.credential}
+                labels={props.labels}
+                value={props.settingsForm.cos_credential_id}
+                onChange={(value) => updateSettings("cos_credential_id", value)}
+              />
+              <TextField
+                label={props.labels.cosRegion}
+                value={props.settingsForm.cos_region}
+                onChange={(value) => updateSettings("cos_region", value)}
+              />
+              <TextField
+                label={props.labels.cosBucket}
+                value={props.settingsForm.cos_bucket}
+                onChange={(value) => updateSettings("cos_bucket", value)}
+              />
+              <TextField
+                label={props.labels.cosPrefix}
+                value={props.settingsForm.cos_prefix}
+                onChange={(value) => updateSettings("cos_prefix", value)}
+              />
+              <NumberField
+                label={props.labels.cosMaxManagedGB}
+                min={1}
+                value={props.settingsForm.cos_max_managed_gb}
+                onChange={(value) => updateSettings("cos_max_managed_gb", value)}
+              />
+              {props.cosConfigError ? <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p> : null}
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={!props.canEditCosModule || props.cosConfigPending || !props.selectedProfile}
+                type="button"
+                onClick={props.onSaveCosConfig}
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {props.labels.saveCosConfig}
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">{props.labels.credentialVault}</h2>
+        <div className="mt-3 grid gap-2">
+          {props.credentials.map((credential) => (
+            <div key={credential.id} className="rounded-md border border-border bg-white px-3 py-2">
+              <p className="text-sm font-semibold">{credential.account_label}</p>
+              <p className="mt-1 text-xs text-muted">
+                {credential.platform} / {credential.purpose} / {credential.status}
+              </p>
+            </div>
+          ))}
+          {props.credentials.length === 0 ? <p className="text-sm text-muted">{props.labels.noCredentials}</p> : null}
+        </div>
+
+        <form className="mt-5 grid gap-3 border-t border-border pt-4" onSubmit={props.onCreateCredential}>
+          <h3 className="text-sm font-semibold">{props.labels.newCredential}</h3>
+          <label className="flex flex-col gap-1 text-sm font-medium">
+            {props.labels.platform}
+            <select
+              className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+              value={props.credentialForm.platform}
+              onChange={(event) => updateCredential("platform", event.target.value as CredentialForm["platform"])}
+            >
+              <option value="bilibili">Bilibili</option>
+              <option value="tencent_cos">Tencent COS</option>
+            </select>
+          </label>
+          <TextField
+            label={props.labels.accountLabel}
+            value={props.credentialForm.account_label}
+            onChange={(value) => updateCredential("account_label", value)}
+          />
+          <TextField
+            label={props.labels.externalUid}
+            value={props.credentialForm.external_uid}
+            onChange={(value) => updateCredential("external_uid", value)}
+          />
+          <JSONTextArea
+            label={props.labels.credentialSecret}
+            value={props.credentialForm.secret}
+            onChange={(value) => updateCredential("secret", value)}
+          />
+          <p className="text-xs text-muted">{props.labels.credentialSecretHint}</p>
+          {props.credentialCreateError ? <p className="text-sm text-red-700">{props.labels.credentialCreateFailed}</p> : null}
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={props.credentialCreatePending}
+            type="submit"
+          >
+            <Save className="h-4 w-4" aria-hidden="true" />
+            {props.labels.createCredential}
+          </button>
+        </form>
+      </section>
+    </section>
+  );
+}
+
+function CredentialSelect(props: {
+  credentials: Credential[];
+  disabled?: boolean;
+  label: string;
+  labels: AdminCopy;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm font-medium">
+      {props.label}
+      <select
+        className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
+        disabled={props.disabled}
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+      >
+        <option value="">{props.labels.noCredentialSelected}</option>
+        {props.credentials.map((credential) => (
+          <option key={credential.id} value={credential.id}>
+            {credential.account_label} ({credential.status})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function JSONTextArea(props: {
+  disabled?: boolean;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm font-medium">
+      {props.label}
+      <textarea
+        className="min-h-28 rounded-md border border-border bg-white px-3 py-2 font-mono text-xs font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
+        disabled={props.disabled}
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </label>
   );
 }
 
