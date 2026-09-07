@@ -532,6 +532,8 @@ Job 可把 `error_class + last_error` 保存到 SQLite，UI 按类别指导管�
 | Job | 自动尝试 | 建议退避 | 特殊规则 |
 | --- | ---: | --- | --- |
 | SYNC_RECORDER_PROFILE | 5 | 5s / 30s / 1m / 5m / 15m | Recorder unavailable 属 TRANSIENT |
+| MERGE_UPLOAD_SOURCE | 3 | 5s / 30s / 1m | terminal 后显示 MERGE_FAILED |
+| PACKAGE_UPLOAD_SOURCE | 3 | 5s / 30s / 1m | terminal 后显示 PACKAGE_FAILED |
 | UPLOAD_BILIBILI | 3 | 1m / 5m / 15m | stale/crash 后先 AMBIGUOUS，不盲重传 |
 | VERIFY_BILIBILI | 8–10 | 1m → 1h 逐步拉长 | 平台处理延迟允许较长验证窗口 |
 | UPLOAD_COS_OBJECT | 5 | 30s / 2m / 5m / 15m / 30m | AUTH/SOURCE_MISSING 不 retry |

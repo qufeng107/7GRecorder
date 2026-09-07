@@ -651,7 +651,7 @@ func TestDiscoverUploadSourcesMarksSingleSegmentReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUploadSources returned error: %v", err)
 	}
-	if len(sources.Items) != 1 || sources.Items[0].Status != "READY_TO_UPLOAD" || sources.Items[0].OutputRecordingFileID == 0 {
+	if len(sources.Items) != 1 || sources.Items[0].Status != "PACKAGE_PENDING" || sources.Items[0].OutputRecordingFileID == 0 {
 		t.Fatalf("expected single segment to be ready, got %#v", sources)
 	}
 }

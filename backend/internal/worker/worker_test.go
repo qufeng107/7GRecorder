@@ -44,6 +44,17 @@ type fakeCOSUploader struct {
 	err     error
 }
 
+type fakePackager struct {
+	request media.PackageRequest
+	result  media.PackageResult
+	err     error
+}
+
+func (f *fakePackager) Package(_ context.Context, request media.PackageRequest) (media.PackageResult, error) {
+	f.request = request
+	return f.result, f.err
+}
+
 func (f *fakeCOSUploader) Upload(_ context.Context, request upload.COSUploadRequest) (upload.COSUploadResult, error) {
 	f.request = request
 	return f.result, f.err
@@ -167,7 +178,7 @@ func TestRunOnceMergesPendingUploadSource(t *testing.T) {
 	`).Scan(&sourceStatus, &outputPath, &totalBytes); err != nil {
 		t.Fatalf("query upload source returned error: %v", err)
 	}
-	if sourceStatus != "READY_TO_UPLOAD" || outputPath != "upload-sources/1/1/upload-source-1.flv" || totalBytes != 45 {
+	if sourceStatus != "PACKAGE_PENDING" || outputPath != "upload-sources/1/1/upload-source-1.flv" || totalBytes != 45 {
 		t.Fatalf("unexpected upload source result: status=%s output=%s bytes=%d", sourceStatus, outputPath, totalBytes)
 	}
 
@@ -177,6 +188,66 @@ func TestRunOnceMergesPendingUploadSource(t *testing.T) {
 	}
 	if jobStatus != "SUCCEEDED" {
 		t.Fatalf("unexpected job status: %s", jobStatus)
+	}
+}
+
+func TestRunOncePackagesUploadSource(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
+		t.Fatalf("complete initial sync job returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds)
+		VALUES (1, ?, 'profile:1:1:1', '1741048619', '7G',
+			'2026-09-05T10:00:00Z', '2026-09-05T15:30:00Z', 19800000, 'PACKAGE_PENDING',
+			'upload-sources/1/1/upload-source-1.flv', 8000000000, 4, 4, 60, 600)
+	`, created.ID); err != nil {
+		t.Fatalf("insert upload source returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		VALUES
+			(?, 1, 'PACKAGE_UPLOAD_SOURCE', 'MEDIA', 'upload-source:1:package', '{"upload_source_id":1}', 'PENDING', 65, 3)
+	`, created.ID); err != nil {
+		t.Fatalf("insert package job returned error: %v", err)
+	}
+	packager := &fakePackager{result: media.PackageResult{Outputs: []media.PackageOutput{
+		{RelativePath: "upload-sources/1/1/parts/upload-source-1-part-000.flv", SizeBytes: 3900000000, DurationMs: 7200000, TimelineStartMs: 0, TimelineEndMs: 7200000},
+		{RelativePath: "upload-sources/1/1/parts/upload-source-1-part-001.flv", SizeBytes: 4100000000, DurationMs: 12600000, TimelineStartMs: 7200000, TimelineEndMs: 19800000},
+	}}}
+	if err := NewWithPackager(database, &fakeRecorder{}, cfg, packager).RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if packager.request.UploadSourceID != 1 || packager.request.MaxPartBytes != cfg.UploadMaxPartBytes {
+		t.Fatalf("unexpected package request: %#v", packager.request)
+	}
+	var status string
+	var outputCount int
+	if err := database.QueryRowContext(ctx, `
+		SELECT us.status, COUNT(uso.id)
+		FROM upload_sources us
+		LEFT JOIN upload_source_outputs uso ON uso.upload_source_id = us.id
+		WHERE us.id = 1
+		GROUP BY us.id
+	`).Scan(&status, &outputCount); err != nil {
+		t.Fatalf("query package result returned error: %v", err)
+	}
+	if status != "READY_TO_UPLOAD" || outputCount != 2 {
+		t.Fatalf("unexpected package result status=%s outputs=%d", status, outputCount)
 	}
 }
 
@@ -235,6 +306,14 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	`, created.ID, sourceRelativePath); err != nil {
 		t.Fatalf("insert upload source returned error: %v", err)
 	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, ?, 5, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
+	`, sourceRelativePath); err != nil {
+		t.Fatalf("insert upload source output returned error: %v", err)
+	}
 	result, err := store.Reconcile(ctx, actor)
 	if err != nil {
 		t.Fatalf("Reconcile returned error: %v", err)
@@ -247,7 +326,7 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	if err := NewWithCOSUploader(database, &fakeRecorder{}, cfg, cosUploader).RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce returned error: %v", err)
 	}
-	if cosUploader.request.ObjectID != 1 || cosUploader.request.ObjectKey != "7grecorder/test/upload-sources/1/upload-source-1.flv" {
+	if cosUploader.request.ObjectID != 1 || cosUploader.request.ObjectKey != "7grecorder/test/upload-sources/1/part-001.flv" {
 		t.Fatalf("unexpected cos upload request: %#v", cosUploader.request)
 	}
 	if cosUploader.request.Secret.SecretID != "id" || cosUploader.request.Secret.SecretKey != "key" {
@@ -268,7 +347,7 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	}
 
 	var jobStatus string
-	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:cos:1'`).Scan(&jobStatus); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:output:1:cos:1'`).Scan(&jobStatus); err != nil {
 		t.Fatalf("query job returned error: %v", err)
 	}
 	if jobStatus != "SUCCEEDED" {
