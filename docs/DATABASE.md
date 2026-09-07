@@ -488,6 +488,7 @@ recording_file_id nullable
 song_id nullable
 publication_id nullable
 cos_object_id nullable
+upload_source_id nullable
 
 type
 resource_class              LIGHT | NETWORK | MEDIA | AI | MAINTENANCE
@@ -512,6 +513,9 @@ updated_at
 - UI 查询；
 - 本地 Cleanup 判断文件/Recording 是否正在被任务读取；
 - 避免依赖解析 JSON payload。
+
+`cos_object_id` 只关联旧的 `cos_objects` 表。基于 Upload Source 的 COS 任务通过 `upload_source_id` 显式关联
+`upload_sources`，并在 `payload_json` 中携带 `upload_source_cos_objects.id`，避免把新表 ID 写入旧外键列。
 
 第一版不增加：
 

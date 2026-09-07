@@ -399,10 +399,9 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO jobs
-			(recording_profile_id, upload_source_id, cos_object_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
 		SELECT co.recording_profile_id,
 			co.upload_source_id,
-			co.id,
 			'UPLOAD_COS_OBJECT',
 			'NETWORK',
 			'upload-source:' || co.upload_source_id || ':cos:' || co.cos_storage_profile_id,
