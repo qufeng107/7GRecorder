@@ -130,9 +130,9 @@ type UploadSourceOutput struct {
 	TimelineStartMs int64  `json:"timeline_start_ms"`
 	TimelineEndMs   int64  `json:"timeline_end_ms"`
 	Status          string `json:"status"`
-	BilibiliStatus string `json:"bilibili_status"`
-	BilibiliURL    string `json:"bilibili_url,omitempty"`
-	COSStatus      string `json:"cos_status"`
+	BilibiliStatus  string `json:"bilibili_status"`
+	BilibiliURL     string `json:"bilibili_url,omitempty"`
+	COSStatus       string `json:"cos_status"`
 }
 
 type UploadSourceList struct {
