@@ -25,6 +25,7 @@ type Worker struct {
 	recorder recorder.SyncClient
 	cfg      config.Config
 	merger   media.Merger
+	cos      upload.COSUploader
 	lockID   string
 }
 
@@ -55,6 +56,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		recorder: recorderClient,
 		cfg:      cfg,
 		merger:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		cos:      upload.NewTencentCOSUploader(),
 		lockID:   fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
 }
@@ -62,6 +64,12 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 func NewWithMerger(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, merger media.Merger) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.merger = merger
+	return worker
+}
+
+func NewWithCOSUploader(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, cosUploader upload.COSUploader) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.cos = cosUploader
 	return worker
 }
 
@@ -97,6 +105,8 @@ func (w Worker) RunOnce(ctx context.Context) error {
 		return w.runSyncJob(ctx, job)
 	case "MERGE_UPLOAD_SOURCE":
 		return w.runMergeJob(ctx, job)
+	case "UPLOAD_COS_OBJECT":
+		return w.runCOSUploadJob(ctx, job)
 	default:
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("unknown job type %q", job.Type))
 	}
@@ -154,6 +164,29 @@ func (w Worker) runMergeJob(ctx context.Context, job workerJob) error {
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
 
+func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
+	var payload upload.COSJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode cos upload payload: %w", err))
+	}
+	store := upload.NewStore(w.db, w.cfg)
+	request, err := store.COSUploadRequest(ctx, payload)
+	if err != nil {
+		return w.failUploadJob(ctx, job, payload.COSObjectID, classifyUploadError(err), err)
+	}
+	if err := store.MarkCOSObjectUploading(ctx, request.ObjectID); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	result, err := w.cos.Upload(ctx, request)
+	if err != nil {
+		return w.failUploadJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
+	}
+	if err := store.MarkCOSObjectUploaded(ctx, request.ObjectID, result); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
 func (w Worker) discoverUploadSources(ctx context.Context) error {
 	if _, err := recording.NewStore(w.db, w.cfg).DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds); err != nil {
 		return err
@@ -177,7 +210,7 @@ func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 		ORDER BY priority ASC, run_after ASC, id ASC
@@ -254,6 +287,28 @@ func (w Worker) succeedJob(ctx context.Context, job workerJob, status recorder.R
 	return nil
 }
 
+func (w Worker) failUploadJob(ctx context.Context, job workerJob, objectID int64, errorClass string, cause error) error {
+	if objectID > 0 {
+		if err := upload.NewStore(w.db, w.cfg).MarkCOSObjectUploadFailed(ctx, objectID, errorClass, truncateError(cause)); err != nil {
+			return err
+		}
+	}
+	return w.failJob(ctx, job, errorClass, cause)
+}
+
+func classifyUploadError(err error) string {
+	var classified interface {
+		ErrorClass() string
+	}
+	if errors.As(err, &classified) {
+		return classified.ErrorClass()
+	}
+	if errors.Is(err, upload.ErrValidation) || errors.Is(err, upload.ErrNotFound) || errors.Is(err, upload.ErrForbidden) {
+		return "PERMANENT"
+	}
+	return "TRANSIENT"
+}
+
 func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, cause error) error {
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -263,7 +318,7 @@ func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, c
 
 	nextStatus := "PENDING"
 	runAfter := "CURRENT_TIMESTAMP"
-	if job.Attempts >= job.MaxAttempts || errorClass == "PERMANENT" {
+	if job.Attempts >= job.MaxAttempts || isTerminalErrorClass(errorClass) {
 		nextStatus = "FAILED"
 	} else {
 		runAfter = fmt.Sprintf("datetime('now', '+%d seconds')", retryDelaySeconds(job.Attempts))
@@ -300,6 +355,10 @@ func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, c
 		return fmt.Errorf("commit job failure: %w", err)
 	}
 	return nil
+}
+
+func isTerminalErrorClass(errorClass string) bool {
+	return errorClass == "PERMANENT" || errorClass == "AUTH" || errorClass == "SOURCE_MISSING"
 }
 
 func truncateError(err error) string {

@@ -104,6 +104,11 @@ type ReconcileResult struct {
 	COSJobsCreated      int `json:"cos_jobs_created"`
 }
 
+type COSJobPayload struct {
+	COSObjectID    int64 `json:"cos_object_id"`
+	UploadSourceID int64 `json:"upload_source_id"`
+}
+
 func (s Store) ListCredentials(ctx context.Context, actor account.User) ([]Credential, error) {
 	query := `
 		SELECT id, COALESCE(owner_user_id, 0), scope, platform, purpose, account_label,
@@ -424,6 +429,130 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 	return int(changed), nil
 }
 
+func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COSUploadRequest, error) {
+	if payload.COSObjectID <= 0 {
+		return COSUploadRequest{}, ErrValidation
+	}
+	var request COSUploadRequest
+	var encryptedSecret []byte
+	var sourceRelativePath string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT co.id,
+			co.upload_source_id,
+			co.recording_profile_id,
+			csp.region,
+			csp.bucket,
+			co.object_key,
+			COALESCE(us.output_relative_path, ''),
+			co.size_bytes,
+			c.encrypted_secret
+		FROM upload_source_cos_objects co
+		JOIN upload_sources us ON us.id = co.upload_source_id
+		JOIN cos_storage_profiles csp ON csp.id = co.cos_storage_profile_id
+		JOIN credentials c ON c.id = csp.credential_id
+		WHERE co.id = ?
+			AND co.status IN ('PENDING', 'FAILED')
+			AND us.status = 'READY_TO_UPLOAD'
+			AND csp.enabled = 1
+	`, payload.COSObjectID).Scan(
+		&request.ObjectID,
+		&request.UploadSourceID,
+		&request.RecordingProfileID,
+		&request.Region,
+		&request.Bucket,
+		&request.ObjectKey,
+		&sourceRelativePath,
+		&request.SourceSizeBytes,
+		&encryptedSecret,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return COSUploadRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return COSUploadRequest{}, fmt.Errorf("load cos upload request: %w", err)
+	}
+	if payload.UploadSourceID > 0 && payload.UploadSourceID != request.UploadSourceID {
+		return COSUploadRequest{}, ErrValidation
+	}
+	sourcePath, err := resolveWithinRoot(s.cfg.DataRoot, sourceRelativePath)
+	if err != nil {
+		return COSUploadRequest{}, fmt.Errorf("resolve cos upload source: %w", err)
+	}
+	info, err := os.Stat(sourcePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return COSUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "cos upload source file is missing")
+	}
+	if err != nil {
+		return COSUploadRequest{}, fmt.Errorf("stat cos upload source: %w", err)
+	}
+	if info.IsDir() {
+		return COSUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "cos upload source path is a directory")
+	}
+	request.SourcePath = sourcePath
+	request.Secret, err = s.decryptCOSSecret(encryptedSecret)
+	if err != nil {
+		return COSUploadRequest{}, err
+	}
+	return request, nil
+}
+
+func (s Store) MarkCOSObjectUploading(ctx context.Context, objectID int64) error {
+	if objectID <= 0 {
+		return ErrValidation
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET status = 'UPLOADING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, objectID)
+	if err != nil {
+		return fmt.Errorf("mark cos object uploading: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkCOSObjectUploaded(ctx context.Context, objectID int64, result COSUploadResult) error {
+	if objectID <= 0 {
+		return ErrValidation
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET status = 'AVAILABLE',
+			etag = NULLIF(?, ''),
+			last_error = NULL,
+			uploaded_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, result.ETag, objectID)
+	if err != nil {
+		return fmt.Errorf("mark cos object uploaded: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkCOSObjectUploadFailed(ctx context.Context, objectID int64, errorClass string, message string) error {
+	if objectID <= 0 {
+		return ErrValidation
+	}
+	status := "FAILED"
+	if errorClass == "SOURCE_MISSING" {
+		status = "SOURCE_MISSING"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET status = ?,
+			last_error = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, status, message, objectID)
+	if err != nil {
+		return fmt.Errorf("mark cos object failed: %w", err)
+	}
+	return nil
+}
+
 func (s Store) getCredential(ctx context.Context, actor account.User, id int64) (Credential, error) {
 	items, err := s.ListCredentials(ctx, actor)
 	if err != nil {
@@ -573,6 +702,66 @@ func (s Store) encryptSecret(secret []byte) ([]byte, error) {
 	return encoded, nil
 }
 
+func (s Store) decryptSecret(encrypted []byte) ([]byte, error) {
+	var envelope struct {
+		Alg        string `json:"alg"`
+		Nonce      string `json:"nonce"`
+		Ciphertext string `json:"ciphertext"`
+	}
+	if err := json.Unmarshal(encrypted, &envelope); err != nil {
+		return nil, fmt.Errorf("decode encrypted secret envelope: %w", err)
+	}
+	if envelope.Alg != "AES-256-GCM" || envelope.Nonce == "" || envelope.Ciphertext == "" {
+		return nil, ErrValidation
+	}
+	nonce, err := base64.StdEncoding.DecodeString(envelope.Nonce)
+	if err != nil {
+		return nil, fmt.Errorf("decode encrypted secret nonce: %w", err)
+	}
+	ciphertext, err := base64.StdEncoding.DecodeString(envelope.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decode encrypted secret ciphertext: %w", err)
+	}
+	master, err := os.ReadFile(s.cfg.MasterKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("read master key: %w", err)
+	}
+	key := sha256.Sum256([]byte(strings.TrimSpace(string(master))))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, fmt.Errorf("create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("create gcm: %w", err)
+	}
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt secret: %w", err)
+	}
+	return plaintext, nil
+}
+
+func (s Store) decryptCOSSecret(encrypted []byte) (COSSecret, error) {
+	plaintext, err := s.decryptSecret(encrypted)
+	if err != nil {
+		return COSSecret{}, err
+	}
+	var flexible map[string]string
+	if err := json.Unmarshal(plaintext, &flexible); err != nil {
+		return COSSecret{}, ErrValidation
+	}
+	secret := COSSecret{
+		SecretID:     firstNonEmpty(flexible["secret_id"], flexible["secretId"], flexible["SecretId"], flexible["SecretID"]),
+		SecretKey:    firstNonEmpty(flexible["secret_key"], flexible["secretKey"], flexible["SecretKey"], flexible["SecretKEY"]),
+		SessionToken: firstNonEmpty(flexible["session_token"], flexible["sessionToken"], flexible["Token"]),
+	}
+	if secret.SecretID == "" || secret.SecretKey == "" {
+		return COSSecret{}, NewClassifiedError("AUTH", "cos credential must include secret_id and secret_key")
+	}
+	return secret, nil
+}
+
 func normalizeJSON(raw json.RawMessage) string {
 	value := strings.TrimSpace(string(raw))
 	if value == "" || value == "null" {
@@ -591,6 +780,42 @@ func normalizePrefix(value string, profileID int64) string {
 		prefix += "/"
 	}
 	return prefix
+}
+
+func resolveWithinRoot(root string, relativePath string) (string, error) {
+	if relativePath == "" || filepath.IsAbs(relativePath) {
+		return "", ErrValidation
+	}
+	cleaned := filepath.Clean(relativePath)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", ErrValidation
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	candidate := filepath.Join(rootAbs, cleaned)
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(rootAbs, candidateAbs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", ErrValidation
+	}
+	return candidateAbs, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func boolInt(value bool) int {
