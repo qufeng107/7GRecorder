@@ -392,8 +392,8 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("Protected Recordings")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
-    expect(await screen.findByRole("heading", { name: "Pre-package segments" })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Post-package parts" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Publish Parts" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Original Segments" })).toBeInTheDocument();
     expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
     expect(await screen.findAllByText("Timeline")).toHaveLength(2);
   });
