@@ -52,6 +52,7 @@ cleanup_old_deploy_artifacts() {
   done
 
   docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -af --filter "until=24h" >/dev/null 2>&1 || true
 }
 
 mkdir -p "${release_root}" /opt/7grecorder/deploy /data/7grecorder/backups/db
