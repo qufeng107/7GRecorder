@@ -395,7 +395,7 @@ describe("AdminDashboard", () => {
     expect(await screen.findByRole("heading", { name: "Pre-package segments" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Post-package parts" })).toBeInTheDocument();
     expect(await screen.findByText("recordings/1741048619/short.flv")).toBeInTheDocument();
-    expect(await screen.findByText("Timeline")).toBeInTheDocument();
+    expect(await screen.findAllByText("Timeline")).toHaveLength(2);
   });
 
   it("renders multi-segment upload sources for merge planning", async () => {
