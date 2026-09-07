@@ -590,7 +590,7 @@ describe("AdminDashboard", () => {
     expect(await screen.findByRole("heading", { name: "Upload Settings" })).toBeInTheDocument();
     expect(await screen.findByText("Credential Vault")).toBeInTheDocument();
     expect(await screen.findByText("Bilibili Publishing")).toBeInTheDocument();
-    expect(await screen.findByText("Tencent COS")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Tencent COS" })).toBeInTheDocument();
     expect(await screen.findByText("bili account")).toBeInTheDocument();
   });
 
