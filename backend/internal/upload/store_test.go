@@ -3,6 +3,7 @@ package upload
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,6 +120,61 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	}
 	if objectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv" {
 		t.Fatalf("unexpected cos object key: %q", objectKey)
+	}
+}
+
+func TestCOSDownloadURLRequestRequiresAvailableOutputObject(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create profile returned error: %v", err)
+	}
+	store := NewStore(database, cfg)
+	credential, err := store.CreateCredential(ctx, actor, CredentialCreate{
+		Scope:        "USER",
+		Platform:     "tencent_cos",
+		Purpose:      "STORAGE",
+		AccountLabel: "cos account",
+		Secret:       []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential returned error: %v", err)
+	}
+	if _, err := store.UpsertCOSConfig(ctx, actor, 1, COSConfigUpsert{
+		CredentialID:    credential.ID,
+		Enabled:         true,
+		Region:          "ap-shanghai",
+		Bucket:          "bucket-1250000000",
+		Prefix:          "7grecorder/test/",
+		MaxManagedBytes: 1000000000,
+	}); err != nil {
+		t.Fatalf("UpsertCOSConfig returned error: %v", err)
+	}
+	insertReadyUploadSource(t, ctx, database)
+	if _, err := store.Reconcile(ctx, actor); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if _, err := store.COSDownloadURLRequest(ctx, actor, 1, 1); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("expected ErrNotReady before upload, got %v", err)
+	}
+	if err := store.MarkCOSObjectUploaded(ctx, 1, COSUploadResult{ETag: "etag"}); err != nil {
+		t.Fatalf("MarkCOSObjectUploaded returned error: %v", err)
+	}
+
+	request, err := store.COSDownloadURLRequest(ctx, actor, 1, 1)
+	if err != nil {
+		t.Fatalf("COSDownloadURLRequest returned error: %v", err)
+	}
+	if request.ObjectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv" {
+		t.Fatalf("unexpected object key: %q", request.ObjectKey)
+	}
+	if request.Secret.SecretID != "id" || request.Secret.SecretKey != "key" {
+		t.Fatalf("unexpected decrypted secret: %#v", request.Secret)
 	}
 }
 

@@ -760,8 +760,8 @@ Bilibili:   VERIFIED / ...
 
 管理后台下载：
 
-- Local：使用受鉴权的下载接口，生产可通过 Nginx internal/X-Accel-Redirect 发送文件，避免 Go 进程复制大文件；
-- COS：后端生成短期签名 URL；
+- Local：只作为录制与待发布工作目录，不作为用户下载出口；
+- COS：后端鉴权、检查下载策略并生成短期签名 URL，浏览器直接从 COS 下载；
 - Bilibili：提供外部稿件链接，必要时由用户自行下载历史归档。
 
 ---

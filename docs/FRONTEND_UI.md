@@ -27,8 +27,10 @@
   not show a per-row short-segment badge.
 - The recordings page uses upload sources as the primary rows. Each row represents one upload-facing video. Expanding a
   row shows child source segments with their recording timestamps, timeline intervals, sizes, and paths.
-- Multi-segment upload sources show download actions only after FFmpeg merge completes and the source becomes
-  `READY_TO_UPLOAD`.
+- Upload-source downloads are shown only for publish parts with COS status `AVAILABLE`; the UI requests a short-lived
+  COS URL from the backend instead of linking to local server files. Verified Bilibili publications are shown as
+  external video links. Expanded recording rows show publish parts before original segments because downstream upload
+  actions operate on publish parts.
 - Multi-segment upload sources can derive their temporary "merging" display state from matching `MERGE_UPLOAD_SOURCE`
   jobs while the upload-source row itself is still `MERGE_PENDING`.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and

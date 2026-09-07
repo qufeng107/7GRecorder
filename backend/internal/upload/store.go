@@ -23,6 +23,7 @@ import (
 var (
 	ErrForbidden  = errors.New("upload forbidden")
 	ErrNotFound   = errors.New("upload resource not found")
+	ErrNotReady   = errors.New("upload resource not ready")
 	ErrValidation = errors.New("upload validation failed")
 )
 
@@ -575,6 +576,73 @@ func (s Store) MarkCOSObjectUploadFailed(ctx context.Context, objectID int64, er
 	return nil
 }
 
+func (s Store) COSDownloadURLRequest(ctx context.Context, actor account.User, uploadSourceID int64, outputID int64) (COSDownloadURLRequest, error) {
+	if uploadSourceID <= 0 || outputID <= 0 {
+		return COSDownloadURLRequest{}, ErrValidation
+	}
+
+	var request COSDownloadURLRequest
+	var encryptedSecret []byte
+	var profileOwnerID int64
+	var sourceStatus string
+	var outputStatus string
+	var objectStatus string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT co.id,
+			co.upload_source_id,
+			co.upload_source_output_id,
+			co.recording_profile_id,
+			csp.region,
+			csp.bucket,
+			co.object_key,
+			c.encrypted_secret,
+			p.owner_user_id,
+			us.status,
+			uso.status,
+			co.status
+		FROM upload_source_cos_objects co
+		JOIN upload_sources us ON us.id = co.upload_source_id
+		JOIN recording_profiles p ON p.id = co.recording_profile_id
+		JOIN upload_source_outputs uso ON uso.id = co.upload_source_output_id
+		JOIN cos_storage_profiles csp ON csp.id = co.cos_storage_profile_id
+		JOIN credentials c ON c.id = csp.credential_id
+		WHERE co.upload_source_id = ?
+			AND co.upload_source_output_id = ?
+			AND csp.enabled = 1
+	`, uploadSourceID, outputID).Scan(
+		&request.ObjectID,
+		&request.UploadSourceID,
+		&request.UploadSourceOutputID,
+		&request.RecordingProfileID,
+		&request.Region,
+		&request.Bucket,
+		&request.ObjectKey,
+		&encryptedSecret,
+		&profileOwnerID,
+		&sourceStatus,
+		&outputStatus,
+		&objectStatus,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return COSDownloadURLRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return COSDownloadURLRequest{}, fmt.Errorf("load cos download request: %w", err)
+	}
+	if err := s.ensureCanDownloadUploadSourceOutput(ctx, actor, profileOwnerID); err != nil {
+		return COSDownloadURLRequest{}, err
+	}
+	if sourceStatus != "READY_TO_UPLOAD" || outputStatus != "READY_TO_UPLOAD" || objectStatus != "AVAILABLE" {
+		return COSDownloadURLRequest{}, ErrNotReady
+	}
+	secret, err := s.decryptCOSSecret(encryptedSecret)
+	if err != nil {
+		return COSDownloadURLRequest{}, err
+	}
+	request.Secret = secret
+	return request, nil
+}
+
 func (s Store) getCredential(ctx context.Context, actor account.User, id int64) (Credential, error) {
 	items, err := s.ListCredentials(ctx, actor)
 	if err != nil {
@@ -664,6 +732,25 @@ func (s Store) ensureCanEditModule(ctx context.Context, actor account.User, prof
 		}
 	default:
 		return ErrValidation
+	}
+	return nil
+}
+
+func (s Store) ensureCanDownloadUploadSourceOutput(ctx context.Context, actor account.User, profileOwnerID int64) error {
+	if actor.Role == account.RoleSuperAdmin {
+		return nil
+	}
+	if profileOwnerID != actor.ID {
+		return ErrForbidden
+	}
+	policy, err := account.NewStore(s.db).Policy(ctx, actor, actor.ID)
+	if err != nil {
+		return err
+	}
+	// Download quotas and time-window policies should attach here so every client
+	// receives the same COS signed URL decision.
+	if !policy.CanManageLocalFiles {
+		return ErrForbidden
 	}
 	return nil
 }

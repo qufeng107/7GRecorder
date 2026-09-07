@@ -172,6 +172,9 @@ type UploadSourceOutput = {
   timeline_start_ms: number;
   timeline_end_ms: number;
   status: string;
+  bilibili_status?: string;
+  bilibili_url?: string;
+  cos_status?: string;
 };
 
 type UploadSourceItem = {
@@ -226,6 +229,12 @@ type ReconcileResult = {
 type RecordingScanResult = {
   reconcile: ReconcileResult;
   discover: UploadSourceDiscoverResult;
+};
+
+type COSDownloadURLResponse = {
+  url: string;
+  expires_at: string;
+  object_key: string;
 };
 
 type LocalStorageStatus = {
@@ -639,6 +648,8 @@ const uiCopy = {
     unprotect: "取消保护",
     protect: "保护",
     download: "下载",
+    downloadFromCos: "COS 下载",
+    openBilibili: "打开 Bilibili",
     details: "详情",
     recordingDetails: "录像详情",
     uploadSources: "可上传视频",
@@ -662,8 +673,8 @@ const uiCopy = {
     uploadStatusAvailable: "已上传",
     uploadStatusVerified: "已发布",
     uploadStatusFailed: "失败",
-    sourceSegments: "整理前片段",
-    sourceOutputs: "整理后分片",
+    sourceSegments: "原始片段",
+    sourceOutputs: "发布分片",
     timeline: "合并时间轴",
     recordingStatus: "录像状态",
     localStorageStatus: "本地状态",
@@ -899,6 +910,8 @@ const uiCopy = {
     unprotect: "Unprotect",
     protect: "Protect",
     download: "Download",
+    downloadFromCos: "COS Download",
+    openBilibili: "Open Bilibili",
     details: "Details",
     recordingDetails: "Recording Details",
     uploadSources: "Upload Sources",
@@ -922,8 +935,8 @@ const uiCopy = {
     uploadStatusAvailable: "Uploaded",
     uploadStatusVerified: "Published",
     uploadStatusFailed: "Failed",
-    sourceSegments: "Pre-package segments",
-    sourceOutputs: "Post-package parts",
+    sourceSegments: "Original Segments",
+    sourceOutputs: "Publish Parts",
     timeline: "Timeline",
     recordingStatus: "Recording Status",
     localStorageStatus: "Local Status",
@@ -1558,6 +1571,20 @@ export function AdminDashboard() {
     }
   });
 
+  const cosDownloadUrlMutation = useMutation({
+    mutationFn: (request: { uploadSourceId: number; outputId: number }) =>
+      requestJson<COSDownloadURLResponse>(
+        `/api/v1/upload-sources/${request.uploadSourceId}/outputs/${request.outputId}/actions/download-url`,
+        {
+          method: "POST",
+          body: "{}"
+        }
+      ),
+    onSuccess: (result) => {
+      window.location.assign(result.url);
+    }
+  });
+
   const saveStorageSettingsMutation = useMutation({
     mutationFn: () =>
       requestJson<LocalStorageSettings>("/api/v1/storage/local/settings", {
@@ -2007,6 +2034,8 @@ export function AdminDashboard() {
                 labels={ui}
                 canManageLocalFiles={canManageLocalFiles}
                 canScanLocalFiles={canScanLocalFiles}
+                cosDownloadPending={cosDownloadUrlMutation.isPending}
+                cosDownloadPendingOutputId={cosDownloadUrlMutation.variables?.outputId ?? null}
                 protectPending={protectRecordingMutation.isPending}
                 reconcileError={reconcileMutation.isError}
                 reconcilePending={reconcileMutation.isPending}
@@ -2017,6 +2046,7 @@ export function AdminDashboard() {
                 total={recordingTotal}
                 visibleTotal={visibleRecordings.length}
                 onReconcile={() => reconcileMutation.mutate()}
+                onDownloadOutput={(uploadSourceId, outputId) => cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })}
                 onSearchChange={setRecordingSearch}
                 onSortChange={setRecordingSort}
                 onToggleProtect={(recording) =>
@@ -3456,6 +3486,8 @@ function TableDateTime(props: { value: string }) {
 function RecordingsPanel(props: {
   canManageLocalFiles: boolean;
   canScanLocalFiles: boolean;
+  cosDownloadPending: boolean;
+  cosDownloadPendingOutputId: number | null;
   isLoading: boolean;
   jobs: JobItem[];
   labels: AdminCopy;
@@ -3468,6 +3500,7 @@ function RecordingsPanel(props: {
   sort: RecordingSortKey;
   total: number;
   visibleTotal: number;
+  onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
   onReconcile: () => void;
   onSearchChange: (value: string) => void;
   onSortChange: (value: RecordingSortKey) => void;
@@ -3591,16 +3624,12 @@ function RecordingsPanel(props: {
       enableResizing: false,
       cell: ({ row }) => {
         const recording = row.original;
-        const file = recording.files?.[0];
+        const uploadSourceId = recording.upload_source_id ?? 0;
         const canUseLocalFile = recording.local_storage_status !== "DELETED";
         const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
-        const uploadSourceDownloadHref =
-          recording.upload_source_id && recording.output_relative_path && recording.upload_source_status === "READY_TO_UPLOAD"
-            ? `/api/v1/upload-sources/${recording.upload_source_id}/download`
-            : "";
-        const recordingFileDownloadHref =
-          file && file.file_status === "CLOSED" && isSingleSegment ? `/api/v1/recording-files/${file.id}/download` : "";
-        const downloadHref = uploadSourceDownloadHref || recordingFileDownloadHref;
+        const downloadableOutputs = (recording.source_outputs ?? []).filter((output) => output.cos_status === "AVAILABLE");
+        const singleDownloadOutput = uploadSourceId > 0 && downloadableOutputs.length === 1 ? downloadableOutputs[0] : null;
+        const bilibiliURL = (recording.source_outputs ?? []).find((output) => output.bilibili_url)?.bilibili_url;
         if (!props.canManageLocalFiles) {
           return <span className="text-xs text-muted">{props.labels.noAction}</span>;
         }
@@ -3628,14 +3657,26 @@ function RecordingsPanel(props: {
                 {recording.local_protected ? props.labels.unprotect : props.labels.protect}
               </button>
             ) : null}
-            {downloadHref ? (
+            {bilibiliURL ? (
               <a
-                className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                href={downloadHref}
+                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                href={bilibiliURL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {props.labels.openBilibili}
+              </a>
+            ) : null}
+            {singleDownloadOutput ? (
+              <button
+                className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                disabled={props.cosDownloadPending && props.cosDownloadPendingOutputId === singleDownloadOutput.id}
+                type="button"
+                onClick={() => props.onDownloadOutput(uploadSourceId, singleDownloadOutput.id)}
               >
                 <Download className="h-3.5 w-3.5" aria-hidden="true" />
                 {props.labels.download}
-              </a>
+              </button>
             ) : null}
           </div>
         );
@@ -3769,8 +3810,16 @@ function RecordingsPanel(props: {
                     <tr key={`${row.id}-segments`} className="bg-[#f7f8f5]">
                       <td className="px-3 py-3" colSpan={table.getAllLeafColumns().length}>
                         <div className="space-y-3">
+                          <UploadSourceOutputsTable
+                            canDownload={props.canManageLocalFiles}
+                            cosDownloadPending={props.cosDownloadPending}
+                            cosDownloadPendingOutputId={props.cosDownloadPendingOutputId}
+                            labels={props.labels}
+                            outputs={recording.source_outputs ?? []}
+                            uploadSourceId={recording.upload_source_id ?? 0}
+                            onDownloadOutput={props.onDownloadOutput}
+                          />
                           <UploadSourceSegmentsTable labels={props.labels} segments={recording.source_segments ?? []} />
-                          <UploadSourceOutputsTable labels={props.labels} outputs={recording.source_outputs ?? []} />
                         </div>
                       </td>
                     </tr>
@@ -3842,39 +3891,79 @@ function UploadSourceSegmentsTable(props: { labels: AdminCopy; segments: UploadS
   );
 }
 
-function UploadSourceOutputsTable(props: { labels: AdminCopy; outputs: UploadSourceOutput[] }) {
+function UploadSourceOutputsTable(props: {
+  canDownload: boolean;
+  cosDownloadPending: boolean;
+  cosDownloadPendingOutputId: number | null;
+  labels: AdminCopy;
+  outputs: UploadSourceOutput[];
+  uploadSourceId: number;
+  onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
+}) {
   return (
     <div className="rounded-md border border-border bg-white p-3">
       <h3 className="text-sm font-semibold">{props.labels.sourceOutputs}</h3>
       <div className="mt-3 overflow-auto">
-        <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+        <table className="w-full min-w-[860px] border-collapse text-left text-xs">
           <thead className="bg-[#eef1eb] uppercase text-muted">
             <tr>
               <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.cosStatus}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.bilibiliStatus}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
             </tr>
           </thead>
           <tbody>
-            {props.outputs.map((output) => (
-              <tr key={output.id} className="align-top">
-                <td className="px-3 py-3">
-                  <p className="font-medium text-ink">{output.relative_path.split("/").pop() ?? output.relative_path}</p>
-                  <p className="mt-1 break-all text-muted">{output.relative_path}</p>
-                </td>
-                <td className="px-3 py-3 text-muted">
-                  {formatTimeline(output.timeline_start_ms)} - {formatTimeline(output.timeline_end_ms)}
-                </td>
-                <td className="px-3 py-3 text-muted">{formatDuration(output.duration_ms)}</td>
-                <td className="px-3 py-3 text-muted">{formatBytes(output.size_bytes)}</td>
-                <td className="px-3 py-3 text-muted">{output.status}</td>
-              </tr>
-            ))}
+            {props.outputs.map((output) => {
+              const cosAvailable = props.canDownload && output.cos_status === "AVAILABLE";
+              const bilibiliURL = output.bilibili_status === "VERIFIED" ? output.bilibili_url : undefined;
+              return (
+                <tr key={output.id} className="align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-ink">{output.relative_path.split("/").pop() ?? output.relative_path}</p>
+                    <p className="mt-1 break-all text-muted">{output.relative_path}</p>
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    {formatTimeline(output.timeline_start_ms)} - {formatTimeline(output.timeline_end_ms)}
+                  </td>
+                  <td className="px-3 py-3 text-muted">{formatDuration(output.duration_ms)}</td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(output.size_bytes)}</td>
+                  <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(output.cos_status, props.labels)}</td>
+                  <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(output.bilibili_status, props.labels)}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-col items-start gap-2">
+                      {cosAvailable ? (
+                        <button
+                          className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                          disabled={props.cosDownloadPending && props.cosDownloadPendingOutputId === output.id}
+                          type="button"
+                          onClick={() => props.onDownloadOutput(props.uploadSourceId, output.id)}
+                        >
+                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                          {props.labels.downloadFromCos}
+                        </button>
+                      ) : null}
+                      {bilibiliURL ? (
+                        <a
+                          className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                          href={bilibiliURL}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {props.labels.openBilibili}
+                        </a>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {props.outputs.length === 0 ? (
               <tr>
-                <td className="px-3 py-6 text-center text-muted" colSpan={5}>
+                <td className="px-3 py-6 text-center text-muted" colSpan={7}>
                   {props.labels.noFile}
                 </td>
               </tr>

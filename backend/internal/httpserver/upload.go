@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
@@ -120,6 +121,27 @@ func bindUploadHandlers(cfg config.Config, s *ghttp.Server) {
 			r.Response.WriteJson(result)
 		})
 	})
+
+	s.BindHandler("/api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		sourceID := r.Get("id").Int64()
+		outputID := r.Get("output_id").Int64()
+		withUploadStore(r, cfg, func(actor account.User, store upload.Store) {
+			request, err := store.COSDownloadURLRequest(r.Context(), actor, sourceID, outputID)
+			if err != nil {
+				writeUploadError(r, err)
+				return
+			}
+			result, err := upload.NewTencentCOSUploader().SignedDownloadURL(r.Context(), request, 5*time.Minute)
+			if err != nil {
+				writeUploadError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
 }
 
 func withUploadStore(r *ghttp.Request, cfg config.Config, fn func(account.User, upload.Store)) {
@@ -150,6 +172,8 @@ func writeUploadError(r *ghttp.Request, err error) {
 		writeAPIError(r, http.StatusNotFound, "UPLOAD_RESOURCE_NOT_FOUND", "Upload module resource was not found.", nil)
 	case errors.Is(err, upload.ErrValidation):
 		writeAPIError(r, http.StatusBadRequest, "VALIDATION_FAILED", "Upload module request is invalid.", nil)
+	case errors.Is(err, upload.ErrNotReady):
+		writeAPIError(r, http.StatusConflict, "UPLOAD_RESOURCE_NOT_READY", "Upload module resource is not ready.", nil)
 	default:
 		writeAPIError(r, http.StatusInternalServerError, "UPLOAD_OPERATION_FAILED", "Upload module operation failed.", nil)
 	}

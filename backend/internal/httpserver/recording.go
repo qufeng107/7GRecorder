@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -145,41 +144,7 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		if !requireMethod(r, http.MethodGet) {
 			return
 		}
-		id := r.Get("id").Int64()
-		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
-			source, err := store.GetUploadSource(r.Context(), actor, id)
-			if err != nil {
-				writeRecordingError(r, err)
-				return
-			}
-			if source.Status != "READY_TO_UPLOAD" || source.OutputRelativePath == "" {
-				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_READY", "Upload source is not ready.", nil)
-				return
-			}
-			relative := filepath.ToSlash(source.OutputRelativePath)
-			if !strings.HasPrefix(relative, "recordings/") && !strings.HasPrefix(relative, "upload-sources/") {
-				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_FOUND", "Upload source file was not found.", nil)
-				return
-			}
-			absolutePath, err := ResolveWithinRoot(cfg.DataRoot, source.OutputRelativePath)
-			if err != nil {
-				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_FOUND", "Upload source file was not found.", nil)
-				return
-			}
-			info, err := os.Stat(absolutePath)
-			if errors.Is(err, os.ErrNotExist) || (err == nil && info.IsDir()) {
-				writeAPIError(r, http.StatusNotFound, "UPLOAD_SOURCE_NOT_FOUND", "Upload source file was not found.", nil)
-				return
-			}
-			if err != nil {
-				writeAPIError(r, http.StatusInternalServerError, "UPLOAD_SOURCE_UNAVAILABLE", "Upload source file is unavailable.", nil)
-				return
-			}
-			name := filepath.Base(source.OutputRelativePath)
-			r.Response.Header().Set("Content-Type", recordingContentType(name))
-			r.Response.Header().Set("Content-Disposition", contentDisposition(name))
-			r.Response.Header().Set("X-Accel-Redirect", protectedMediaPath(source.OutputRelativePath))
-		})
+		writeAPIError(r, http.StatusGone, "LOCAL_UPLOAD_SOURCE_DOWNLOAD_DISABLED", "Upload source downloads must use COS signed URLs.", nil)
 	})
 
 	s.BindHandler("/api/v1/recording-files/reconcile", func(r *ghttp.Request) {
@@ -230,36 +195,7 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		if !requireMethod(r, http.MethodGet) {
 			return
 		}
-		id := r.Get("id").Int64()
-		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
-			file, err := store.FileForDownload(r.Context(), actor, id)
-			if err != nil {
-				writeRecordingError(r, err)
-				return
-			}
-			if !strings.HasPrefix(filepath.ToSlash(file.RelativePath), "recordings/") {
-				writeAPIError(r, http.StatusNotFound, "RECORDING_FILE_NOT_FOUND", "Recording file was not found.", nil)
-				return
-			}
-			absolutePath, err := ResolveWithinRoot(cfg.DataRoot, file.RelativePath)
-			if err != nil {
-				writeAPIError(r, http.StatusNotFound, "RECORDING_FILE_NOT_FOUND", "Recording file was not found.", nil)
-				return
-			}
-			info, err := os.Stat(absolutePath)
-			if errors.Is(err, os.ErrNotExist) || (err == nil && info.IsDir()) {
-				writeAPIError(r, http.StatusNotFound, "RECORDING_FILE_NOT_FOUND", "Recording file was not found.", nil)
-				return
-			}
-			if err != nil {
-				writeAPIError(r, http.StatusInternalServerError, "RECORDING_FILE_UNAVAILABLE", "Recording file is unavailable.", nil)
-				return
-			}
-
-			r.Response.Header().Set("Content-Type", recordingContentType(file.OriginalName))
-			r.Response.Header().Set("Content-Disposition", contentDisposition(file.OriginalName))
-			r.Response.Header().Set("X-Accel-Redirect", protectedMediaPath(file.RelativePath))
-		})
+		writeAPIError(r, http.StatusGone, "LOCAL_RECORDING_FILE_DOWNLOAD_DISABLED", "Recording file downloads must use COS signed URLs.", nil)
 	})
 }
 

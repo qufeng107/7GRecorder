@@ -704,6 +704,58 @@ func TestUploadSourcePackageBaseNameUsesChinaDateOrdinal(t *testing.T) {
 	}
 }
 
+func TestUploadSourceCOSStatusUsesCurrentOutputObjects(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO credentials (id, owner_user_id, scope, platform, purpose, account_label, encrypted_secret, status)
+		VALUES (1, 1, 'USER', 'tencent_cos', 'STORAGE', 'cos account', X'00', 'UNVERIFIED');
+		INSERT INTO cos_storage_profiles
+			(id, recording_profile_id, credential_id, enabled, region, bucket, prefix, max_managed_bytes)
+		VALUES (1, 1, 1, 1, 'ap-shanghai', 'bucket-1250000000', '7grecorder/test/', 1000000000);
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES (1, 1, 'profile:1:1:1', 'ready upload', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'READY_TO_UPLOAD',
+			'upload-sources/1/1/parts/7G-20260905-p01.flv', 50, 1, 1, 0, 600, CURRENT_TIMESTAMP);
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, 'upload-sources/1/1/parts/7G-20260905-p01.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD');
+		INSERT INTO upload_source_cos_objects
+			(cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key, size_bytes, status)
+		VALUES
+			(1, 1, 1, NULL, '7grecorder/test/old-upload-source.flv', 50, 'FAILED'),
+			(1, 1, 1, 1, '7grecorder/test/upload-sources/1/1/parts/7G-20260905-p01.flv', 50, 'AVAILABLE');
+	`); err != nil {
+		t.Fatalf("seed upload source returned error: %v", err)
+	}
+
+	sources, err := NewStore(database, cfg).ListUploadSources(ctx, actor, 600)
+	if err != nil {
+		t.Fatalf("ListUploadSources returned error: %v", err)
+	}
+	if len(sources.Items) != 1 {
+		t.Fatalf("expected one upload source, got %#v", sources)
+	}
+	if sources.Items[0].COSStatus != "AVAILABLE" {
+		t.Fatalf("expected current output COS status to win, got %q", sources.Items[0].COSStatus)
+	}
+	if len(sources.Items[0].Outputs) != 1 || sources.Items[0].Outputs[0].COSStatus != "AVAILABLE" {
+		t.Fatalf("unexpected output statuses: %#v", sources.Items[0].Outputs)
+	}
+}
+
 func TestDiscoverUploadSourcesBackfillsMissingMergeJobs(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

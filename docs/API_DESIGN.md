@@ -287,7 +287,7 @@ Upload sources are the durable upload-facing recording list:
 ```text
 GET  /api/v1/upload-sources?merge_gap_seconds=600
 POST /api/v1/upload-sources/actions/discover?merge_gap_seconds=600
-GET  /api/v1/upload-sources/{id}/download
+POST /api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url
 ```
 
 Discovery is SUPER_ADMIN-only and idempotent. It creates upload sources only when a profile is not currently live or
@@ -298,26 +298,22 @@ become `PACKAGE_PENDING` after the `MERGE_UPLOAD_SOURCE` job writes a derived fi
 `DATA_ROOT/upload-sources`; `PACKAGE_UPLOAD_SOURCE` then records one or more output parts and marks the source
 `READY_TO_UPLOAD`. Output parts use upload-facing names in the form
 `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`. Upload source rows expose independent Bilibili and COS status summaries;
-merge/package readiness is not treated as either module's upload state. Upload source download uses the same
-authenticated `X-Accel-Redirect` pattern as recording file download.
+merge/package readiness is not treated as either module's upload state. Upload source downloads are only available for
+packaged output parts whose COS object status is `AVAILABLE`. The API validates session, profile visibility, and
+download policy, then returns a short-lived Tencent COS signed URL. It must not expose local filesystem paths or use
+`X-Accel-Redirect` for upload-source downloads.
 
 ### Files / Download
 
 ```text
 GET /api/v1/recording-files/{id}
-GET /api/v1/recording-files/{id}/download?source=local
-GET /api/v1/recording-files/{id}/download?source=cos
+POST /api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url
 ```
 
-Early production bootstrap implements local file download as:
-
-```text
-GET /api/v1/recording-files/{id}/download
-```
-
-This first version only serves local, closed video files. The backend must authenticate the session, check
-profile visibility, resolve the DB `relative_path` under `DATA_ROOT`, and return `X-Accel-Redirect` for the
-Nginx internal media location. COS downloads remain a later module.
+Recording file APIs expose metadata for local storage management, not public download links. User-facing download must
+go through upload-source output parts that have been uploaded to COS. The backend authenticates the session, checks
+profile visibility and download policy, and returns a short-lived Tencent COS signed URL. Later manager/public-user
+limits, such as allowed recording date windows and daily download counts, must be enforced before issuing that URL.
 
 下载行为见第 9 节。
 
