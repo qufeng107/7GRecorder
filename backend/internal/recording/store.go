@@ -130,6 +130,9 @@ type UploadSourceOutput struct {
 	TimelineStartMs int64  `json:"timeline_start_ms"`
 	TimelineEndMs   int64  `json:"timeline_end_ms"`
 	Status          string `json:"status"`
+	BilibiliStatus string `json:"bilibili_status"`
+	BilibiliURL    string `json:"bilibili_url,omitempty"`
+	COSStatus      string `json:"cos_status"`
 }
 
 type UploadSourceList struct {
@@ -496,13 +499,16 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 				ELSE 'DISABLED'
 			END,
 			CASE
-				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'FAILED') THEN 'FAILED'
-				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'UPLOADING') THEN 'UPLOADING'
-				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'PENDING') THEN 'PENDING'
-				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_id = us.id AND co.status = 'AVAILABLE')
+				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD')
 					AND NOT EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
-						SELECT 1 FROM upload_source_cos_objects co2 WHERE co2.upload_source_output_id = uso.id AND co2.status = 'AVAILABLE'
+						SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'AVAILABLE'
 					)) THEN 'AVAILABLE'
+				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status = 'UPLOADING') THEN 'UPLOADING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status = 'PENDING') THEN 'PENDING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
+						SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id
+					)) THEN 'PENDING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status IN ('FAILED', 'SOURCE_MISSING')) THEN 'FAILED'
 				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
 				ELSE 'DISABLED'
 			END
@@ -1256,11 +1262,35 @@ func (s Store) uploadSourceSegments(ctx context.Context, uploadSourceID int64) (
 
 func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([]UploadSourceOutput, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms,
-			timeline_start_ms, timeline_end_ms, status
-		FROM upload_source_outputs
-		WHERE upload_source_id = ?
-		ORDER BY sort_order ASC, id ASC
+		SELECT uso.id,
+			uso.upload_source_id,
+			uso.sort_order,
+			uso.relative_path,
+			uso.size_bytes,
+			uso.duration_ms,
+			uso.timeline_start_ms,
+			uso.timeline_end_ms,
+			uso.status,
+			CASE
+				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED') THEN 'VERIFIED'
+				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status IN ('UPLOADING', 'VERIFYING')) THEN 'UPLOADING'
+				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'FAILED') THEN 'FAILED'
+				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili') THEN 'PENDING'
+				WHEN EXISTS (SELECT 1 FROM publishing_profiles pp JOIN upload_sources us ON us.recording_profile_id = pp.recording_profile_id WHERE us.id = uso.upload_source_id AND pp.platform = 'bilibili' AND pp.enabled = 1 AND pp.credential_id IS NOT NULL) THEN 'WAITING_SOURCE'
+				ELSE 'DISABLED'
+			END,
+			COALESCE((SELECT pub.external_url FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED' ORDER BY pub.updated_at DESC, pub.id DESC LIMIT 1), ''),
+			CASE
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'AVAILABLE') THEN 'AVAILABLE'
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'UPLOADING') THEN 'UPLOADING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'PENDING') THEN 'PENDING'
+				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status IN ('FAILED', 'SOURCE_MISSING')) THEN 'FAILED'
+				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp JOIN upload_sources us ON us.recording_profile_id = csp.recording_profile_id WHERE us.id = uso.upload_source_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
+				ELSE 'DISABLED'
+			END
+		FROM upload_source_outputs uso
+		WHERE uso.upload_source_id = ?
+		ORDER BY uso.sort_order ASC, uso.id ASC
 	`, uploadSourceID)
 	if err != nil {
 		return nil, fmt.Errorf("list upload source outputs: %w", err)
@@ -1280,6 +1310,9 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 			&item.TimelineStartMs,
 			&item.TimelineEndMs,
 			&item.Status,
+			&item.BilibiliStatus,
+			&item.BilibiliURL,
+			&item.COSStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan upload source output: %w", err)
 		}

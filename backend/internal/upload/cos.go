@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/tencentyun/cos-go-sdk-v5"
 )
@@ -30,6 +31,23 @@ type COSUploadRequest struct {
 
 type COSUploadResult struct {
 	ETag string
+}
+
+type COSDownloadURLRequest struct {
+	ObjectID             int64
+	UploadSourceID       int64
+	UploadSourceOutputID int64
+	RecordingProfileID   int64
+	Region               string
+	Bucket               string
+	ObjectKey            string
+	Secret               COSSecret
+}
+
+type COSDownloadURLResult struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+	ObjectKey  string `json:"object_key"`
 }
 
 type COSUploader interface {
@@ -73,6 +91,35 @@ func (TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest) 
 		etag = strings.Trim(response.Header.Get("ETag"), `"`)
 	}
 	return COSUploadResult{ETag: etag}, nil
+}
+
+func (TencentCOSUploader) SignedDownloadURL(ctx context.Context, request COSDownloadURLRequest, expiresIn time.Duration) (COSDownloadURLResult, error) {
+	if request.Region == "" || request.Bucket == "" || request.ObjectKey == "" || expiresIn <= 0 {
+		return COSDownloadURLResult{}, NewClassifiedError("PERMANENT", "cos download request is incomplete")
+	}
+	if request.Secret.SecretID == "" || request.Secret.SecretKey == "" {
+		return COSDownloadURLResult{}, NewClassifiedError("AUTH", "cos credential is incomplete")
+	}
+	bucketURL, err := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com", request.Bucket, request.Region))
+	if err != nil {
+		return COSDownloadURLResult{}, NewClassifiedError("PERMANENT", fmt.Sprintf("invalid cos bucket endpoint: %v", err))
+	}
+	client := cos.NewClient(&cos.BaseURL{BucketURL: bucketURL}, &http.Client{
+		Transport: &cos.AuthorizationTransport{
+			SecretID:     request.Secret.SecretID,
+			SecretKey:    request.Secret.SecretKey,
+			SessionToken: request.Secret.SessionToken,
+		},
+	})
+	signedURL, err := client.Object.GetPresignedURL(ctx, http.MethodGet, request.ObjectKey, request.Secret.SecretID, request.Secret.SecretKey, expiresIn, nil)
+	if err != nil {
+		return COSDownloadURLResult{}, classifyCOSSDKError(err)
+	}
+	return COSDownloadURLResult{
+		URL:       signedURL.String(),
+		ExpiresAt: time.Now().UTC().Add(expiresIn).Format(time.RFC3339),
+		ObjectKey: request.ObjectKey,
+	}, nil
 }
 
 func classifyCOSSDKError(err error) error {

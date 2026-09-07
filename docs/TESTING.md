@@ -200,6 +200,9 @@ song processing FAILED
 - COS upload jobs cover worker dispatch with a fake COS uploader, encrypted credential decryption, source path
   resolution under `DATA_ROOT`, object transition to `AVAILABLE`, and job success. Real COS credentials are not used in
   CI.
+- COS download tests must verify that only `AVAILABLE` upload source output objects can produce signed download
+  requests, that profile visibility and manager policy are enforced before signing, and that old failed COS jobs do not
+  make the current output summary look failed after a later successful upload.
 
 ---
 

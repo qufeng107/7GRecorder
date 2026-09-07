@@ -468,6 +468,10 @@ updated_at
 (cos_storage_profile_id, object_key) UNIQUE
 ```
 
+录像列表中的 COS 汇总状态以当前 `upload_source_outputs` 为准。旧的失败任务或未关联当前输出分片的历史 COS
+对象不能覆盖已经上传成功的分片状态。下载入口只基于 `upload_source_cos_objects.status = AVAILABLE` 发放短时 COS
+签名 URL；本地 Upload Source 文件路径属于服务端实现细节，不作为下载契约。
+
 ---
 
 ## 10. Songs
