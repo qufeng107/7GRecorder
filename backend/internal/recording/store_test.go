@@ -699,7 +699,7 @@ func TestUploadSourcePackageBaseNameUsesChinaDateOrdinal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UploadSourcePackageBaseName returned error: %v", err)
 	}
-	if baseName != "7G-20260906-第02场直播" {
+	if baseName != "7G-20260906-\u7b2c01\u573a\u76f4\u64ad" {
 		t.Fatalf("unexpected base name: %q", baseName)
 	}
 }

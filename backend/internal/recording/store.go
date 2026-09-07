@@ -957,7 +957,7 @@ func (s Store) UploadSourcePackageBaseName(ctx context.Context, source UploadSou
 			if name == "" {
 				name = "upload-source"
 			}
-			return fmt.Sprintf("%s-%s-第%02d场直播", name, chinaDate, ordinal), nil
+			return fmt.Sprintf("%s-%s-\u7b2c%02d\u573a\u76f4\u64ad", name, chinaDate, ordinal), nil
 		}
 	}
 	if err := rows.Err(); err != nil {

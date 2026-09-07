@@ -235,7 +235,7 @@ func TestRunOncePackagesUploadSource(t *testing.T) {
 	if packager.request.UploadSourceID != 1 || packager.request.MaxPartBytes != cfg.UploadMaxPartBytes {
 		t.Fatalf("unexpected package request: %#v", packager.request)
 	}
-	if packager.request.OutputBaseName != "7G Live-20260905-第01场直播" {
+	if packager.request.OutputBaseName != "7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad" {
 		t.Fatalf("unexpected package output base name: %q", packager.request.OutputBaseName)
 	}
 	var status string
@@ -269,7 +269,7 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
 		t.Fatalf("complete initial sync job returned error: %v", err)
 	}
-	sourceRelativePath := "upload-sources/1/1/upload-source-1.flv"
+	sourceRelativePath := "upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv"
 	sourcePath := filepath.Join(cfg.DataRoot, sourceRelativePath)
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		t.Fatalf("create upload source dir returned error: %v", err)
@@ -329,7 +329,7 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	if err := NewWithCOSUploader(database, &fakeRecorder{}, cfg, cosUploader).RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce returned error: %v", err)
 	}
-	if cosUploader.request.ObjectID != 1 || cosUploader.request.ObjectKey != "7grecorder/test/upload-sources/1/part-001.flv" {
+	if cosUploader.request.ObjectID != 1 || cosUploader.request.ObjectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv" {
 		t.Fatalf("unexpected cos upload request: %#v", cosUploader.request)
 	}
 	if cosUploader.request.Secret.SecretID != "id" || cosUploader.request.Secret.SecretKey != "key" {
