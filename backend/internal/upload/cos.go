@@ -47,7 +47,7 @@ type COSDownloadURLRequest struct {
 type COSDownloadURLResult struct {
 	URL       string `json:"url"`
 	ExpiresAt string `json:"expires_at"`
-	ObjectKey  string `json:"object_key"`
+	ObjectKey string `json:"object_key"`
 }
 
 type COSUploader interface {
