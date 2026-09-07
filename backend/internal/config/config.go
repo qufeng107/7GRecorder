@@ -3,19 +3,19 @@ package config
 import "os"
 
 type Config struct {
-	ListenAddr                 string
-	PublicBaseURL              string
-	DataRoot                   string
-	SQLitePath                 string
-	TempRoot                   string
-	RecorderBaseURL            string
-	RecorderUser               string
-	RecorderPassword           string
-	FFmpegPath                 string
-	MasterKeyPath              string
-	UploadMaxPartBytes         int64
-	UploadMaxPartDurationSecs  int64
-	LogLevel                   string
+	ListenAddr                string
+	PublicBaseURL             string
+	DataRoot                  string
+	SQLitePath                string
+	TempRoot                  string
+	RecorderBaseURL           string
+	RecorderUser              string
+	RecorderPassword          string
+	FFmpegPath                string
+	MasterKeyPath             string
+	UploadMaxPartBytes        int64
+	UploadMaxPartDurationSecs int64
+	LogLevel                  string
 }
 
 func LoadFromEnv() Config {
