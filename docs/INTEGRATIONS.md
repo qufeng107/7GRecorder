@@ -161,6 +161,7 @@ CLI 文本解析集中在 Adapter。
 probe media
 extract/cut audio
 必要的轻量媒体处理
+COS delivery compression
 ```
 
 第一版不做通用转码平台。
@@ -178,6 +179,35 @@ Adapter 输出：
 - typed error。
 
 不把任意前端参数直接拼接为 shell command。
+
+### COS 压缩推荐方案
+
+COS 上传前压缩使用 FFmpeg Adapter 的受控 preset，不允许前端提交任意 FFmpeg 参数。
+
+默认目标：
+
+```text
+container: mp4
+video:     libx264, yuv420p, CRF 23, preset medium
+audio:     aac, 128k, keep existing audio stream count conservatively
+flags:     +faststart
+```
+
+示例语义，不作为 shell 拼接模板：
+
+```text
+ffmpeg -i input.flv -map 0:v:0 -map 0:a? -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output.mp4
+```
+
+选择理由：
+
+- H.264/AAC/MP4 兼容性强，COS 下载和浏览器播放都稳定；
+- CRF 23 通常能明显缩小直播录屏体积，同时不是激进破坏性压缩；
+- `medium` 速度和压缩率平衡，后续可允许 SUPER_ADMIN 改为 `slow` 换取更小体积；
+- 输出先写 Job temp，再用 ffprobe 验证可读、时长偏差在容忍范围内后才进入 COS 上传。
+
+如果输入已经很小或压缩收益低，可以仍然上传原封装分片，或把压缩结果标记为 `SKIPPED_LOW_GAIN`。第一版优先
+实现稳定保守的“压缩成功才上传压缩件，压缩失败不损坏源文件”。
 
 ---
 
@@ -203,6 +233,10 @@ HeadObject
 DeleteObject
 GenerateSignedDownloadURL
 ```
+
+COS Adapter 可以接收原始 output part，也可以接收 FFmpeg Adapter 生成的压缩派生文件。压缩文件只存在于本地
+受控 temp/derived path，上传成功后可以按 housekeeping 策略删除。COS object metadata 必须记录该对象来自哪个
+`upload_source_output`、使用的压缩 preset、源文件大小和上传对象大小，便于 UI 显示压缩收益和排查问题。
 
 业务层自己维护：
 

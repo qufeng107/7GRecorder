@@ -327,7 +327,8 @@ Bilibili 是长期观看归档，不视为原始文件 bit-for-bit 备份。
 
 用途：
 
-> 保存一段时间内的近期原始录播文件，方便管理网站直接下载；更早的内容可以依赖已存在的 Bilibili 归档继续观看/自行下载。
+> 保存一段时间内的近期发布分片副本，方便管理网站通过短期 COS 签名 URL 下载；更早的内容可以依赖已存在的 Bilibili
+> 归档继续观看/自行下载。
 
 启用条件：
 
@@ -342,12 +343,19 @@ AND credential/bucket/region configured
 
 COS 优先对 `READY_TO_UPLOAD` Upload Source 自动上传，和 Bilibili 共享同一份可上传视频边界。
 
+COS 可以在上传前对每个发布分片生成压缩派生文件。默认压缩应使用受控、稳定、兼容性高的 FFmpeg preset
+（例如 H.264/AAC MP4 + CRF 23），并在上传前用 ffprobe 校验。压缩不得覆盖原始录播或发布分片；压缩失败只影响
+COS 对象，不影响 Bilibili 投稿和本地录制状态。
+
 需要记录：
 
 ```text
 bucket
 object_key
-size
+source_size
+uploaded_size
+compression_status
+compression_preset
 checksum(optional)
 status
 uploaded_at
@@ -410,8 +418,8 @@ Bilibili   VERIFIED
 
 下载行为：
 
-- Local：管理后台鉴权后下载；
-- COS：生成短期签名下载 URL；
+- Local：只作为录制和处理工作目录，不作为默认用户下载出口；
+- COS：管理后台鉴权、检查下载策略后生成短期签名下载 URL；
 - Bilibili：打开已归档稿件，不伪装成原文件备份。
 
 Public 主播页面默认不暴露原始 Local/COS 下载地址，除非以后明确增加公开下载功能。
@@ -674,12 +682,14 @@ BililiveRecorder 使用持久配置/workdir，Backend 短暂部署或故障时�
 - 应用日志 stdout/stderr + Docker rotation；
 - 不引入 ELK/Loki/Prometheus；
 - SQLite 每日安全备份并保留有限历史；
-- 临时目录、旧 Release、旧 Docker image 都必须有清理策略。
+- 临时目录、旧 Release、旧 Docker image、旧 Docker build cache、旧 DB backup 都必须有清理策略；
+- 每次部署前/后执行安全部署清理；
+- 每天定时执行一次 disk housekeeping，只清理白名单内确定不影响业务的数据。
 
 ### 大文件下载
 
-- Local Recording 下载不得由 Go 进程直接转发数 GB 文件，使用鉴权后 Nginx internal/X-Accel-Redirect；
-- COS 下载使用短期签名 URL；
+- Local Recording 不作为默认用户下载出口，避免应用服务器承载大文件下载流量；
+- COS 下载使用短期签名 URL，并在签发前执行账号权限、Profile 范围和下载限流策略；
 - 数据库只保存相对媒体路径，任何删除/下载必须校验不能逃逸数据根目录。
 
 ---

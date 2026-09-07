@@ -269,6 +269,10 @@ Local Storage **不以 Bilibili/COS/Songs 成功作为删除前置条件**。
 当前 Upload Source 可以是单段原始文件，也可以是合并后的多段文件；COS 与 Bilibili 都只消费
 `READY_TO_UPLOAD`，并保存原始子视频时间轴 metadata。
 
+COS 可以配置“上传前压缩”作为 COS Storage Module 自己的派生处理。压缩只生成 COS 上传用文件，不覆盖原始
+RecordingFile，不改变 Bilibili 投稿输入，也不改变 Upload Source 的来源时间轴 metadata。压缩失败只影响 COS
+对象状态；原始/封装后分片仍可供其他模块继续使用。
+
 COS 删除只删除：
 
 - 7GRecorder 自己管理的 Prefix；
@@ -697,6 +701,19 @@ Upload Source ready
 ```
 
 这样 COS 与 Bilibili 共享同一个上传边界；多段直播先合并成一个可上传视频，单段直播可直接引用原始文件。
+
+COS 可在该边界之后、实际 PutObject 之前对每个 output part 生成压缩派生文件。推荐默认策略是保守稳定压缩：
+
+```text
+input output part
+→ ffmpeg transcode to temp MP4
+→ ffprobe verify duration/readability
+→ atomic finalize compressed temp file
+→ COS upload compressed object
+→ remove temp after successful upload or after safe failure retention
+```
+
+压缩策略不得覆盖原文件；不得把压缩结果作为 Bilibili 的默认投稿源；不得因为压缩失败删除源分片。
 
 ### 12.3 COS 配额
 

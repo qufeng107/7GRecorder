@@ -311,11 +311,26 @@ must process only upload source output parts whose parent source status is `READ
 become `PACKAGE_PENDING` after the `MERGE_UPLOAD_SOURCE` job writes a derived file under
 `DATA_ROOT/upload-sources`; `PACKAGE_UPLOAD_SOURCE` then records one or more output parts and marks the source
 `READY_TO_UPLOAD`. Output parts use upload-facing names in the form
-`<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`. Upload source rows expose independent Bilibili and COS status summaries;
+`<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`. The part size limit must use the smaller effective limit between
+Bilibili and COS, with a conservative default such as 3.8GB rather than a boundary value. Upload source rows expose
+independent Bilibili and COS status summaries;
 merge/package readiness is not treated as either module's upload state. Upload source downloads are only available for
 packaged output parts whose COS object status is `AVAILABLE`. The API validates session, profile visibility, and
 download policy, then returns a short-lived Tencent COS signed URL. It must not expose local filesystem paths or use
 `X-Accel-Redirect` for upload-source downloads.
+
+COS upload settings may later expose a controlled compression preset:
+
+```json
+{
+  "compression_enabled": true,
+  "compression_preset": "h264_crf23_medium_mp4"
+}
+```
+
+Only predefined presets are accepted. The API must not accept arbitrary FFmpeg flags. Recording/upload-source list DTOs
+should show COS status per publish part, including original size, uploaded object size, compression status, and signed
+download availability. Download remains available only after the COS object reaches `AVAILABLE`.
 
 ### Files / Download
 
@@ -490,18 +505,16 @@ Go 应用不直接复制数 GB 视频字节。
 ```text
 Browser
 → authenticated Admin API
-→ ownership/file state check
-→ X-Accel-Redirect
-→ Nginx internal location
-→ file
+→ profile visibility + download policy check
+→ short-lived Tencent COS signed URL
+→ browser downloads from COS
 ```
 
 要求：
 
-- Nginx `internal` location；
-- DB 只保存受控相对路径；
-- Backend 解析后必须确认目标仍位于配置的数据根目录内；
-- 支持 HTTP Range；
+- Local files are recording and processing workdir files, not the default user/admin download outlet；
+- Upload-source downloads must only be issued for COS `AVAILABLE` objects；
+- `X-Accel-Redirect` is reserved for a future explicitly designed break-glass/admin recovery path or other non-upload-source media；
 - 不把真实服务器绝对路径暴露给浏览器。
 
 ### COS
@@ -527,7 +540,9 @@ Songs 的本地音频也沿用受鉴权的 Nginx internal/Range 方案；公开 
 - 会产生高 IO/CPU；
 - 与滚动存储目标冲突。
 
-管理后台按 Recording 展示并下载各个原始分段；如果 COS 存在，对应分段可从 COS 下载。
+管理后台按 Upload Source 展示发布分片。下载按钮只在发布分片已上传 COS 且 COS object `AVAILABLE` 时显示；
+后端发放短期签名 URL 后由浏览器直接从 COS 下载。原始录制片段和本地 Upload Source 文件路径只作为详情和审计信息展示，
+不提供直接本地下载入口。
 
 ---
 

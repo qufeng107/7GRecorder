@@ -349,7 +349,7 @@ BililiveRecorder 的升级是独立运维动作：
 11. health/readiness check
 12. optional nginx config test/reload when config changed
 13. mark release current
-14. cleanup old release artifacts/images
+14. cleanup old release artifacts/images/build cache
 ```
 
 Backend 停止期间 BililiveRecorder 继续录制。
@@ -466,11 +466,20 @@ select previous SHA
 
 ## 13. Release 清理
 
-成功部署后：
+部署脚本必须在两个时机运行安全清理：
+
+```text
+before build   释放旧部署遗留，避免新 release 无法传入或构建
+after success  回收本次部署产生的旧版本/缓存
+```
+
+每次部署清理范围：
 
 - 保留最近 3 个 server release；
 - 删除更旧的 release directory；
+- 删除旧 `7grecorder-release-*.tar`；
 - 删除不再引用的旧 7GRecorder image；
+- 删除 24 小时以前的 Docker build cache；
 - 不清理 BililiveRecorder image 当前版本；
 - 不触碰 `/data/7grecorder`；
 - GitHub Artifact 只需短期保留，例如 3–7 天。
@@ -480,6 +489,10 @@ select previous SHA
 Deploy script may also run the same retention cleanup before building a new release so a previous failed deployment,
 old release tar, old backend image, or stale Docker build cache does not block the next deploy with
 `No space left on device`.
+
+除部署内置清理外，服务器应安装一个每日定时的 disk housekeeping job，复用同一套安全白名单策略。Daily cleanup
+可以比部署清理覆盖更多“确定不影响业务”的系统垃圾，例如 apt package cache、过期 temp、超出保留数量的 DB backup、
+journald 旧日志和 Docker dangling data；但不得绕过 Local Storage Guard 直接删除原始录播或上传源业务文件。
 
 ---
 

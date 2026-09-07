@@ -32,6 +32,9 @@
   actions, even when there is only one publish part. Verified Bilibili publications are shown as external video links.
   Expanded recording rows show publish parts before original segments because downstream upload actions operate on
   publish parts. Original segments are collapsed by default and can be expanded inside the nested row detail area.
+- Publish part rows should show COS and Bilibili status separately. When COS compression is enabled, show source size,
+  uploaded object size, compression status, and compression preset/gain in the detail area without making compressed
+  COS files look like separate recordings.
 - Multi-segment upload sources can derive their temporary "merging" display state from matching `MERGE_UPLOAD_SOURCE`
   jobs while the upload-source row itself is still `MERGE_PENDING`.
 - The recordings page shows summary metrics for the current filtered list: visible size, short segment count, and
