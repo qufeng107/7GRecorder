@@ -117,7 +117,7 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	`).Scan(&objectKey); err != nil {
 		t.Fatalf("query cos object key returned error: %v", err)
 	}
-	if objectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-第01场直播-p01.flv" {
+	if objectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv" {
 		t.Fatalf("unexpected cos object key: %q", objectKey)
 	}
 }
@@ -157,6 +157,7 @@ func bootstrapTestAdmin(t *testing.T, ctx context.Context, database *sql.DB) acc
 
 func insertReadyUploadSource(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
+	outputRelativePath := "upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv"
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO upload_sources
 			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
@@ -164,16 +165,16 @@ func insertReadyUploadSource(t *testing.T, ctx context.Context, database *sql.DB
 				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
 		VALUES (1, 1, 'profile:1:1:1', 'ready upload', '1741048619', 'Streamer',
 			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'READY_TO_UPLOAD',
-			'upload-sources/1/1/upload-source-1.flv', 50, 1, 1, 0, 600, CURRENT_TIMESTAMP)
-	`); err != nil {
+			?, 50, 1, 1, 0, 600, CURRENT_TIMESTAMP)
+	`, outputRelativePath); err != nil {
 		t.Fatalf("insert upload source returned error: %v", err)
 	}
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO upload_source_outputs
 			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
 		VALUES
-			(1, 1, 0, 'upload-sources/1/1/parts/7G-20260905-第01场直播-p01.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
-	`); err != nil {
+			(1, 1, 0, ?, 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
+	`, outputRelativePath); err != nil {
 		t.Fatalf("insert upload source output returned error: %v", err)
 	}
 }
