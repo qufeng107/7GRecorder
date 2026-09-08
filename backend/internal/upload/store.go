@@ -115,6 +115,34 @@ type COSJobPayload struct {
 	OutputID       int64 `json:"output_id"`
 }
 
+const uploadSourceStableCondition = `
+			NOT EXISTS (
+				SELECT 1
+				FROM recordings next
+				WHERE next.recording_profile_id = us.recording_profile_id
+					AND next.local_storage_status != 'DELETED'
+					AND next.local_deleted_at IS NULL
+					AND next.started_at > us.completed_at
+					AND ((julianday(next.started_at) - julianday(us.completed_at)) * 86400.0) <= us.merge_gap_threshold_seconds
+					AND NOT EXISTS (
+						SELECT 1
+						FROM upload_source_segments same_segment
+						WHERE same_segment.upload_source_id = us.id
+							AND same_segment.recording_id = next.id
+					)
+					AND (
+						next.recording_status = 'ACTIVE'
+						OR EXISTS (
+							SELECT 1
+							FROM recording_files f
+							WHERE f.recording_id = next.id
+								AND LOWER(f.kind) = 'video'
+								AND f.file_status IN ('CLOSED', 'WRITING')
+								AND f.deleted_at IS NULL
+						)
+					)
+			)`
+
 type COSRecordingFileJobPayload struct {
 	COSObjectID     int64 `json:"cos_object_id"`
 	RecordingFileID int64 `json:"recording_file_id"`
@@ -342,7 +370,7 @@ func (s Store) Reconcile(ctx context.Context, actor account.User) (ReconcileResu
 }
 
 func (s Store) createBilibiliPublications(ctx context.Context) (int, error) {
-	result, err := s.db.ExecContext(ctx, `
+	query := `
 		INSERT OR IGNORE INTO publications
 			(recording_profile_id, upload_source_id, platform, credential_id, status, request_snapshot_json)
 		SELECT us.recording_profile_id,
@@ -357,11 +385,13 @@ func (s Store) createBilibiliPublications(ctx context.Context) (int, error) {
 			AND pp.enabled = 1
 			AND pp.credential_id IS NOT NULL
 		WHERE us.status = 'READY_TO_UPLOAD'
+			AND ` + uploadSourceStableCondition + `
 			AND EXISTS (
 				SELECT 1 FROM upload_source_outputs uso
 				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD'
 			)
-	`)
+	`
+	result, err := s.db.ExecContext(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("create bilibili publications: %w", err)
 	}
@@ -373,7 +403,7 @@ func (s Store) createBilibiliPublications(ctx context.Context) (int, error) {
 }
 
 func (s Store) createBilibiliJobs(ctx context.Context) (int, error) {
-	result, err := s.db.ExecContext(ctx, `
+	query := `
 		INSERT OR IGNORE INTO jobs
 			(recording_profile_id, upload_source_id, publication_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
 		SELECT p.recording_profile_id,
@@ -391,12 +421,14 @@ func (s Store) createBilibiliJobs(ctx context.Context) (int, error) {
 		WHERE p.platform = 'bilibili'
 			AND p.status = 'PENDING'
 			AND us.status = 'READY_TO_UPLOAD'
+			AND ` + uploadSourceStableCondition + `
 			AND EXISTS (
 				SELECT 1 FROM upload_source_outputs uso
 				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD'
 			)
 			AND p.upload_source_id IS NOT NULL
-	`)
+	`
+	result, err := s.db.ExecContext(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("create bilibili jobs: %w", err)
 	}
@@ -414,7 +446,7 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 		compressionStatus = "PENDING"
 		compressionPreset = configuredCOSCompressionPreset(s.cfg.COSCompressionPreset)
 	}
-	result, err := s.db.ExecContext(ctx, `
+	query := `
 		INSERT OR IGNORE INTO upload_source_cos_objects
 			(cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key,
 				size_bytes, source_size_bytes, compression_status, compression_preset, status)
@@ -434,7 +466,9 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 		JOIN cos_storage_profiles csp ON csp.recording_profile_id = us.recording_profile_id
 			AND csp.enabled = 1
 		WHERE us.status = 'READY_TO_UPLOAD'
-	`, compressionStatus, compressionPreset)
+			AND ` + uploadSourceStableCondition + `
+	`
+	result, err := s.db.ExecContext(ctx, query, compressionStatus, compressionPreset)
 	if err != nil {
 		return 0, fmt.Errorf("create cos objects: %w", err)
 	}
@@ -446,7 +480,7 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 }
 
 func (s Store) createCOSJobs(ctx context.Context) (int, error) {
-	result, err := s.db.ExecContext(ctx, `
+	query := `
 		INSERT OR IGNORE INTO jobs
 			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
 		SELECT co.recording_profile_id,
@@ -463,7 +497,9 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 		WHERE co.status = 'PENDING'
 			AND co.upload_source_output_id IS NOT NULL
 			AND us.status = 'READY_TO_UPLOAD'
-	`)
+			AND ` + uploadSourceStableCondition + `
+	`
+	result, err := s.db.ExecContext(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("create cos jobs: %w", err)
 	}

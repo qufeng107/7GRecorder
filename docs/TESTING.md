@@ -200,6 +200,8 @@ song processing FAILED
 - Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`
   source detection, idempotent Bilibili publication/job creation, idempotent COS object/job creation, and COS object
   keys that follow post-package part paths.
+- Upload module reconciliation must not create Bilibili/COS jobs for a `READY_TO_UPLOAD` source that has a later
+  same-profile adjacent recording outside the source inside the merge gap.
 - COS upload jobs cover worker dispatch with a fake COS uploader, encrypted credential decryption, source path
   resolution under `DATA_ROOT`, object transition to `AVAILABLE`, and job success. Real COS credentials are not used in
   CI.

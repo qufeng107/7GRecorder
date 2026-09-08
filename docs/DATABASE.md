@@ -776,6 +776,11 @@ window: if the next segment starts within that window and is still `ACTIVE` or h
 waits so the eventual parent source can include the full continuous session. Already finalized sources with
 upload/publication side effects are not silently rebuilt by the automatic scanner.
 
+Upload modules must repeat the stability check before creating Bilibili publications, Bilibili jobs, COS objects, or
+COS jobs. A `READY_TO_UPLOAD` source is not uploadable when a later same-profile recording starts within the source's
+merge gap and is not already one of that source's segments. This prevents older prematurely finalized sources from
+starting external uploads before a controlled regroup/rebuild action is run.
+
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
 `upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
 existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.

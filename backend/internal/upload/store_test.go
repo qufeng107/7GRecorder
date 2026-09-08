@@ -123,6 +123,79 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	}
 }
 
+func TestReconcileSkipsUploadSourceWithAdjacentRecordingOutsideSource(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create profile returned error: %v", err)
+	}
+	store := NewStore(database, cfg)
+	biliCredential, err := store.CreateCredential(ctx, actor, CredentialCreate{
+		Scope:        "USER",
+		Platform:     "bilibili",
+		Purpose:      "PUBLISHER",
+		AccountLabel: "bili account",
+		Secret:       []byte(`{"cookie":"cookie"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential bilibili returned error: %v", err)
+	}
+	cosCredential, err := store.CreateCredential(ctx, actor, CredentialCreate{
+		Scope:        "USER",
+		Platform:     "tencent_cos",
+		Purpose:      "STORAGE",
+		AccountLabel: "cos account",
+		Secret:       []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential cos returned error: %v", err)
+	}
+	if _, err := store.UpsertBilibiliConfig(ctx, actor, 1, PublishingConfigUpsert{
+		CredentialID: biliCredential.ID,
+		Enabled:      true,
+		Settings:     []byte(`{"copyright":2}`),
+	}); err != nil {
+		t.Fatalf("UpsertBilibiliConfig returned error: %v", err)
+	}
+	if _, err := store.UpsertCOSConfig(ctx, actor, 1, COSConfigUpsert{
+		CredentialID:    cosCredential.ID,
+		Enabled:         true,
+		Region:          "ap-shanghai",
+		Bucket:          "bucket-1250000000",
+		Prefix:          "7grecorder/test/",
+		MaxManagedBytes: 1000000000,
+	}); err != nil {
+		t.Fatalf("UpsertCOSConfig returned error: %v", err)
+	}
+	insertReadyUploadSource(t, ctx, database)
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO recordings
+			(id, recording_profile_id, title, started_at, completed_at, duration_ms, recording_status,
+				local_storage_status, source_room_id, streamer_name_snapshot)
+		VALUES (2, 1, 'adjacent part', '2026-09-05T10:30:07Z', '2026-09-05T10:45:00Z',
+			899000, 'COMPLETED', 'AVAILABLE', '1741048619', 'Streamer');
+		INSERT INTO recording_files
+			(id, recording_id, relative_path, original_name, kind, file_status, size_bytes, duration_ms, closed_at)
+		VALUES (2, 2, 'recordings/1741048619-Streamer/adjacent.flv', 'adjacent.flv',
+			'video', 'CLOSED', 30, 899000, '2026-09-05T10:45:00Z');
+	`); err != nil {
+		t.Fatalf("insert adjacent recording returned error: %v", err)
+	}
+
+	result, err := store.Reconcile(ctx, actor)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.PublicationsCreated != 0 || result.BilibiliJobsCreated != 0 || result.COSObjectsCreated != 0 || result.COSJobsCreated != 0 {
+		t.Fatalf("expected adjacent source to block upload jobs, got %#v", result)
+	}
+}
+
 func TestCOSDownloadURLRequestRequiresAvailableOutputObject(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
