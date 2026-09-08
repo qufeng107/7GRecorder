@@ -63,6 +63,7 @@ tar -xf "${RELEASE_TAR}" -C "${release_root}"
 mkdir -p "${release_root}/source"
 tar -xf "${release_root}/source.tar" -C "${release_root}/source"
 bash "${release_root}/source/scripts/deploy/preflight.sh"
+HOUSEKEEPING_DEPLOY_SHA="${RELEASE_SHA}" bash "${release_root}/source/scripts/deploy/housekeeping.sh"
 
 if [ -f "/data/7grecorder/db/7grecorder.db" ]; then
   cp "/data/7grecorder/db/7grecorder.db" "/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db"
@@ -86,6 +87,7 @@ for _ in $(seq 1 30); do
     ln -sfn "${release_root}" /opt/7grecorder/current
     echo "${RELEASE_SHA}" > /opt/7grecorder/current-release
     cleanup_old_deploy_artifacts
+    HOUSEKEEPING_DEPLOY_SHA="${RELEASE_SHA}" bash "${release_root}/source/scripts/deploy/housekeeping.sh"
     echo "deploy ok: ${RELEASE_SHA}"
     exit 0
   fi
