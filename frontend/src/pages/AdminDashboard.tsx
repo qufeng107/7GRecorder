@@ -673,8 +673,8 @@ const uiCopy = {
     noJobs: "暂无任务。",
     recordings: "录像文件",
     scan: "扫描",
-    regroupToday: "重整今天",
-    regroupTodayConfirm: "将按中国今天和 10 分钟连续窗口重整已生成的可上传视频。不会删除本地文件或 COS 对象；存在 Bilibili 投稿或运行中任务的分组会被跳过。确认继续？",
+    regroupToday: "重整最新日期",
+    regroupTodayConfirm: "将按当前列表最新录像的录制日期和 10 分钟连续窗口重整已生成的可上传视频。不会删除本地文件或 COS 对象；存在 Bilibili 投稿或运行中任务的分组会被跳过。确认继续？",
     regroupResult: (result: RecordingRegroupResult) => {
       const totals = result.items.reduce(
         (sum, item) => ({
@@ -970,8 +970,8 @@ const uiCopy = {
     noJobs: "No jobs yet.",
     recordings: "Recordings",
     scan: "Scan",
-    regroupToday: "Regroup Today",
-    regroupTodayConfirm: "Regroup existing upload sources for today's China date using the 10-minute continuity window. This will not delete local files or COS objects; groups with Bilibili publications or running jobs will be skipped. Continue?",
+    regroupToday: "Regroup Latest Date",
+    regroupTodayConfirm: "Regroup existing upload sources for the newest recording date in the current list using the 10-minute continuity window. This will not delete local files or COS objects; groups with Bilibili publications or running jobs will be skipped. Continue?",
     regroupResult: (result: RecordingRegroupResult) => {
       const totals = result.items.reduce(
         (sum, item) => ({
@@ -1691,8 +1691,12 @@ export function AdminDashboard() {
 
   const regroupTodayMutation = useMutation({
     mutationFn: async () => {
-      const chinaDate = currentChinaDate();
-      const profileIds = Array.from(new Set(profiles.map((profile) => profile.id)));
+      const chinaDate = latestRecordingChinaDate(recordings) ?? currentChinaDate();
+      const profileIds = Array.from(new Set(
+        recordings
+          .filter((recording) => chinaDateFromTimestamp(recording.started_at) === chinaDate)
+          .map((recording) => recording.recording_profile_id)
+      ));
       const items: UploadSourceRegroupResult[] = [];
       for (const profileId of profileIds) {
         const result = await requestJson<UploadSourceRegroupResult>("/api/v1/upload-sources/actions/regroup", {
@@ -4741,12 +4745,38 @@ function formatChinaDateParts(value: string): { date: string; time: string } {
 }
 
 function currentChinaDate(): string {
+  return chinaDateFromDate(new Date());
+}
+
+function latestRecordingChinaDate(recordings: RecordingItem[]): string | null {
+  let latest: Date | null = null;
+  for (const recording of recordings) {
+    const started = new Date(recording.started_at);
+    if (Number.isNaN(started.getTime())) {
+      continue;
+    }
+    if (!latest || started > latest) {
+      latest = started;
+    }
+  }
+  return latest ? chinaDateFromDate(latest) : null;
+}
+
+function chinaDateFromTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return chinaDateFromDate(date);
+}
+
+function chinaDateFromDate(date: Date): string {
   const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).formatToParts(new Date());
+  }).formatToParts(date);
   const valueFor = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${valueFor("year")}-${valueFor("month")}-${valueFor("day")}`;
 }
