@@ -787,6 +787,13 @@ The fallback can only delay source creation when a video filename/path maps to t
 falls after the candidate source and inside the merge gap, and the file still looks actively written by the same
 fresh-mtime rule used by local reconciliation.
 
+Already finalized upload sources can be corrected through a SUPER_ADMIN-only regroup action. Regrouping is explicit and
+auditable: it groups existing visible upload sources by profile, China date, and merge gap; blocks any group with a
+running upload-source job or Bilibili publication; marks the old source rows `REPLACED`; cancels old pending/failed jobs;
+removes only old `upload_source_segments`; and creates a new upload source from the original `recordings` and
+`recording_files`. It must not delete original recordings, upload-source output files, COS objects, or publication rows.
+Normal upload-source lists hide `REPLACED` rows, while historical rows remain in SQLite for audit and future cleanup.
+
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
 `upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
 existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.

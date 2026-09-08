@@ -229,6 +229,22 @@ type UploadSourceDiscoverResult = {
   merge_gap_threshold_seconds: number;
 };
 
+type UploadSourceRegroupResult = {
+  replaced_sources: number;
+  created_sources: number;
+  cancelled_jobs: number;
+  blocked?: Array<{
+    upload_source_ids: number[];
+    reason: string;
+  }>;
+  merge_gap_threshold_seconds: number;
+};
+
+type RecordingRegroupResult = {
+  china_date: string;
+  items: UploadSourceRegroupResult[];
+};
+
 type ReconcileResult = {
   scanned_files: number;
   imported: number;
@@ -657,6 +673,21 @@ const uiCopy = {
     noJobs: "暂无任务。",
     recordings: "录像文件",
     scan: "扫描",
+    regroupToday: "重整今天",
+    regroupTodayConfirm: "将按中国今天和 10 分钟连续窗口重整已生成的可上传视频。不会删除本地文件或 COS 对象；存在 Bilibili 投稿或运行中任务的分组会被跳过。确认继续？",
+    regroupResult: (result: RecordingRegroupResult) => {
+      const totals = result.items.reduce(
+        (sum, item) => ({
+          replaced: sum.replaced + item.replaced_sources,
+          created: sum.created + item.created_sources,
+          cancelled: sum.cancelled + item.cancelled_jobs,
+          blocked: sum.blocked + (item.blocked?.length ?? 0)
+        }),
+        { replaced: 0, created: 0, cancelled: 0, blocked: 0 }
+      );
+      return `重整 ${result.china_date}：替换旧父视频 ${totals.replaced}，生成新父视频 ${totals.created}，取消旧任务 ${totals.cancelled}，阻止 ${totals.blocked} 组。`;
+    },
+    regroupFailed: "重整失败，请查看服务器日志。",
     refresh: "刷新",
     scanResult: (imported: number, updated: number, skipped: number) =>
       `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
@@ -939,6 +970,21 @@ const uiCopy = {
     noJobs: "No jobs yet.",
     recordings: "Recordings",
     scan: "Scan",
+    regroupToday: "Regroup Today",
+    regroupTodayConfirm: "Regroup existing upload sources for today's China date using the 10-minute continuity window. This will not delete local files or COS objects; groups with Bilibili publications or running jobs will be skipped. Continue?",
+    regroupResult: (result: RecordingRegroupResult) => {
+      const totals = result.items.reduce(
+        (sum, item) => ({
+          replaced: sum.replaced + item.replaced_sources,
+          created: sum.created + item.created_sources,
+          cancelled: sum.cancelled + item.cancelled_jobs,
+          blocked: sum.blocked + (item.blocked?.length ?? 0)
+        }),
+        { replaced: 0, created: 0, cancelled: 0, blocked: 0 }
+      );
+      return `Regrouped ${result.china_date}: ${totals.replaced} old sources replaced, ${totals.created} new sources created, ${totals.cancelled} old jobs cancelled, ${totals.blocked} groups blocked.`;
+    },
+    regroupFailed: "Regroup failed. Check server logs.",
     refresh: "Refresh",
     scanResult: (imported: number, updated: number, skipped: number) =>
       `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
@@ -1643,6 +1689,31 @@ export function AdminDashboard() {
     }
   });
 
+  const regroupTodayMutation = useMutation({
+    mutationFn: async () => {
+      const chinaDate = currentChinaDate();
+      const profileIds = Array.from(new Set(profiles.map((profile) => profile.id)));
+      const items: UploadSourceRegroupResult[] = [];
+      for (const profileId of profileIds) {
+        const result = await requestJson<UploadSourceRegroupResult>("/api/v1/upload-sources/actions/regroup", {
+          method: "POST",
+          body: JSON.stringify({
+            recording_profile_id: profileId,
+            china_date: chinaDate,
+            merge_gap_seconds: UPLOAD_SOURCE_MERGE_GAP_SECONDS
+          })
+        });
+        items.push(result);
+      }
+      return { china_date: chinaDate, items };
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+    }
+  });
+
   const protectRecordingMutation = useMutation({
     mutationFn: (request: { id: number; protected: boolean }) =>
       requestJson<RecordingItem>(
@@ -2138,6 +2209,9 @@ export function AdminDashboard() {
                 cosFileDownloadPending={cosFileDownloadUrlMutation.isPending}
                 cosFileDownloadPendingFileId={cosFileDownloadUrlMutation.variables?.fileId ?? null}
                 protectPending={protectRecordingMutation.isPending}
+                regroupError={regroupTodayMutation.isError}
+                regroupPending={regroupTodayMutation.isPending}
+                regroupResult={regroupTodayMutation.data}
                 reconcileError={reconcileMutation.isError}
                 reconcilePending={reconcileMutation.isPending}
                 reconcileResult={reconcileMutation.data}
@@ -2147,6 +2221,11 @@ export function AdminDashboard() {
                 total={recordingTotal}
                 visibleTotal={visibleRecordings.length}
                 onReconcile={() => reconcileMutation.mutate()}
+                onRegroupToday={() => {
+                  if (window.confirm(ui.regroupTodayConfirm)) {
+                    regroupTodayMutation.mutate();
+                  }
+                }}
                 onDownloadOutput={(uploadSourceId, outputId) => cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })}
                 onDownloadFile={(fileId) => cosFileDownloadUrlMutation.mutate({ fileId })}
                 onSearchChange={setRecordingSearch}
@@ -3623,6 +3702,9 @@ function RecordingsPanel(props: {
   jobs: JobItem[];
   labels: AdminCopy;
   protectPending: boolean;
+  regroupError: boolean;
+  regroupPending: boolean;
+  regroupResult?: RecordingRegroupResult;
   reconcileError: boolean;
   reconcilePending: boolean;
   reconcileResult?: RecordingScanResult;
@@ -3634,6 +3716,7 @@ function RecordingsPanel(props: {
   onDownloadFile: (fileId: number) => void;
   onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
   onReconcile: () => void;
+  onRegroupToday: () => void;
   onSearchChange: (value: string) => void;
   onSortChange: (value: RecordingSortKey) => void;
   onToggleProtect: (recording: RecordingItem) => void;
@@ -3831,15 +3914,26 @@ function RecordingsPanel(props: {
           <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
         </div>
         {props.canScanLocalFiles ? (
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={props.reconcilePending}
-            type="button"
-            onClick={props.onReconcile}
-          >
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {props.labels.scan}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+              disabled={props.regroupPending || props.reconcilePending}
+              type="button"
+              onClick={props.onRegroupToday}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {props.labels.regroupToday}
+            </button>
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+              disabled={props.reconcilePending || props.regroupPending}
+              type="button"
+              onClick={props.onReconcile}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {props.labels.scan}
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -3867,6 +3961,12 @@ function RecordingsPanel(props: {
       ) : null}
       {props.reconcileError ? (
         <p className="mt-3 text-sm text-red-700">{props.labels.scanFailed}</p>
+      ) : null}
+      {props.regroupResult ? (
+        <p className="mt-3 text-sm text-muted">{props.labels.regroupResult(props.regroupResult)}</p>
+      ) : null}
+      {props.regroupError ? (
+        <p className="mt-3 text-sm text-red-700">{props.labels.regroupFailed}</p>
       ) : null}
 
       <TableToolbar
@@ -4638,6 +4738,17 @@ function formatChinaDateParts(value: string): { date: string; time: string } {
     date: `${valueFor("year")}/${valueFor("month")}/${valueFor("day")}`,
     time: `${valueFor("hour")}:${valueFor("minute")}:${valueFor("second")}`
   };
+}
+
+function currentChinaDate(): string {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const valueFor = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${valueFor("year")}-${valueFor("month")}-${valueFor("day")}`;
 }
 
 function NumberField(props: { label: string; max?: number; min: number; value: number; onChange: (value: number) => void }) {

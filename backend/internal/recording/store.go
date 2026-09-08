@@ -155,6 +155,25 @@ type UploadSourceDiscoverResult struct {
 	MergeGapThresholdSeconds int64 `json:"merge_gap_threshold_seconds"`
 }
 
+type UploadSourceRegroupRequest struct {
+	RecordingProfileID int64  `json:"recording_profile_id"`
+	ChinaDate          string `json:"china_date"`
+	MergeGapSeconds    int64  `json:"merge_gap_seconds"`
+}
+
+type UploadSourceRegroupResult struct {
+	ReplacedSources          int                        `json:"replaced_sources"`
+	CreatedSources           int                        `json:"created_sources"`
+	CancelledJobs            int                        `json:"cancelled_jobs"`
+	Blocked                  []UploadSourceRegroupBlock `json:"blocked"`
+	MergeGapThresholdSeconds int64                      `json:"merge_gap_threshold_seconds"`
+}
+
+type UploadSourceRegroupBlock struct {
+	UploadSourceIDs []int64 `json:"upload_source_ids"`
+	Reason          string  `json:"reason"`
+}
+
 type File struct {
 	ID           int64  `json:"id"`
 	RecordingID  int64  `json:"recording_id"`
@@ -532,6 +551,9 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 		conditions = append(conditions, "p.owner_user_id = ?")
 		args = append(args, actor.ID)
 	}
+	if id <= 0 {
+		conditions = append(conditions, "us.status != 'REPLACED'")
+	}
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -693,6 +715,274 @@ func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64
 	}
 	result.PackageJobsEnqueued = packageJobsEnqueued
 	return result, nil
+}
+
+func (s Store) RegroupUploadSources(ctx context.Context, actor account.User, req UploadSourceRegroupRequest) (UploadSourceRegroupResult, error) {
+	if actor.Role != account.RoleSuperAdmin {
+		return UploadSourceRegroupResult{}, ErrForbidden
+	}
+	if req.RecordingProfileID <= 0 || strings.TrimSpace(req.ChinaDate) == "" {
+		return UploadSourceRegroupResult{}, ErrValidation
+	}
+	thresholdSeconds := normalizeGroupSeconds(req.MergeGapSeconds, DefaultMergeGapThresholdSeconds)
+	sources, err := s.uploadSourcesForRegroupDate(ctx, req.RecordingProfileID, req.ChinaDate)
+	if err != nil {
+		return UploadSourceRegroupResult{}, err
+	}
+	groups := groupUploadSourcesForRegroup(sources, thresholdSeconds)
+	result := UploadSourceRegroupResult{MergeGapThresholdSeconds: thresholdSeconds}
+	for _, group := range groups {
+		sourceIDs := uploadSourceIDs(group)
+		if len(sourceIDs) <= 1 {
+			continue
+		}
+		running, err := s.hasRunningUploadSourceJobs(ctx, sourceIDs)
+		if err != nil {
+			return UploadSourceRegroupResult{}, err
+		}
+		if running {
+			result.Blocked = append(result.Blocked, UploadSourceRegroupBlock{
+				UploadSourceIDs: sourceIDs,
+				Reason:          "RUNNING_JOB",
+			})
+			continue
+		}
+		hasPublication, err := s.hasBilibiliPublications(ctx, sourceIDs)
+		if err != nil {
+			return UploadSourceRegroupResult{}, err
+		}
+		if hasPublication {
+			result.Blocked = append(result.Blocked, UploadSourceRegroupBlock{
+				UploadSourceIDs: sourceIDs,
+				Reason:          "BILIBILI_PUBLICATION_EXISTS",
+			})
+			continue
+		}
+		recordings := recordingsFromUploadSourceGroup(group)
+		if len(recordings) <= 1 {
+			continue
+		}
+		cancelled, created, err := s.replaceUploadSourceGroup(ctx, sourceIDs, recordings, thresholdSeconds)
+		if err != nil {
+			return UploadSourceRegroupResult{}, err
+		}
+		if created {
+			result.ReplacedSources += len(sourceIDs)
+			result.CreatedSources++
+			result.CancelledJobs += cancelled
+		}
+	}
+	return result, nil
+}
+
+func (s Store) uploadSourcesForRegroupDate(ctx context.Context, profileID int64, chinaDate string) ([]UploadSource, error) {
+	start, err := time.ParseInLocation("2006-01-02", chinaDate, chinaLocation())
+	if err != nil {
+		return nil, ErrValidation
+	}
+	end := start.Add(24 * time.Hour)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id
+		FROM upload_sources
+		WHERE recording_profile_id = ?
+			AND status != 'REPLACED'
+			AND started_at >= ?
+			AND started_at < ?
+		ORDER BY started_at ASC, id ASC
+	`, profileID, start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("list upload source regroup candidates: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]UploadSource, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan upload source regroup candidate: %w", err)
+		}
+		found, err := s.uploadSourcesByID(ctx, id, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(found) == 1 {
+			items = append(items, found[0])
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate upload source regroup candidates: %w", err)
+	}
+	return items, nil
+}
+
+func groupUploadSourcesForRegroup(sources []UploadSource, thresholdSeconds int64) [][]UploadSource {
+	groups := make([][]UploadSource, 0)
+	var current []UploadSource
+	var previousEnd time.Time
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		groups = append(groups, current)
+		current = nil
+		previousEnd = time.Time{}
+	}
+	for _, source := range sources {
+		started := parseRecordingTimestamp(source.StartedAt)
+		completed := parseRecordingTimestamp(source.CompletedAt)
+		if len(current) > 0 && !previousEnd.IsZero() && !started.IsZero() {
+			if int64(started.Sub(previousEnd).Seconds()) > thresholdSeconds {
+				flush()
+			}
+		}
+		current = append(current, source)
+		if !completed.IsZero() && (previousEnd.IsZero() || completed.After(previousEnd)) {
+			previousEnd = completed
+		}
+	}
+	flush()
+	return groups
+}
+
+func uploadSourceIDs(sources []UploadSource) []int64 {
+	ids := make([]int64, 0, len(sources))
+	for _, source := range sources {
+		ids = append(ids, source.ID)
+	}
+	return ids
+}
+
+func recordingsFromUploadSourceGroup(sources []UploadSource) []Recording {
+	recordings := make([]Recording, 0)
+	for _, source := range sources {
+		for _, segment := range source.Segments {
+			recordings = append(recordings, Recording{
+				ID:                 segment.RecordingID,
+				RecordingProfileID: source.RecordingProfileID,
+				ProfileName:        source.ProfileName,
+				RoomID:             source.RoomID,
+				StreamerName:       source.StreamerName,
+				Title:              source.Title,
+				StartedAt:          segment.SourceStartedAt,
+				CompletedAt:        segment.SourceCompletedAt,
+				DurationMs:         segment.DurationMs,
+				RecordingStatus:    "COMPLETED",
+				LocalStorageStatus: "AVAILABLE",
+				Files: []File{{
+					ID:           segment.RecordingFileID,
+					RecordingID:  segment.RecordingID,
+					RelativePath: segment.RelativePath,
+					OriginalName: filepath.Base(segment.RelativePath),
+					Kind:         "video",
+					FileStatus:   "CLOSED",
+					SizeBytes:    segment.SizeBytes,
+					DurationMs:   segment.DurationMs,
+					ClosedAt:     segment.SourceCompletedAt,
+				}},
+			})
+		}
+	}
+	sort.SliceStable(recordings, func(i, j int) bool {
+		startI := parseRecordingTimestamp(recordings[i].StartedAt)
+		startJ := parseRecordingTimestamp(recordings[j].StartedAt)
+		if !startI.Equal(startJ) {
+			return startI.Before(startJ)
+		}
+		return recordings[i].ID < recordings[j].ID
+	})
+	return recordings
+}
+
+func (s Store) hasRunningUploadSourceJobs(ctx context.Context, sourceIDs []int64) (bool, error) {
+	for _, id := range sourceIDs {
+		var count int
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM jobs
+			WHERE status = 'RUNNING'
+				AND (upload_source_id = ? OR business_key LIKE ?)
+		`, id, fmt.Sprintf("upload-source:%d:%%", id)).Scan(&count); err != nil {
+			return false, fmt.Errorf("check running upload source jobs: %w", err)
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s Store) hasBilibiliPublications(ctx context.Context, sourceIDs []int64) (bool, error) {
+	for _, id := range sourceIDs {
+		var count int
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM publications
+			WHERE upload_source_id = ? AND platform = 'bilibili'
+		`, id).Scan(&count); err != nil {
+			return false, fmt.Errorf("check bilibili publications: %w", err)
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s Store) replaceUploadSourceGroup(ctx context.Context, sourceIDs []int64, recordings []Recording, thresholdSeconds int64) (int, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, fmt.Errorf("begin upload source regroup: %w", err)
+	}
+	defer tx.Rollback()
+
+	cancelled := 0
+	for _, id := range sourceIDs {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE jobs
+			SET status = 'CANCELLED',
+				locked_at = NULL,
+				heartbeat_at = NULL,
+				locked_by = NULL,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE status IN ('PENDING', 'FAILED')
+				AND (upload_source_id = ? OR business_key LIKE ?)
+		`, id, fmt.Sprintf("upload-source:%d:%%", id))
+		if err != nil {
+			return 0, false, fmt.Errorf("cancel replaced upload source jobs: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return 0, false, fmt.Errorf("read cancelled job count: %w", err)
+		}
+		cancelled += int(changed)
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM upload_source_segments
+			WHERE upload_source_id = ?
+		`, id); err != nil {
+			return 0, false, fmt.Errorf("clear replaced upload source segments: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE upload_sources
+			SET status = 'REPLACED',
+				ready_at = NULL,
+				last_error = 'Replaced by upload source regroup.',
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, id); err != nil {
+			return 0, false, fmt.Errorf("mark upload source replaced: %w", err)
+		}
+	}
+	created, err := insertUploadSourceTx(ctx, tx, recordings, thresholdSeconds)
+	if err != nil {
+		return 0, false, err
+	}
+	if !created {
+		return 0, false, ErrValidation
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, fmt.Errorf("commit upload source regroup: %w", err)
+	}
+	return cancelled, true, nil
 }
 
 func (s Store) ensureUploadSourceMergeJobs(ctx context.Context) (int, error) {
@@ -925,6 +1215,23 @@ func recordingStartTimeFromName(name string) time.Time {
 }
 
 func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, thresholdSeconds int64) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin upload source insert: %w", err)
+	}
+	defer tx.Rollback()
+
+	created, err := insertUploadSourceTx(ctx, tx, recordings, thresholdSeconds)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit upload source insert: %w", err)
+	}
+	return created, nil
+}
+
+func insertUploadSourceTx(ctx context.Context, tx *sql.Tx, recordings []Recording, thresholdSeconds int64) (bool, error) {
 	if len(recordings) == 0 {
 		return false, nil
 	}
@@ -947,12 +1254,6 @@ func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, t
 	if err != nil {
 		return false, fmt.Errorf("encode upload source metadata: %w", err)
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("begin upload source insert: %w", err)
-	}
-	defer tx.Rollback()
 
 	result, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO upload_sources
@@ -1016,9 +1317,6 @@ func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, t
 			return false, fmt.Errorf("enqueue upload source package: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit upload source insert: %w", err)
-	}
 	return true, nil
 }
 
@@ -1060,6 +1358,7 @@ func (s Store) UploadSourcePackageBaseName(ctx context.Context, source UploadSou
 		SELECT id, started_at
 		FROM upload_sources
 		WHERE recording_profile_id = ?
+			AND status != 'REPLACED'
 		ORDER BY started_at ASC, id ASC
 	`, source.RecordingProfileID)
 	if err != nil {

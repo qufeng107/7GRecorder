@@ -970,6 +970,146 @@ func TestUploadSourceCOSStatusUsesCurrentOutputObjects(t *testing.T) {
 	}
 }
 
+func TestRegroupUploadSourcesReplacesFragmentedSources(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-08T10:00:00Z",
+		CompletedAt: "2026-09-08T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-08T10:04:00Z",
+		CompletedAt: "2026-09-08T10:07:00Z",
+		DurationMs:  180000,
+		SizeBytes:   30,
+	})
+	store := NewStore(database, cfg)
+	if _, err := store.DiscoverUploadSources(ctx, 1); err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	before, err := store.ListUploadSources(ctx, actor, 600)
+	if err != nil {
+		t.Fatalf("ListUploadSources returned error: %v", err)
+	}
+	if len(before.Items) != 2 {
+		t.Fatalf("expected fragmented upload sources before regroup, got %#v", before.Items)
+	}
+
+	result, err := store.RegroupUploadSources(ctx, actor, UploadSourceRegroupRequest{
+		RecordingProfileID: 1,
+		ChinaDate:          "2026-09-08",
+		MergeGapSeconds:    600,
+	})
+	if err != nil {
+		t.Fatalf("RegroupUploadSources returned error: %v", err)
+	}
+	if result.ReplacedSources != 2 || result.CreatedSources != 1 || result.CancelledJobs != 2 || len(result.Blocked) != 0 {
+		t.Fatalf("unexpected regroup result: %#v", result)
+	}
+	after, err := store.ListUploadSources(ctx, actor, 600)
+	if err != nil {
+		t.Fatalf("ListUploadSources returned error: %v", err)
+	}
+	if len(after.Items) != 1 || after.Items[0].RecordingCount != 2 || after.Items[0].Status != "MERGE_PENDING" {
+		t.Fatalf("expected one regrouped source, got %#v", after.Items)
+	}
+	if len(after.Items[0].Segments) != 2 || after.Items[0].Segments[1].TimelineStartMs != 180000 {
+		t.Fatalf("unexpected regrouped segments: %#v", after.Items[0].Segments)
+	}
+	var replaced int
+	if err := database.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM upload_sources WHERE status = 'REPLACED'
+	`).Scan(&replaced); err != nil {
+		t.Fatalf("query replaced sources returned error: %v", err)
+	}
+	if replaced != 2 {
+		t.Fatalf("expected two replaced sources, got %d", replaced)
+	}
+}
+
+func TestRegroupUploadSourcesBlocksBilibiliPublication(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-08T10:00:00Z",
+		CompletedAt: "2026-09-08T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-08T10:04:00Z",
+		CompletedAt: "2026-09-08T10:07:00Z",
+		DurationMs:  180000,
+		SizeBytes:   30,
+	})
+	store := NewStore(database, cfg)
+	if _, err := store.DiscoverUploadSources(ctx, 1); err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO publications
+			(recording_profile_id, upload_source_id, platform, status, attempts)
+		VALUES (1, 1, 'bilibili', 'PENDING', 0)
+	`); err != nil {
+		t.Fatalf("insert publication returned error: %v", err)
+	}
+
+	result, err := store.RegroupUploadSources(ctx, actor, UploadSourceRegroupRequest{
+		RecordingProfileID: 1,
+		ChinaDate:          "2026-09-08",
+		MergeGapSeconds:    600,
+	})
+	if err != nil {
+		t.Fatalf("RegroupUploadSources returned error: %v", err)
+	}
+	if result.CreatedSources != 0 || len(result.Blocked) != 1 || result.Blocked[0].Reason != "BILIBILI_PUBLICATION_EXISTS" {
+		t.Fatalf("expected bilibili publication block, got %#v", result)
+	}
+	after, err := store.ListUploadSources(ctx, actor, 600)
+	if err != nil {
+		t.Fatalf("ListUploadSources returned error: %v", err)
+	}
+	if len(after.Items) != 2 {
+		t.Fatalf("expected fragmented sources to remain visible, got %#v", after.Items)
+	}
+}
+
 func TestDiscoverUploadSourcesBackfillsMissingMergeJobs(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

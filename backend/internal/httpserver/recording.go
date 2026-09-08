@@ -140,6 +140,25 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/upload-sources/actions/regroup", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			var req recording.UploadSourceRegroupRequest
+			if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+				writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+				return
+			}
+			result, err := store.RegroupUploadSources(r.Context(), actor, req)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
 	s.BindHandler("/api/v1/upload-sources/{id}/download", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return

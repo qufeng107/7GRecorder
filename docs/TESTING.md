@@ -204,6 +204,9 @@ song processing FAILED
   keys that follow post-package part paths.
 - Upload module reconciliation must not create Bilibili/COS jobs for a `READY_TO_UPLOAD` source that has a later
   same-profile adjacent recording outside the source inside the merge gap.
+- Upload source regroup tests must verify that fragmented historical sources can be explicitly replaced without
+  deleting original recordings or COS objects, that `REPLACED` sources disappear from normal lists, and that groups with
+  Bilibili publications or running upload-source jobs are blocked.
 - COS upload jobs cover worker dispatch with a fake COS uploader, encrypted credential decryption, source path
   resolution under `DATA_ROOT`, object transition to `AVAILABLE`, and job success. Real COS credentials are not used in
   CI.

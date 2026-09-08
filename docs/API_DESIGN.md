@@ -301,6 +301,7 @@ Upload sources are the durable upload-facing recording list:
 ```text
 GET  /api/v1/upload-sources?merge_gap_seconds=600
 POST /api/v1/upload-sources/actions/discover?merge_gap_seconds=600
+POST /api/v1/upload-sources/actions/regroup
 POST /api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url
 POST /api/v1/recording-files/{id}/actions/cos-download-url
 ```
@@ -326,6 +327,14 @@ download policy, then returns a short-lived Tencent COS signed URL. It must not 
 `X-Accel-Redirect` for upload-source downloads.
 
 COS upload settings may later expose a controlled compression preset:
+
+`POST /api/v1/upload-sources/actions/regroup` is SUPER_ADMIN-only and fixes historical upload sources that were
+finalized too early. The request accepts `recording_profile_id`, `china_date` (`YYYY-MM-DD`), and optional
+`merge_gap_seconds`. It groups current non-`REPLACED` sources for that China date by the same merge gap, replaces only
+groups containing multiple old source IDs, and returns counts plus blocked groups. It must refuse groups that have
+running upload-source jobs or Bilibili publication rows, because those can create duplicate external side effects.
+Existing COS objects and local files are never deleted by regroup; old source rows are hidden from normal lists with
+status `REPLACED`.
 
 ```json
 {
