@@ -781,6 +781,12 @@ COS jobs. A `READY_TO_UPLOAD` source is not uploadable when a later same-profile
 merge gap and is not already one of that source's segments. This prevents older prematurely finalized sources from
 starting external uploads before a controlled regroup/rebuild action is run.
 
+As a filesystem fallback, discovery may also inspect only original recording files under `DATA_ROOT/recordings`.
+Derived paths such as `upload-sources/`, COS compression temp files, and other processing directories must be ignored.
+The fallback can only delay source creation when a video filename/path maps to the same profile, its parsed start time
+falls after the candidate source and inside the merge gap, and the file still looks actively written by the same
+fresh-mtime rule used by local reconciliation.
+
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
 `upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
 existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.

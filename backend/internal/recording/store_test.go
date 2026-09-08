@@ -741,6 +741,94 @@ func TestDiscoverUploadSourcesWaitsForAdjacentUnfinishedRecording(t *testing.T) 
 	}
 }
 
+func TestDiscoverUploadSourcesWaitsForAdjacentActiveFile(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-05T10:00:00Z",
+		CompletedAt: "2026-09-05T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+	if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll recording dir returned error: %v", err)
+	}
+	activePath := filepath.Join(recordingDir, "record-1741048619-20260905-180307-001-part 2.flv")
+	if err := os.WriteFile(activePath, []byte("active video"), 0o644); err != nil {
+		t.Fatalf("WriteFile active returned error: %v", err)
+	}
+
+	discover, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+	if err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if discover.Created != 0 || discover.Delayed != 1 {
+		t.Fatalf("expected active filesystem recording to delay upload source, got %#v", discover)
+	}
+}
+
+func TestDiscoverUploadSourcesIgnoresDerivedActiveFiles(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-05T10:00:00Z",
+		CompletedAt: "2026-09-05T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	derivedDir := filepath.Join(cfg.DataRoot, "upload-sources", "1", "1", "parts")
+	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll derived dir returned error: %v", err)
+	}
+	derivedPath := filepath.Join(derivedDir, "record-1741048619-20260905-180307-001-derived.flv")
+	if err := os.WriteFile(derivedPath, []byte("derived video"), 0o644); err != nil {
+		t.Fatalf("WriteFile derived returned error: %v", err)
+	}
+
+	discover, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+	if err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if discover.Created != 1 || discover.Delayed != 0 {
+		t.Fatalf("expected derived files outside recordings root to be ignored, got %#v", discover)
+	}
+}
+
 func TestDiscoverUploadSourcesMarksSingleSegmentPendingPackage(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

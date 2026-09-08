@@ -634,6 +634,16 @@ func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64
 			current = nil
 			return nil
 		}
+		waiting, err = s.hasAdjacentActiveRecordingFile(current[len(current)-1], thresholdSeconds)
+		if err != nil {
+			return err
+		}
+		if waiting {
+			result.Ignored += len(current)
+			result.Delayed += len(current)
+			current = nil
+			return nil
+		}
 		created, err := s.insertUploadSource(ctx, current, thresholdSeconds)
 		if err != nil {
 			return err
@@ -851,6 +861,67 @@ func (s Store) hasAdjacentUnfinishedRecording(ctx context.Context, item Recordin
 		return false, fmt.Errorf("check adjacent unfinished recording: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (s Store) hasAdjacentActiveRecordingFile(item Recording, thresholdSeconds int64) (bool, error) {
+	completed := recordingCompletedTime(item)
+	if completed.IsZero() {
+		return true, nil
+	}
+	root := filepath.Join(s.cfg.DataRoot, "recordings")
+	windowEnd := completed.Add(time.Duration(thresholdSeconds) * time.Second)
+	activeThreshold := time.Now().Add(-2 * time.Minute)
+	found := false
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if found || entry.IsDir() || !isVideoFile(entry.Name()) {
+			return nil
+		}
+		roomID := roomIDFromPath(root, path)
+		if roomID == "" {
+			match := recordingNamePattern.FindStringSubmatch(filepath.Base(path))
+			if len(match) > 1 {
+				roomID = match[1]
+			}
+		}
+		if roomID != item.RoomID {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat adjacent recording file: %w", err)
+		}
+		if info.IsDir() || info.ModTime().Before(activeThreshold) {
+			return nil
+		}
+		started := recordingStartTimeFromName(entry.Name())
+		if started.IsZero() || !started.After(completed) || started.After(windowEnd) {
+			return nil
+		}
+		found = true
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("scan adjacent active recording files: %w", err)
+	}
+	return found, nil
+}
+
+func recordingStartTimeFromName(name string) time.Time {
+	result := recordingNamePattern.FindStringSubmatch(name)
+	if len(result) != 5 {
+		return time.Time{}
+	}
+	parsed, err := time.ParseInLocation("20060102-150405", result[2]+"-"+result[3], time.FixedZone("Asia/Shanghai", 8*60*60))
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
 }
 
 func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, thresholdSeconds int64) (bool, error) {
