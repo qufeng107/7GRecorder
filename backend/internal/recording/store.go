@@ -121,18 +121,22 @@ type UploadSourceSegment struct {
 }
 
 type UploadSourceOutput struct {
-	ID              int64  `json:"id"`
-	UploadSourceID  int64  `json:"upload_source_id"`
-	SortOrder       int    `json:"sort_order"`
-	RelativePath    string `json:"relative_path"`
-	SizeBytes       int64  `json:"size_bytes"`
-	DurationMs      int64  `json:"duration_ms"`
-	TimelineStartMs int64  `json:"timeline_start_ms"`
-	TimelineEndMs   int64  `json:"timeline_end_ms"`
-	Status          string `json:"status"`
-	BilibiliStatus  string `json:"bilibili_status"`
-	BilibiliURL     string `json:"bilibili_url,omitempty"`
-	COSStatus       string `json:"cos_status"`
+	ID                   int64  `json:"id"`
+	UploadSourceID       int64  `json:"upload_source_id"`
+	SortOrder            int    `json:"sort_order"`
+	RelativePath         string `json:"relative_path"`
+	SizeBytes            int64  `json:"size_bytes"`
+	DurationMs           int64  `json:"duration_ms"`
+	TimelineStartMs      int64  `json:"timeline_start_ms"`
+	TimelineEndMs        int64  `json:"timeline_end_ms"`
+	Status               string `json:"status"`
+	BilibiliStatus       string `json:"bilibili_status"`
+	BilibiliURL          string `json:"bilibili_url,omitempty"`
+	COSStatus            string `json:"cos_status"`
+	COSSourceSizeBytes   int64  `json:"cos_source_size_bytes,omitempty"`
+	COSUploadedSizeBytes int64  `json:"cos_uploaded_size_bytes,omitempty"`
+	COSCompressionStatus string `json:"cos_compression_status,omitempty"`
+	COSCompressionPreset string `json:"cos_compression_preset,omitempty"`
 }
 
 type UploadSourceList struct {
@@ -1287,7 +1291,11 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status IN ('FAILED', 'SOURCE_MISSING')) THEN 'FAILED'
 				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp JOIN upload_sources us ON us.recording_profile_id = csp.recording_profile_id WHERE us.id = uso.upload_source_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
 				ELSE 'DISABLED'
-			END
+			END,
+			COALESCE((SELECT co.source_size_bytes FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), 0),
+			COALESCE((SELECT co.size_bytes FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), 0),
+			COALESCE((SELECT co.compression_status FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), ''),
+			COALESCE((SELECT co.compression_preset FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), '')
 		FROM upload_source_outputs uso
 		WHERE uso.upload_source_id = ?
 		ORDER BY uso.sort_order ASC, uso.id ASC
@@ -1313,6 +1321,10 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 			&item.BilibiliStatus,
 			&item.BilibiliURL,
 			&item.COSStatus,
+			&item.COSSourceSizeBytes,
+			&item.COSUploadedSizeBytes,
+			&item.COSCompressionStatus,
+			&item.COSCompressionPreset,
 		); err != nil {
 			return nil, fmt.Errorf("scan upload source output: %w", err)
 		}

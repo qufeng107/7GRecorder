@@ -56,7 +56,18 @@ type fakePackager struct {
 	err     error
 }
 
+type fakeCompressor struct {
+	request media.CompressionRequest
+	result  media.CompressionResult
+	err     error
+}
+
 func (f *fakePackager) Package(_ context.Context, request media.PackageRequest) (media.PackageResult, error) {
+	f.request = request
+	return f.result, f.err
+}
+
+func (f *fakeCompressor) Compress(_ context.Context, request media.CompressionRequest) (media.CompressionResult, error) {
 	f.request = request
 	return f.result, f.err
 }
@@ -366,6 +377,126 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	}
 	if jobStatus != "SUCCEEDED" {
 		t.Fatalf("unexpected job status: %s", jobStatus)
+	}
+}
+
+func TestRunOnceCompressesCOSObjectBeforeUpload(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	cfg.COSCompressionEnabled = true
+	cfg.COSCompressionPreset = upload.COSCompressionPresetH264CRF23MediumMP4
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
+		t.Fatalf("complete initial sync job returned error: %v", err)
+	}
+	sourceRelativePath := "upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv"
+	sourcePath := filepath.Join(cfg.DataRoot, sourceRelativePath)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create upload source dir returned error: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write upload source returned error: %v", err)
+	}
+	store := upload.NewStore(database, cfg)
+	credential, err := store.CreateCredential(ctx, actor, upload.CredentialCreate{
+		Scope:        "USER",
+		Platform:     "tencent_cos",
+		Purpose:      "STORAGE",
+		AccountLabel: "cos account",
+		Secret:       []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential returned error: %v", err)
+	}
+	if _, err := store.UpsertCOSConfig(ctx, actor, created.ID, upload.COSConfigUpsert{
+		CredentialID:    credential.ID,
+		Enabled:         true,
+		Region:          "ap-shanghai",
+		Bucket:          "bucket-1250000000",
+		Prefix:          "7grecorder/test/",
+		MaxManagedBytes: 1000000000,
+	}); err != nil {
+		t.Fatalf("UpsertCOSConfig returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES (1, ?, 'profile:1:1:1', '1741048619', '7G',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'READY_TO_UPLOAD',
+			?, 5, 1, 1, 0, 600, CURRENT_TIMESTAMP)
+	`, created.ID, sourceRelativePath); err != nil {
+		t.Fatalf("insert upload source returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, ?, 5, 1800000, 0, 1800000, 'READY_TO_UPLOAD')
+	`, sourceRelativePath); err != nil {
+		t.Fatalf("insert upload source output returned error: %v", err)
+	}
+	result, err := store.Reconcile(ctx, actor)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.COSObjectsCreated != 1 || result.COSJobsCreated != 1 {
+		t.Fatalf("unexpected reconcile result: %#v", result)
+	}
+
+	compressedRelativePath := "upload-sources/1/1/cos/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.mp4"
+	compressedPath := filepath.Join(cfg.DataRoot, compressedRelativePath)
+	if err := os.MkdirAll(filepath.Dir(compressedPath), 0o755); err != nil {
+		t.Fatalf("create compressed dir returned error: %v", err)
+	}
+	if err := os.WriteFile(compressedPath, []byte("mp4"), 0o644); err != nil {
+		t.Fatalf("write compressed output returned error: %v", err)
+	}
+	compressor := &fakeCompressor{result: media.CompressionResult{
+		RelativePath: compressedRelativePath,
+		SizeBytes:    3,
+		Preset:       upload.COSCompressionPresetH264CRF23MediumMP4,
+	}}
+	cosUploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "etag", SizeBytes: 3}}
+	if err := NewWithCOSUploaderAndCompressor(database, &fakeRecorder{}, cfg, cosUploader, compressor).RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if compressor.request.InputRelativePath != sourceRelativePath || compressor.request.OutputRelativePath != compressedRelativePath {
+		t.Fatalf("unexpected compression request: %#v", compressor.request)
+	}
+	if cosUploader.request.SourcePath != compressedPath {
+		t.Fatalf("expected compressed upload path %q, got %q", compressedPath, cosUploader.request.SourcePath)
+	}
+	if cosUploader.request.ObjectKey != "7grecorder/test/upload-sources/1/1/cos/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.mp4" {
+		t.Fatalf("unexpected compressed object key: %q", cosUploader.request.ObjectKey)
+	}
+
+	var objectStatus string
+	var compressionStatus string
+	var compressedFrom string
+	var sizeBytes int64
+	var sourceSizeBytes int64
+	if err := database.QueryRowContext(ctx, `
+		SELECT status, compression_status, COALESCE(compressed_from_relative_path, ''), size_bytes, source_size_bytes
+		FROM upload_source_cos_objects
+		WHERE id = 1
+	`).Scan(&objectStatus, &compressionStatus, &compressedFrom, &sizeBytes, &sourceSizeBytes); err != nil {
+		t.Fatalf("query cos object returned error: %v", err)
+	}
+	if objectStatus != "AVAILABLE" || compressionStatus != "COMPRESSED" || compressedFrom != compressedRelativePath || sizeBytes != 3 || sourceSizeBytes != 5 {
+		t.Fatalf("unexpected cos object metadata status=%s compression=%s from=%s size=%d source=%d", objectStatus, compressionStatus, compressedFrom, sizeBytes, sourceSizeBytes)
+	}
+	if _, err := os.Stat(compressedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected compressed local file to be removed after upload, got %v", err)
 	}
 }
 

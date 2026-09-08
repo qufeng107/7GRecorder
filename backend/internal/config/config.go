@@ -15,6 +15,8 @@ type Config struct {
 	MasterKeyPath             string
 	UploadMaxPartBytes        int64
 	UploadMaxPartDurationSecs int64
+	COSCompressionEnabled     bool
+	COSCompressionPreset      string
 	LogLevel                  string
 }
 
@@ -31,8 +33,10 @@ func LoadFromEnv() Config {
 		RecorderPassword:          os.Getenv("RECORDER_BASIC_PASSWORD"),
 		FFmpegPath:                env("FFMPEG_PATH", "ffmpeg"),
 		MasterKeyPath:             env("MASTER_KEY_PATH", "/etc/7grecorder/master.key"),
-		UploadMaxPartBytes:        envInt64("UPLOAD_MAX_PART_BYTES", 4*1024*1024*1024),
+		UploadMaxPartBytes:        envInt64("UPLOAD_MAX_PART_BYTES", 3800000000),
 		UploadMaxPartDurationSecs: envInt64("UPLOAD_MAX_PART_DURATION_SECONDS", 7200),
+		COSCompressionEnabled:     envBool("COS_COMPRESSION_ENABLED", true),
+		COSCompressionPreset:      env("COS_COMPRESSION_PRESET", "h264_crf23_medium_mp4"),
 		LogLevel:                  env("LOG_LEVEL", "info"),
 	}
 }
@@ -60,4 +64,18 @@ func envInt64(key string, fallback int64) int64 {
 		return fallback
 	}
 	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	switch value {
+	case "":
+		return fallback
+	case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+		return true
+	case "0", "false", "FALSE", "no", "NO", "off", "OFF":
+		return false
+	default:
+		return fallback
+	}
 }

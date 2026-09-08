@@ -220,10 +220,10 @@ Phase 0 只搭正式部署通道，不建设 test/staging server。
 - 已实现：扫描 `READY_TO_UPLOAD` Upload Source 并创建幂等 COS Object/Job；
 - 已实现：Worker 使用官方 Go SDK 上传 Upload Source 到 COS 并更新对象状态；
 - 已实现：Upload Source 封装分片，按 COS/Bilibili 较小限制生成平台可消费文件；
-- 待修正：将 `UPLOAD_MAX_PART_BYTES` 默认值从早期 4 GiB 调整到更保守的 3.8GB 级别，避免超过 Bilibili
+- 已实现：将 `UPLOAD_MAX_PART_BYTES` 默认值从早期 4 GiB 调整到更保守的 3.8GB 级别，避免超过 Bilibili
   单文件上传边界；
-- 待开发：COS 上传前按受控 preset 压缩每个 output part，默认 `h264_crf23_medium_mp4`；
-- 待开发：COS 对象记录原始大小、上传对象大小、压缩状态和压缩 preset；
+- 已实现：COS 上传前按受控 preset 压缩每个 output part，默认 `h264_crf23_medium_mp4`；
+- 已实现：COS 对象记录原始大小、上传对象大小、压缩状态和压缩 preset；
 - object metadata；
 - per-profile managed usage；
 - oldest Recording COS rolling deletion；
