@@ -62,7 +62,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		packager:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		compressor: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		cos:        upload.NewTencentCOSUploader(),
-		bilibili:   upload.NewNoopBilibiliUploader(),
+		bilibili:   upload.NewBiliupCLIUploader(cfg),
 		lockID:     fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
 }

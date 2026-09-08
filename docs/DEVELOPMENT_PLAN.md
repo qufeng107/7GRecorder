@@ -180,6 +180,15 @@ Phase 0 只搭正式部署通道，不建设 test/staging server。
 - verify/update；
 - enabled detection。
 
+Current implementation note:
+
+- Real upload now uses the pinned `biliup==1.2.4` CLI adapter from the worker process.
+- The adapter writes decrypted biliup cookie JSON only to a per-job temp directory, invokes `biliup upload --submit`,
+  then removes the temp directory.
+- Successful CLI exit is treated as a successful publication even when the BV id is not present in stdout, so retry
+  handling does not accidentally submit duplicates.
+- Verification/listing after upload is still pending and should fill missing BV URLs later.
+
 ### Reconciler / Jobs
 
 - 扫描 completed + local source available；

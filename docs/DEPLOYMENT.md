@@ -204,6 +204,16 @@ Backend image：
 - 不包含 Node runtime；
 - 运行时不下载依赖。
 
+The runtime image pins `biliup==1.2.4`. Override the executable path only when the server intentionally installs a
+compatible CLI somewhere else:
+
+```env
+BILIUP_PATH=biliup
+```
+
+Bilibili credential material is not deployed as a file. Store the biliup-generated `cookies.json` content in the
+encrypted credential vault from the admin Upload Settings page.
+
 Server deploy builds:
 
 ```text

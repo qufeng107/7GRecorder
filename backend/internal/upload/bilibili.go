@@ -24,6 +24,10 @@ type BilibiliPublishingSettings struct {
 	Tags                []string `json:"tags,omitempty"`
 	Copyright           int      `json:"copyright,omitempty"`
 	Source              string   `json:"source,omitempty"`
+	TID                 int      `json:"tid,omitempty"`
+	Submit              string   `json:"submit,omitempty"`
+	Line                string   `json:"line,omitempty"`
+	UploadLimit         int      `json:"upload_limit,omitempty"`
 }
 
 type BilibiliJobPayload struct {

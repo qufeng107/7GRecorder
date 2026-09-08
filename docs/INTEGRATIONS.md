@@ -102,6 +102,30 @@ CLI subprocess
 
 不运行独立 biliup server。
 
+### Pinned Runtime
+
+The production image installs `biliup==1.2.4` from PyPI and invokes the CLI directly. The adapter is intentionally
+small and only builds arguments supported by the pinned CLI:
+
+```text
+biliup -u <job-temp-cookies.json> upload --submit <app|web|client> --limit <n> --copyright <1|2> --tid <partition> --title <title> --desc <description> ...
+```
+
+The default upload settings are:
+
+- submit mode: `app`
+- upload concurrency limit: `3`
+- Bilibili partition `tid`: `171`
+- copyright: `1` when the stored config omits or corrupts the value
+
+Credential secret JSON should contain the content of a biliup-generated `cookies.json`, either directly or under
+`cookie_file`, `cookie_json`, or `biliup_cookie`. Any valid JSON object is passed through to biliup so minor upstream
+cookie-file shape changes do not break the app. Browser cookie strings such as `SESSDATA=...` are rejected because
+they are not a stable biliup credential file format.
+
+If the CLI exits successfully but no BV id can be parsed from stdout, 7GRecorder still marks the publication verified
+without an external URL. This avoids unsafe duplicate submissions; a later verification/list adapter can fill the URL.
+
 ### Upload Source Rule
 
 第一版整场 Recording 投稿要求：

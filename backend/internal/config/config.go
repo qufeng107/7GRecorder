@@ -12,6 +12,7 @@ type Config struct {
 	RecorderUser              string
 	RecorderPassword          string
 	FFmpegPath                string
+	BiliupPath                string
 	MasterKeyPath             string
 	UploadMaxPartBytes        int64
 	UploadMaxPartDurationSecs int64
@@ -32,6 +33,7 @@ func LoadFromEnv() Config {
 		RecorderUser:              os.Getenv("RECORDER_BASIC_USER"),
 		RecorderPassword:          os.Getenv("RECORDER_BASIC_PASSWORD"),
 		FFmpegPath:                env("FFMPEG_PATH", "ffmpeg"),
+		BiliupPath:                env("BILIUP_PATH", "biliup"),
 		MasterKeyPath:             env("MASTER_KEY_PATH", "/etc/7grecorder/master.key"),
 		UploadMaxPartBytes:        envInt64("UPLOAD_MAX_PART_BYTES", 3800000000),
 		UploadMaxPartDurationSecs: envInt64("UPLOAD_MAX_PART_DURATION_SECONDS", 7200),

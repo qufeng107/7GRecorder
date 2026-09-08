@@ -61,6 +61,10 @@ Fake/controlled external boundaries：
 
 普通 CI 不依赖真实 Bilibili/COS/网易云账号。
 
+Bilibili CLI adapter tests use a fake executable instead of a real Bilibili account. The test verifies argument
+construction, temp `cookies.json` creation, BV id parsing, and rejection of browser cookie strings. Real biliup fixture
+refresh remains a pinned-version maintenance task and must not introduce real secrets into the repository.
+
 ---
 
 ## 5. 模块隔离测试 — 必须有
