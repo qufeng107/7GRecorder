@@ -101,12 +101,12 @@ type COSConfigUpsert struct {
 }
 
 type ReconcileResult struct {
-	PublicationsCreated     int `json:"publications_created"`
-	BilibiliJobsCreated     int `json:"bilibili_jobs_created"`
-	COSObjectsCreated       int `json:"cos_objects_created"`
-	COSJobsCreated          int `json:"cos_jobs_created"`
-	COSFileObjectsCreated   int `json:"cos_file_objects_created"`
-	COSFileJobsCreated      int `json:"cos_file_jobs_created"`
+	PublicationsCreated    int `json:"publications_created"`
+	BilibiliJobsCreated    int `json:"bilibili_jobs_created"`
+	COSObjectsCreated      int `json:"cos_objects_created"`
+	COSJobsCreated         int `json:"cos_jobs_created"`
+	COSFileObjectsCreated  int `json:"cos_file_objects_created"`
+	COSFileJobsCreated     int `json:"cos_file_jobs_created"`
 }
 
 type COSJobPayload struct {
