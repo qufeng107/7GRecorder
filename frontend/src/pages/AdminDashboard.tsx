@@ -240,6 +240,18 @@ type UploadSourceRegroupResult = {
   merge_gap_threshold_seconds: number;
 };
 
+type UploadSourceRepairResult = {
+  checked: number;
+  reset_to_merge: number;
+  reset_to_package: number;
+  outputs_marked_missing: number;
+  upload_jobs_cancelled: number;
+  merge_jobs_reset: number;
+  package_jobs_reset: number;
+  source_missing_blocks: number;
+  bilibili_publications_reset: number;
+};
+
 type RecordingRegroupResult = {
   china_date: string;
   items: UploadSourceRegroupResult[];
@@ -688,6 +700,11 @@ const uiCopy = {
       return `重整 ${result.china_date}：替换旧父视频 ${totals.replaced}，生成新父视频 ${totals.created}，取消旧任务 ${totals.cancelled}，阻止 ${totals.blocked} 组。`;
     },
     regroupFailed: "重整失败，请查看服务器日志。",
+    repairUploadSources: "修复上传源",
+    repairUploadSourcesConfirm: "将检查上传源产物是否仍在本地磁盘，缺失时自动回退到合并或封装步骤并取消下游上传任务。确认继续？",
+    repairUploadSourcesResult: (result: UploadSourceRepairResult) =>
+      `修复：检查 ${result.checked} 个，回退合并 ${result.reset_to_merge} 个，回退封装 ${result.reset_to_package} 个，重置 merge/package 任务 ${result.merge_jobs_reset + result.package_jobs_reset} 个，取消上传任务 ${result.upload_jobs_cancelled} 个，原始文件缺失阻止 ${result.source_missing_blocks} 个。`,
+    repairUploadSourcesFailed: "修复失败，请查看服务器日志。",
     refresh: "刷新",
     scanResult: (imported: number, updated: number, skipped: number) =>
       `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
@@ -985,6 +1002,11 @@ const uiCopy = {
       return `Regrouped ${result.china_date}: ${totals.replaced} old sources replaced, ${totals.created} new sources created, ${totals.cancelled} old jobs cancelled, ${totals.blocked} groups blocked.`;
     },
     regroupFailed: "Regroup failed. Check server logs.",
+    repairUploadSources: "Repair Sources",
+    repairUploadSourcesConfirm: "Check upload-source files on disk. Missing derived files will roll back to merge or package and downstream upload jobs will be cancelled. Continue?",
+    repairUploadSourcesResult: (result: UploadSourceRepairResult) =>
+      `Repair: checked ${result.checked}, reset ${result.reset_to_merge} to merge and ${result.reset_to_package} to package, reset ${result.merge_jobs_reset + result.package_jobs_reset} merge/package jobs, cancelled ${result.upload_jobs_cancelled} upload jobs, blocked ${result.source_missing_blocks} sources with missing raw files.`,
+    repairUploadSourcesFailed: "Repair failed. Check server logs.",
     refresh: "Refresh",
     scanResult: (imported: number, updated: number, skipped: number) =>
       `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
@@ -1718,6 +1740,19 @@ export function AdminDashboard() {
     }
   });
 
+  const repairUploadSourcesMutation = useMutation({
+    mutationFn: () =>
+      requestJson<UploadSourceRepairResult>("/api/v1/upload-sources/actions/repair", {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
+    }
+  });
+
   const protectRecordingMutation = useMutation({
     mutationFn: (request: { id: number; protected: boolean }) =>
       requestJson<RecordingItem>(
@@ -2216,6 +2251,9 @@ export function AdminDashboard() {
                 regroupError={regroupTodayMutation.isError}
                 regroupPending={regroupTodayMutation.isPending}
                 regroupResult={regroupTodayMutation.data}
+                repairError={repairUploadSourcesMutation.isError}
+                repairPending={repairUploadSourcesMutation.isPending}
+                repairResult={repairUploadSourcesMutation.data}
                 reconcileError={reconcileMutation.isError}
                 reconcilePending={reconcileMutation.isPending}
                 reconcileResult={reconcileMutation.data}
@@ -2228,6 +2266,11 @@ export function AdminDashboard() {
                 onRegroupToday={() => {
                   if (window.confirm(ui.regroupTodayConfirm)) {
                     regroupTodayMutation.mutate();
+                  }
+                }}
+                onRepairUploadSources={() => {
+                  if (window.confirm(ui.repairUploadSourcesConfirm)) {
+                    repairUploadSourcesMutation.mutate();
                   }
                 }}
                 onDownloadOutput={(uploadSourceId, outputId) => cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })}
@@ -3706,6 +3749,9 @@ function RecordingsPanel(props: {
   jobs: JobItem[];
   labels: AdminCopy;
   protectPending: boolean;
+  repairError: boolean;
+  repairPending: boolean;
+  repairResult?: UploadSourceRepairResult;
   regroupError: boolean;
   regroupPending: boolean;
   regroupResult?: RecordingRegroupResult;
@@ -3721,6 +3767,7 @@ function RecordingsPanel(props: {
   onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
   onReconcile: () => void;
   onRegroupToday: () => void;
+  onRepairUploadSources: () => void;
   onSearchChange: (value: string) => void;
   onSortChange: (value: RecordingSortKey) => void;
   onToggleProtect: (recording: RecordingItem) => void;
@@ -3921,7 +3968,7 @@ function RecordingsPanel(props: {
           <div className="flex flex-wrap items-center gap-2">
             <button
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-              disabled={props.regroupPending || props.reconcilePending}
+              disabled={props.regroupPending || props.reconcilePending || props.repairPending}
               type="button"
               onClick={props.onRegroupToday}
             >
@@ -3929,8 +3976,17 @@ function RecordingsPanel(props: {
               {props.labels.regroupToday}
             </button>
             <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+              disabled={props.regroupPending || props.reconcilePending || props.repairPending}
+              type="button"
+              onClick={props.onRepairUploadSources}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {props.labels.repairUploadSources}
+            </button>
+            <button
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-              disabled={props.reconcilePending || props.regroupPending}
+              disabled={props.reconcilePending || props.regroupPending || props.repairPending}
               type="button"
               onClick={props.onReconcile}
             >
@@ -3971,6 +4027,12 @@ function RecordingsPanel(props: {
       ) : null}
       {props.regroupError ? (
         <p className="mt-3 text-sm text-red-700">{props.labels.regroupFailed}</p>
+      ) : null}
+      {props.repairResult ? (
+        <p className="mt-3 text-sm text-muted">{props.labels.repairUploadSourcesResult(props.repairResult)}</p>
+      ) : null}
+      {props.repairError ? (
+        <p className="mt-3 text-sm text-red-700">{props.labels.repairUploadSourcesFailed}</p>
       ) : null}
 
       <TableToolbar

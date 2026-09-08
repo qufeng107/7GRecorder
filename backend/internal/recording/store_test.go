@@ -13,6 +13,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/db"
+	"github.com/7grecorder/7grecorder/backend/internal/media"
 	"github.com/7grecorder/7grecorder/backend/internal/profile"
 )
 
@@ -970,6 +971,77 @@ func TestUploadSourceCOSStatusUsesCurrentOutputObjects(t *testing.T) {
 	}
 }
 
+func TestMarkUploadSourcePackageSucceededUpdatesOutputsReferencedByCOS(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO credentials (id, owner_user_id, scope, platform, purpose, account_label, encrypted_secret, status)
+		VALUES (1, 1, 'USER', 'tencent_cos', 'STORAGE', 'cos account', X'00', 'UNVERIFIED');
+		INSERT INTO cos_storage_profiles
+			(id, recording_profile_id, credential_id, enabled, region, bucket, prefix, max_managed_bytes)
+		VALUES (1, 1, 1, 1, 'ap-shanghai', 'bucket-1250000000', '7grecorder/test/', 1000000000);
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, output_relative_path,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds)
+		VALUES (1, 1, 'profile:1:1:1', 'ready upload', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'PACKAGE_PENDING',
+			'upload-sources/1/1/upload-source-1.flv', 50, 1, 1, 0, 600);
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, 'upload-sources/1/1/parts/old.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD');
+		INSERT INTO upload_source_cos_objects
+			(cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key, size_bytes, status)
+		VALUES
+			(1, 1, 1, 1, '7grecorder/test/upload-sources/1/1/parts/old.flv', 50, 'AVAILABLE');
+	`); err != nil {
+		t.Fatalf("seed upload source returned error: %v", err)
+	}
+
+	if err := NewStore(database, cfg).MarkUploadSourcePackageSucceeded(ctx, 1, []media.PackageOutput{{
+		RelativePath:    "upload-sources/1/1/parts/new.flv",
+		SizeBytes:       75,
+		DurationMs:      1900000,
+		TimelineStartMs: 0,
+		TimelineEndMs:   1900000,
+	}}); err != nil {
+		t.Fatalf("MarkUploadSourcePackageSucceeded returned error: %v", err)
+	}
+	var outputID int64
+	var outputPath string
+	var outputSize int64
+	if err := database.QueryRowContext(ctx, `
+		SELECT id, relative_path, size_bytes
+		FROM upload_source_outputs
+		WHERE upload_source_id = 1 AND sort_order = 0
+	`).Scan(&outputID, &outputPath, &outputSize); err != nil {
+		t.Fatalf("query output returned error: %v", err)
+	}
+	if outputID != 1 || outputPath != "upload-sources/1/1/parts/new.flv" || outputSize != 75 {
+		t.Fatalf("unexpected updated output id=%d path=%q size=%d", outputID, outputPath, outputSize)
+	}
+	var referencedOutputID int64
+	if err := database.QueryRowContext(ctx, `
+		SELECT upload_source_output_id
+		FROM upload_source_cos_objects
+		WHERE id = 1
+	`).Scan(&referencedOutputID); err != nil {
+		t.Fatalf("query cos object returned error: %v", err)
+	}
+	if referencedOutputID != outputID {
+		t.Fatalf("expected COS object to keep output id %d, got %d", outputID, referencedOutputID)
+	}
+}
+
 func TestRegroupUploadSourcesReplacesFragmentedSources(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
@@ -1107,6 +1179,139 @@ func TestRegroupUploadSourcesBlocksBilibiliPublication(t *testing.T) {
 	}
 	if len(after.Items) != 2 {
 		t.Fatalf("expected fragmented sources to remain visible, got %#v", after.Items)
+	}
+}
+
+func TestRepairUploadSourcesResetsMissingDerivedFilesToMerge(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-08T10:00:00Z",
+		CompletedAt: "2026-09-08T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-08T10:04:00Z",
+		CompletedAt: "2026-09-08T10:07:00Z",
+		DurationMs:  180000,
+		SizeBytes:   30,
+	})
+	for _, relativePath := range []string{
+		"recordings/1741048619-Streamer/part 1.flv",
+		"recordings/1741048619-Streamer/part 2.flv",
+	} {
+		path := filepath.Join(cfg.DataRoot, relativePath)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create recording file dir returned error: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("video"), 0o644); err != nil {
+			t.Fatalf("write recording file returned error: %v", err)
+		}
+	}
+	store := NewStore(database, cfg)
+	if _, err := store.DiscoverUploadSources(ctx, 600); err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = 'PACKAGE_FAILED',
+			output_relative_path = 'upload-sources/1/1/upload-source-1.flv',
+			last_error = 'package input missing'
+		WHERE id = 1;
+		UPDATE jobs
+		SET status = 'SUCCEEDED'
+		WHERE business_key = 'upload-source:1:merge';
+		INSERT INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts, last_error)
+		VALUES
+			(1, 1, 'PACKAGE_UPLOAD_SOURCE', 'MEDIA', 'upload-source:1:package', '{"upload_source_id":1}', 'FAILED', 65, 3, 'waiting for merge rerun'),
+			(1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'upload-source:1:bilibili:upload', '{"publication_id":1,"upload_source_id":1}', 'FAILED', 80, 3, 'source file missing');
+		INSERT INTO upload_source_outputs
+			(upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 0, 'upload-sources/1/1/parts/upload-source-1-part-000.flv', 20, 180000, 0, 180000, 'READY_TO_UPLOAD');
+		INSERT INTO publications
+			(id, recording_profile_id, upload_source_id, platform, status, last_error)
+		VALUES (1, 1, 1, 'bilibili', 'SOURCE_MISSING', 'source file missing');
+	`); err != nil {
+		t.Fatalf("seed broken upload source returned error: %v", err)
+	}
+
+	result, err := store.RepairUploadSources(ctx, actor)
+	if err != nil {
+		t.Fatalf("RepairUploadSources returned error: %v", err)
+	}
+	if result.ResetToMerge != 1 || result.OutputsMarkedMissing != 1 || result.PackageJobsReset != 1 || result.MergeJobsReset != 1 || result.BilibiliPublicationsReset != 1 {
+		t.Fatalf("unexpected repair result: %#v", result)
+	}
+	var sourceStatus string
+	var outputPath string
+	if err := database.QueryRowContext(ctx, `
+		SELECT status, COALESCE(output_relative_path, '')
+		FROM upload_sources
+		WHERE id = 1
+	`).Scan(&sourceStatus, &outputPath); err != nil {
+		t.Fatalf("query repaired source returned error: %v", err)
+	}
+	if sourceStatus != "MERGE_PENDING" || outputPath != "" {
+		t.Fatalf("unexpected repaired source status=%s output=%q", sourceStatus, outputPath)
+	}
+	var mergeJobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:merge'`).Scan(&mergeJobStatus); err != nil {
+		t.Fatalf("query repaired merge job returned error: %v", err)
+	}
+	if mergeJobStatus != "PENDING" {
+		t.Fatalf("expected merge job PENDING, got %s", mergeJobStatus)
+	}
+	var packageJobStatus string
+	var packageJobError string
+	if err := database.QueryRowContext(ctx, `
+		SELECT status, COALESCE(last_error, '')
+		FROM jobs
+		WHERE business_key = 'upload-source:1:package'
+	`).Scan(&packageJobStatus, &packageJobError); err != nil {
+		t.Fatalf("query repaired package job returned error: %v", err)
+	}
+	if packageJobStatus != "CANCELLED" || packageJobError != "waiting for merge rerun" {
+		t.Fatalf("expected package job waiting for merge, got status=%s error=%q", packageJobStatus, packageJobError)
+	}
+	var publicationStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM publications WHERE id = 1`).Scan(&publicationStatus); err != nil {
+		t.Fatalf("query repaired publication returned error: %v", err)
+	}
+	if publicationStatus != "PENDING" {
+		t.Fatalf("expected publication PENDING, got %s", publicationStatus)
+	}
+	if err := store.MarkUploadSourceMergeSucceeded(ctx, 1, "upload-sources/1/1/upload-source-1.flv", 50); err != nil {
+		t.Fatalf("MarkUploadSourceMergeSucceeded returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `
+		SELECT status, COALESCE(last_error, '')
+		FROM jobs
+		WHERE business_key = 'upload-source:1:package'
+	`).Scan(&packageJobStatus, &packageJobError); err != nil {
+		t.Fatalf("query package job after merge returned error: %v", err)
+	}
+	if packageJobStatus != "PENDING" || packageJobError != "" {
+		t.Fatalf("expected package job to resume after merge, got status=%s error=%q", packageJobStatus, packageJobError)
 	}
 }
 

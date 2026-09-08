@@ -436,6 +436,49 @@ func (s Store) createBilibiliJobs(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read bilibili job count: %w", err)
 	}
+	reset, err := s.resetPendingBilibiliJobs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return int(changed) + reset, nil
+}
+
+func (s Store) resetPendingBilibiliJobs(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING',
+			attempts = 0,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE type = 'UPLOAD_BILIBILI'
+			AND status IN ('FAILED', 'CANCELLED')
+			AND publication_id IN (
+				SELECT p.id
+				FROM publications p
+				JOIN upload_sources us ON us.id = p.upload_source_id
+				WHERE p.platform = 'bilibili'
+					AND p.status = 'PENDING'
+					AND us.status = 'READY_TO_UPLOAD'
+					AND `+uploadSourceStableCondition+`
+					AND EXISTS (
+						SELECT 1 FROM upload_source_outputs uso
+						WHERE uso.upload_source_id = us.id
+							AND uso.status = 'READY_TO_UPLOAD'
+					)
+			)
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("reset pending bilibili jobs: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read reset bilibili job count: %w", err)
+	}
 	return int(changed), nil
 }
 
@@ -506,6 +549,46 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 	changed, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("read cos job count: %w", err)
+	}
+	reset, err := s.resetPendingCOSJobs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return int(changed) + reset, nil
+}
+
+func (s Store) resetPendingCOSJobs(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING',
+			attempts = 0,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE type = 'UPLOAD_COS_OBJECT'
+			AND status IN ('FAILED', 'CANCELLED')
+			AND EXISTS (
+				SELECT 1
+				FROM upload_source_cos_objects co
+				JOIN upload_sources us ON us.id = co.upload_source_id
+				JOIN upload_source_outputs uso ON uso.id = co.upload_source_output_id
+					AND uso.status = 'READY_TO_UPLOAD'
+				WHERE co.id = json_extract(jobs.payload_json, '$.cos_object_id')
+					AND co.status = 'PENDING'
+					AND us.status = 'READY_TO_UPLOAD'
+					AND `+uploadSourceStableCondition+`
+			)
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("reset pending cos jobs: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read reset cos job count: %w", err)
 	}
 	return int(changed), nil
 }

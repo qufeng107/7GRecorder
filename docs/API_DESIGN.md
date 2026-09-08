@@ -302,6 +302,7 @@ Upload sources are the durable upload-facing recording list:
 GET  /api/v1/upload-sources?merge_gap_seconds=600
 POST /api/v1/upload-sources/actions/discover?merge_gap_seconds=600
 POST /api/v1/upload-sources/actions/regroup
+POST /api/v1/upload-sources/actions/repair
 POST /api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url
 POST /api/v1/recording-files/{id}/actions/cos-download-url
 ```
@@ -333,6 +334,13 @@ finalized too early. The request accepts `recording_profile_id`, `china_date` (`
 `merge_gap_seconds`. It groups current non-`REPLACED` sources for that China date by the same merge gap, replaces only
 groups containing multiple old source IDs, and returns counts plus blocked groups. It must refuse groups that have
 running upload-source jobs or Bilibili publication rows, because those can create duplicate external side effects.
+
+`POST /api/v1/upload-sources/actions/repair` is SUPER_ADMIN-only and reconciles upload-source metadata against the
+local filesystem. It is not a regroup operation. If derived merge/package output files were manually removed while the
+original recording segment files still exist, the action rolls the upload source back to `MERGE_PENDING` or
+`PACKAGE_PENDING`, resets the corresponding media jobs, cancels pending/failed downstream upload jobs, and resets
+`SOURCE_MISSING` Bilibili publications to `PENDING`. If original segment files are missing, the source is left blocked
+with a visible error instead of creating partial uploads.
 Existing COS objects and local files are never deleted by regroup; old source rows are hidden from normal lists with
 status `REPLACED`.
 

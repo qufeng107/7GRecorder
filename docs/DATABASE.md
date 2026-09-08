@@ -801,6 +801,14 @@ existing closed video file but still enter `PACKAGE_PENDING` so size/duration li
 failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
 `PACKAGE_FAILED`.
 
+Upload-source repair is allowed to correct DB/filesystem drift without deleting external metadata. If package output
+rows already exist and are referenced by COS objects, package reruns update rows by `(upload_source_id, sort_order)`
+instead of deleting them, preserving foreign-key references. Missing local output files are marked
+`upload_source_outputs.status = SOURCE_MISSING` until a package rerun recreates them. When derived outputs are gone but
+all original segment files are still present, repair rolls the parent back to `MERGE_PENDING` or `PACKAGE_PENDING` and
+resets the corresponding media jobs. When original segment files are gone, repair records a visible blocked state and
+must not create partial Bilibili/COS uploads.
+
 ---
 
 ## 17. Raw Danmaku Archive

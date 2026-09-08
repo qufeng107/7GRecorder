@@ -354,6 +354,9 @@ func (w Worker) discoverUploadSources(ctx context.Context) error {
 	if _, err := recordingStore.ReconcileLocal(ctx, accountSuperAdmin()); err != nil {
 		return err
 	}
+	if _, err := recordingStore.RepairUploadSources(ctx, accountSuperAdmin()); err != nil {
+		return err
+	}
 	if _, err := recordingStore.DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds); err != nil {
 		return err
 	}

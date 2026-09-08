@@ -174,6 +174,18 @@ type UploadSourceRegroupBlock struct {
 	Reason          string  `json:"reason"`
 }
 
+type UploadSourceRepairResult struct {
+	Checked                   int `json:"checked"`
+	ResetToMerge              int `json:"reset_to_merge"`
+	ResetToPackage            int `json:"reset_to_package"`
+	OutputsMarkedMissing      int `json:"outputs_marked_missing"`
+	UploadJobsCancelled       int `json:"upload_jobs_cancelled"`
+	MergeJobsReset            int `json:"merge_jobs_reset"`
+	PackageJobsReset          int `json:"package_jobs_reset"`
+	SourceMissingBlocks       int `json:"source_missing_blocks"`
+	BilibiliPublicationsReset int `json:"bilibili_publications_reset"`
+}
+
 type File struct {
 	ID           int64  `json:"id"`
 	RecordingID  int64  `json:"recording_id"`
@@ -775,6 +787,105 @@ func (s Store) RegroupUploadSources(ctx context.Context, actor account.User, req
 	return result, nil
 }
 
+func (s Store) RepairUploadSources(ctx context.Context, actor account.User) (UploadSourceRepairResult, error) {
+	if actor.Role != account.RoleSuperAdmin {
+		return UploadSourceRepairResult{}, ErrForbidden
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, status, COALESCE(output_relative_path, ''), recording_count
+		FROM upload_sources
+		WHERE status IN ('MERGE_PENDING', 'MERGE_FAILED', 'PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return UploadSourceRepairResult{}, fmt.Errorf("list upload sources for repair: %w", err)
+	}
+	defer rows.Close()
+
+	type repairSource struct {
+		ID                 int64
+		Status             string
+		OutputRelativePath string
+		RecordingCount     int
+	}
+	sources := make([]repairSource, 0)
+	for rows.Next() {
+		var item repairSource
+		if err := rows.Scan(&item.ID, &item.Status, &item.OutputRelativePath, &item.RecordingCount); err != nil {
+			return UploadSourceRepairResult{}, fmt.Errorf("scan upload source repair row: %w", err)
+		}
+		sources = append(sources, item)
+	}
+	if err := rows.Err(); err != nil {
+		return UploadSourceRepairResult{}, fmt.Errorf("iterate upload sources for repair: %w", err)
+	}
+
+	result := UploadSourceRepairResult{}
+	for _, source := range sources {
+		id := source.ID
+		status := source.Status
+		outputRelativePath := source.OutputRelativePath
+		recordingCount := source.RecordingCount
+		result.Checked++
+		segmentFilesAvailable, err := s.uploadSourceSegmentFilesAvailable(ctx, id)
+		if err != nil {
+			return UploadSourceRepairResult{}, err
+		}
+		if !segmentFilesAvailable {
+			changed, cancelled, err := s.markUploadSourceRepairBlocked(ctx, id, "repair blocked: source segment files are missing")
+			if err != nil {
+				return UploadSourceRepairResult{}, err
+			}
+			result.SourceMissingBlocks += changed
+			result.UploadJobsCancelled += cancelled
+			continue
+		}
+		missingOutputs, err := s.markMissingUploadSourceOutputs(ctx, id)
+		if err != nil {
+			return UploadSourceRepairResult{}, err
+		}
+		result.OutputsMarkedMissing += missingOutputs
+
+		outputMissing := false
+		if strings.TrimSpace(outputRelativePath) != "" {
+			outputMissing, err = s.relativeFileMissing(outputRelativePath)
+			if err != nil {
+				return UploadSourceRepairResult{}, err
+			}
+		}
+		outputCount, err := s.readyUploadSourceOutputCount(ctx, id)
+		if err != nil {
+			return UploadSourceRepairResult{}, err
+		}
+		needsOutputRebuild := missingOutputs > 0 || outputCount == 0
+		needsMergeRerun := missingOutputs > 0 ||
+			status == "MERGE_FAILED" ||
+			(outputCount == 0 && (strings.TrimSpace(outputRelativePath) == "" || outputMissing || status == "PACKAGE_PENDING" || status == "PACKAGE_FAILED"))
+		switch {
+		case recordingCount > 1 && needsMergeRerun:
+			cancelled, resetMerge, resetPackage, pubs, err := s.resetUploadSourceToMerge(ctx, id)
+			if err != nil {
+				return UploadSourceRepairResult{}, err
+			}
+			result.UploadJobsCancelled += cancelled
+			result.MergeJobsReset += resetMerge
+			result.PackageJobsReset += resetPackage
+			result.BilibiliPublicationsReset += pubs
+			result.ResetToMerge++
+		case recordingCount <= 1 && (needsOutputRebuild || status == "PACKAGE_FAILED"):
+			cancelled, resetPackage, pubs, err := s.resetUploadSourceToPackage(ctx, id)
+			if err != nil {
+				return UploadSourceRepairResult{}, err
+			}
+			result.UploadJobsCancelled += cancelled
+			result.PackageJobsReset += resetPackage
+			result.BilibiliPublicationsReset += pubs
+			result.ResetToPackage++
+		}
+	}
+	return result, nil
+}
+
 func (s Store) uploadSourcesForRegroupDate(ctx context.Context, profileID int64, chinaDate string) ([]UploadSource, error) {
 	start, err := time.ParseInLocation("2006-01-02", chinaDate, chinaLocation())
 	if err != nil {
@@ -1053,6 +1164,337 @@ func (s Store) ensureUploadSourcePackageJobs(ctx context.Context) (int, error) {
 	changed, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("read ensured package job count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func (s Store) uploadSourceSegmentFilesAvailable(ctx context.Context, uploadSourceID int64) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT relative_path
+		FROM upload_source_segments
+		WHERE upload_source_id = ?
+	`, uploadSourceID)
+	if err != nil {
+		return false, fmt.Errorf("list upload source segment paths: %w", err)
+	}
+	defer rows.Close()
+
+	seen := false
+	for rows.Next() {
+		var relativePath string
+		if err := rows.Scan(&relativePath); err != nil {
+			return false, fmt.Errorf("scan upload source segment path: %w", err)
+		}
+		seen = true
+		missing, err := s.relativeFileMissing(relativePath)
+		if err != nil {
+			return false, err
+		}
+		if missing {
+			return false, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate upload source segment paths: %w", err)
+	}
+	return seen, nil
+}
+
+func (s Store) markMissingUploadSourceOutputs(ctx context.Context, uploadSourceID int64) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, relative_path
+		FROM upload_source_outputs
+		WHERE upload_source_id = ?
+			AND status = 'READY_TO_UPLOAD'
+	`, uploadSourceID)
+	if err != nil {
+		return 0, fmt.Errorf("list upload source output paths: %w", err)
+	}
+	defer rows.Close()
+
+	missingIDs := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		var relativePath string
+		if err := rows.Scan(&id, &relativePath); err != nil {
+			return 0, fmt.Errorf("scan upload source output path: %w", err)
+		}
+		missing, err := s.relativeFileMissing(relativePath)
+		if err != nil {
+			return 0, err
+		}
+		if missing {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate upload source output paths: %w", err)
+	}
+	changed := 0
+	for _, id := range missingIDs {
+		result, err := s.db.ExecContext(ctx, `
+			UPDATE upload_source_outputs
+			SET status = 'SOURCE_MISSING',
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+				AND status = 'READY_TO_UPLOAD'
+		`, id)
+		if err != nil {
+			return 0, fmt.Errorf("mark upload source output missing: %w", err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("read output missing count: %w", err)
+		}
+		changed += int(count)
+	}
+	return changed, nil
+}
+
+func (s Store) readyUploadSourceOutputCount(ctx context.Context, uploadSourceID int64) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM upload_source_outputs
+		WHERE upload_source_id = ?
+			AND status = 'READY_TO_UPLOAD'
+	`, uploadSourceID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count ready upload source outputs: %w", err)
+	}
+	return count, nil
+}
+
+func (s Store) relativeFileMissing(relativePath string) (bool, error) {
+	path, err := resolveWithinRoot(s.cfg.DataRoot, relativePath)
+	if err != nil {
+		return false, fmt.Errorf("resolve upload source file: %w", err)
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat upload source file: %w", err)
+	}
+	return info.IsDir(), nil
+}
+
+func (s Store) markUploadSourceRepairBlocked(ctx context.Context, uploadSourceID int64, message string) (int, int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin upload source repair block: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = CASE
+				WHEN status IN ('READY_TO_UPLOAD', 'PACKAGE_PENDING', 'PACKAGE_FAILED') THEN 'PACKAGE_FAILED'
+				ELSE status
+			END,
+			last_error = ?,
+			ready_at = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+			AND status IN ('MERGE_PENDING', 'MERGE_FAILED', 'PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
+	`, message, uploadSourceID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("mark upload source repair blocked: %w", err)
+	}
+	cancelled, err := cancelPendingUploadJobsTx(ctx, tx, uploadSourceID)
+	if err != nil {
+		return 0, 0, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, 0, fmt.Errorf("read repair blocked count: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("commit upload source repair block: %w", err)
+	}
+	return int(changed), cancelled, nil
+}
+
+func (s Store) resetUploadSourceToMerge(ctx context.Context, uploadSourceID int64) (int, int, int, int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("begin upload source repair merge reset: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = 'MERGE_PENDING',
+			output_relative_path = NULL,
+			output_recording_file_id = NULL,
+			ready_at = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, uploadSourceID); err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("reset upload source to merge: %w", err)
+	}
+	cancelled, err := cancelPendingUploadJobsTx(ctx, tx, uploadSourceID)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	pubs, err := resetSourceMissingPublicationsTx(ctx, tx, uploadSourceID)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	merge, err := resetUploadSourceJobTx(ctx, tx, uploadSourceID, "MERGE_UPLOAD_SOURCE", 60, "MEDIA")
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	pkg, err := markPackageJobWaitingForMergeTx(ctx, tx, uploadSourceID)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("commit upload source repair merge reset: %w", err)
+	}
+	return cancelled, merge, pkg, pubs, nil
+}
+
+func (s Store) resetUploadSourceToPackage(ctx context.Context, uploadSourceID int64) (int, int, int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("begin upload source repair package reset: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET status = 'PACKAGE_PENDING',
+			output_relative_path = (
+				SELECT relative_path FROM upload_source_segments
+				WHERE upload_source_id = ?
+				ORDER BY sort_order ASC, id ASC LIMIT 1
+			),
+			ready_at = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, uploadSourceID, uploadSourceID); err != nil {
+		return 0, 0, 0, fmt.Errorf("reset upload source to package: %w", err)
+	}
+	cancelled, err := cancelPendingUploadJobsTx(ctx, tx, uploadSourceID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	pubs, err := resetSourceMissingPublicationsTx(ctx, tx, uploadSourceID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	pkg, err := resetUploadSourceJobTx(ctx, tx, uploadSourceID, "PACKAGE_UPLOAD_SOURCE", 65, "MEDIA")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, 0, fmt.Errorf("commit upload source repair package reset: %w", err)
+	}
+	return cancelled, pkg, pubs, nil
+}
+
+func resetUploadSourceJobTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64, jobType string, priority int, resourceClass string) (int, error) {
+	var businessKey string
+	if jobType == "PACKAGE_UPLOAD_SOURCE" {
+		businessKey = fmt.Sprintf("upload-source:%d:package", uploadSourceID)
+	}
+	if jobType == "MERGE_UPLOAD_SOURCE" {
+		businessKey = fmt.Sprintf("upload-source:%d:merge", uploadSourceID)
+	}
+	if businessKey == "" {
+		return 0, ErrValidation
+	}
+	payload := fmt.Sprintf(`{"upload_source_id":%d}`, uploadSourceID)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT recording_profile_id, id, ?, ?, ?, ?, 'PENDING', ?, 3
+		FROM upload_sources
+		WHERE id = ?
+	`, jobType, resourceClass, businessKey, payload, priority, uploadSourceID); err != nil {
+		return 0, fmt.Errorf("insert repaired upload source job: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING',
+			attempts = 0,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE business_key = ?
+			AND type = ?
+			AND status != 'RUNNING'
+	`, businessKey, jobType)
+	if err != nil {
+		return 0, fmt.Errorf("reset upload source job: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read reset upload source job count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func markPackageJobWaitingForMergeTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) (int, error) {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'CANCELLED',
+			last_error = 'waiting for merge rerun',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE business_key = ?
+			AND type = 'PACKAGE_UPLOAD_SOURCE'
+			AND status != 'RUNNING'
+	`, fmt.Sprintf("upload-source:%d:package", uploadSourceID))
+	if err != nil {
+		return 0, fmt.Errorf("mark package job waiting for merge: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read waiting package job count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func cancelPendingUploadJobsTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) (int, error) {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'CANCELLED',
+			last_error = 'upload source will be repaired before upload',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
+			AND status IN ('PENDING', 'FAILED')
+	`, uploadSourceID)
+	if err != nil {
+		return 0, fmt.Errorf("cancel pending upload jobs for repair: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read cancelled upload job count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func resetSourceMissingPublicationsTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) (int, error) {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE publications
+		SET status = 'PENDING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND platform = 'bilibili'
+			AND status = 'SOURCE_MISSING'
+	`, uploadSourceID)
+	if err != nil {
+		return 0, fmt.Errorf("reset source-missing publications: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read reset publication count: %w", err)
 	}
 	return int(changed), nil
 }
@@ -1431,6 +1873,23 @@ func (s Store) MarkUploadSourceMergeSucceeded(ctx context.Context, id int64, out
 	`, fmt.Sprintf("upload-source:%d:package", id), string(payload), id); err != nil {
 		return fmt.Errorf("enqueue upload source package: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING',
+			attempts = 0,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE business_key = ?
+			AND type = 'PACKAGE_UPLOAD_SOURCE'
+			AND status != 'RUNNING'
+	`, fmt.Sprintf("upload-source:%d:package", id)); err != nil {
+		return fmt.Errorf("reset upload source package job: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit upload source merge success: %w", err)
 	}
@@ -1467,9 +1926,6 @@ func (s Store) MarkUploadSourcePackageSucceeded(ctx context.Context, id int64, o
 		return fmt.Errorf("begin upload source package success: %w", err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM upload_source_outputs WHERE upload_source_id = ?`, id); err != nil {
-		return fmt.Errorf("clear upload source outputs: %w", err)
-	}
 	var totalBytes int64
 	var totalDurationMs int64
 	for index, output := range outputs {
@@ -1480,11 +1936,29 @@ func (s Store) MarkUploadSourcePackageSucceeded(ctx context.Context, id int64, o
 			INSERT INTO upload_source_outputs
 				(upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
 			VALUES (?, ?, ?, ?, ?, ?, ?, 'READY_TO_UPLOAD')
+			ON CONFLICT(upload_source_id, sort_order) DO UPDATE SET
+				relative_path = excluded.relative_path,
+				size_bytes = excluded.size_bytes,
+				duration_ms = excluded.duration_ms,
+				timeline_start_ms = excluded.timeline_start_ms,
+				timeline_end_ms = excluded.timeline_end_ms,
+				status = 'READY_TO_UPLOAD',
+				updated_at = CURRENT_TIMESTAMP
 		`, id, index, output.RelativePath, output.SizeBytes, output.DurationMs, output.TimelineStartMs, output.TimelineEndMs); err != nil {
-			return fmt.Errorf("insert upload source output: %w", err)
+			return fmt.Errorf("upsert upload source output: %w", err)
 		}
 		totalBytes += output.SizeBytes
 		totalDurationMs += output.DurationMs
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_source_outputs
+		SET status = 'SOURCE_MISSING',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND sort_order >= ?
+			AND status = 'READY_TO_UPLOAD'
+	`, id, len(outputs)); err != nil {
+		return fmt.Errorf("mark stale upload source outputs missing: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE upload_sources
@@ -1497,6 +1971,17 @@ func (s Store) MarkUploadSourcePackageSucceeded(ctx context.Context, id int64, o
 		WHERE id = ? AND status IN ('PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
 	`, totalBytes, totalDurationMs, totalDurationMs, id); err != nil {
 		return fmt.Errorf("mark upload source package succeeded: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE publications
+		SET status = 'PENDING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND platform = 'bilibili'
+			AND status = 'SOURCE_MISSING'
+	`, id); err != nil {
+		return fmt.Errorf("reset source-missing publications after package: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit upload source package success: %w", err)

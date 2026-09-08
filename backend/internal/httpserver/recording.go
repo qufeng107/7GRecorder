@@ -159,6 +159,20 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/upload-sources/actions/repair", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			result, err := store.RepairUploadSources(r.Context(), actor)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
 	s.BindHandler("/api/v1/upload-sources/{id}/download", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return

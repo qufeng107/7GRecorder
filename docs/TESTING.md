@@ -211,6 +211,11 @@ song processing FAILED
 - Upload source regroup tests must verify that fragmented historical sources can be explicitly replaced without
   deleting original recordings or COS objects, that `REPLACED` sources disappear from normal lists, and that groups with
   Bilibili publications or running upload-source jobs are blocked.
+- Upload source repair tests must verify DB/filesystem drift recovery: missing derived merge/package files roll a source
+  back to the correct upstream state when original segment files still exist; old succeeded/failed/cancelled merge and
+  package jobs are reset safely; downstream upload jobs are cancelled until the source is ready again; package reruns
+  update existing output rows without violating COS object foreign keys; missing original segment files block repair
+  instead of creating partial uploads.
 - COS upload jobs cover worker dispatch with a fake COS uploader, encrypted credential decryption, source path
   resolution under `DATA_ROOT`, object transition to `AVAILABLE`, and job success. Real COS credentials are not used in
   CI.
