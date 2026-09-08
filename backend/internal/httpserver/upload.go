@@ -142,6 +142,26 @@ func bindUploadHandlers(cfg config.Config, s *ghttp.Server) {
 			r.Response.WriteJson(result)
 		})
 	})
+
+	s.BindHandler("/api/v1/recording-files/{id}/actions/cos-download-url", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		fileID := r.Get("id").Int64()
+		withUploadStore(r, cfg, func(actor account.User, store upload.Store) {
+			request, err := store.COSRecordingFileDownloadURLRequest(r.Context(), actor, fileID)
+			if err != nil {
+				writeUploadError(r, err)
+				return
+			}
+			result, err := upload.NewTencentCOSUploader().SignedDownloadURL(r.Context(), request, 5*time.Minute)
+			if err != nil {
+				writeUploadError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
 }
 
 func withUploadStore(r *ghttp.Request, cfg config.Config, fn func(account.User, upload.Store)) {

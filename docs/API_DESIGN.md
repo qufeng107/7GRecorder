@@ -302,6 +302,7 @@ Upload sources are the durable upload-facing recording list:
 GET  /api/v1/upload-sources?merge_gap_seconds=600
 POST /api/v1/upload-sources/actions/discover?merge_gap_seconds=600
 POST /api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url
+POST /api/v1/recording-files/{id}/actions/cos-download-url
 ```
 
 Discovery is SUPER_ADMIN-only and idempotent. It creates upload sources only when a profile is not currently live or
@@ -343,6 +344,10 @@ Recording file APIs expose metadata for local storage management, not public dow
 go through upload-source output parts that have been uploaded to COS. The backend authenticates the session, checks
 profile visibility and download policy, and returns a short-lived Tencent COS signed URL. Later manager/public-user
 limits, such as allowed recording date windows and daily download counts, must be enforced before issuing that URL.
+
+Raw danmaku downloads use `POST /api/v1/recording-files/{id}/actions/cos-download-url`. This endpoint only supports
+closed `recording_files.kind = 'danmaku'` assets whose raw COS copy is `AVAILABLE`. It must not expose local server
+files and must not infer timeline alignment.
 
 下载行为见第 9 节。
 

@@ -224,6 +224,8 @@ Phase 0 只搭正式部署通道，不建设 test/staging server。
   单文件上传边界；
 - 已实现：COS 上传前按受控 preset 压缩每个 output part，默认 `h264_crf23_medium_mp4`；
 - 已实现：COS 对象记录原始大小、上传对象大小、压缩状态和压缩 preset；
+- 当前开发：原始弹幕文件按 `recording_files.kind = 'danmaku'` 扫描入库，使用 `UPLOAD_COS_RECORDING_FILE`
+  任务上传到 COS `raw/` 前缀；先归档原文，不解析、不对齐时间轴；
 - object metadata；
 - per-profile managed usage；
 - oldest Recording COS rolling deletion；

@@ -68,6 +68,67 @@ func TestReconcileLocalImportsRecordingFiles(t *testing.T) {
 	}
 }
 
+func TestReconcileLocalImportsDanmakuWithMatchingVideo(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	_, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+	if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	baseName := "record-1741048619-20260905-224258-164-title"
+	videoPath := filepath.Join(recordingDir, baseName+".flv")
+	danmakuPath := filepath.Join(recordingDir, baseName+".xml")
+	if err := os.WriteFile(videoPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile video returned error: %v", err)
+	}
+	if err := os.WriteFile(danmakuPath, []byte("<i></i>"), 0o644); err != nil {
+		t.Fatalf("WriteFile danmaku returned error: %v", err)
+	}
+	oldTime := closedTestTime()
+	if err := os.Chtimes(videoPath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes video returned error: %v", err)
+	}
+	if err := os.Chtimes(danmakuPath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes danmaku returned error: %v", err)
+	}
+
+	result, err := NewStore(database, cfg).ReconcileLocal(ctx, actor)
+	if err != nil {
+		t.Fatalf("ReconcileLocal returned error: %v", err)
+	}
+	if result.Imported != 2 {
+		t.Fatalf("expected two imported files, got %#v", result)
+	}
+
+	items, err := NewStore(database, cfg).List(ctx, actor)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one recording, got %d", len(items))
+	}
+	if len(items[0].Files) != 2 {
+		t.Fatalf("expected video and danmaku files, got %#v", items[0].Files)
+	}
+	kinds := map[string]bool{}
+	for _, file := range items[0].Files {
+		kinds[file.Kind] = true
+	}
+	if !kinds["video"] || !kinds["danmaku"] {
+		t.Fatalf("expected video and danmaku kinds, got %#v", items[0].Files)
+	}
+}
+
 func TestReconcileLocalUpdatesExistingRecordingFiles(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

@@ -777,6 +777,22 @@ existing closed video file but still enter `PACKAGE_PENDING` so size/duration li
 failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
 `PACKAGE_FAILED`.
 
+---
+
+## 17. Raw Danmaku Archive
+
+Raw danmaku files are indexed as `recording_files.kind = 'danmaku'`.
+They are attachment assets for a recording, not video segments, and must not be consumed by upload source merge,
+package, Bilibili upload, or local storage cleanup decisions until a later timeline-alignment design is approved.
+
+The existing `cos_objects` table stores COS copies of raw recording-file assets. For the first raw archive use case,
+only closed danmaku files are eligible. The object key is derived from the configured COS prefix plus
+`raw/<recording_files.relative_path>`, so raw artifacts cannot collide with publishable video parts stored in
+`upload_source_cos_objects`.
+
+`UPLOAD_COS_RECORDING_FILE` jobs own raw file upload status transitions in `cos_objects`. Publishable video part
+upload status remains isolated in `upload_source_cos_objects`.
+
 备份写入：
 
 ```text

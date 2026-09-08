@@ -101,16 +101,23 @@ type COSConfigUpsert struct {
 }
 
 type ReconcileResult struct {
-	PublicationsCreated int `json:"publications_created"`
-	BilibiliJobsCreated int `json:"bilibili_jobs_created"`
-	COSObjectsCreated   int `json:"cos_objects_created"`
-	COSJobsCreated      int `json:"cos_jobs_created"`
+	PublicationsCreated     int `json:"publications_created"`
+	BilibiliJobsCreated     int `json:"bilibili_jobs_created"`
+	COSObjectsCreated       int `json:"cos_objects_created"`
+	COSJobsCreated          int `json:"cos_jobs_created"`
+	COSFileObjectsCreated   int `json:"cos_file_objects_created"`
+	COSFileJobsCreated      int `json:"cos_file_jobs_created"`
 }
 
 type COSJobPayload struct {
 	COSObjectID    int64 `json:"cos_object_id"`
 	UploadSourceID int64 `json:"upload_source_id"`
 	OutputID       int64 `json:"output_id"`
+}
+
+type COSRecordingFileJobPayload struct {
+	COSObjectID     int64 `json:"cos_object_id"`
+	RecordingFileID int64 `json:"recording_file_id"`
 }
 
 func (s Store) ListCredentials(ctx context.Context, actor account.User) ([]Credential, error) {
@@ -321,6 +328,16 @@ func (s Store) Reconcile(ctx context.Context, actor account.User) (ReconcileResu
 		return ReconcileResult{}, err
 	}
 	result.COSJobsCreated = cosJobs
+	fileObjects, err := s.createCOSRecordingFileObjects(ctx)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	result.COSFileObjectsCreated = fileObjects
+	fileJobs, err := s.createCOSRecordingFileJobs(ctx)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	result.COSFileJobsCreated = fileJobs
 	return result, nil
 }
 
@@ -457,6 +474,71 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 	return int(changed), nil
 }
 
+func (s Store) createCOSRecordingFileObjects(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO cos_objects
+			(cos_storage_profile_id, recording_profile_id, recording_id, recording_file_id, object_key, size_bytes, status)
+		SELECT csp.id,
+			rec.recording_profile_id,
+			rf.recording_id,
+			rf.id,
+			csp.prefix || 'raw/' || rf.relative_path,
+			rf.size_bytes,
+			'PENDING'
+		FROM recording_files rf
+		JOIN recordings rec ON rec.id = rf.recording_id
+			AND rec.local_storage_status <> 'DELETED'
+		JOIN cos_storage_profiles csp ON csp.recording_profile_id = rec.recording_profile_id
+			AND csp.enabled = 1
+		WHERE rf.kind = 'danmaku'
+			AND rf.file_status = 'CLOSED'
+			AND rf.deleted_at IS NULL
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("create cos recording file objects: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read cos recording file object count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func (s Store) createCOSRecordingFileJobs(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO jobs
+			(recording_profile_id, recording_id, recording_file_id, cos_object_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT co.recording_profile_id,
+			co.recording_id,
+			co.recording_file_id,
+			co.id,
+			'UPLOAD_COS_RECORDING_FILE',
+			'NETWORK',
+			'recording-file:' || co.recording_file_id || ':cos:' || co.cos_storage_profile_id,
+			'{"cos_object_id":' || co.id || ',"recording_file_id":' || co.recording_file_id || '}',
+			'PENDING',
+			95,
+			5
+		FROM cos_objects co
+		JOIN recording_files rf ON rf.id = co.recording_file_id
+		JOIN cos_storage_profiles csp ON csp.id = co.cos_storage_profile_id
+			AND csp.enabled = 1
+		WHERE co.status = 'PENDING'
+			AND co.deleted_at IS NULL
+			AND rf.kind = 'danmaku'
+			AND rf.file_status = 'CLOSED'
+			AND rf.deleted_at IS NULL
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("create cos recording file jobs: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read cos recording file job count: %w", err)
+	}
+	return int(changed), nil
+}
+
 func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COSUploadRequest, error) {
 	if payload.COSObjectID <= 0 {
 		return COSUploadRequest{}, ErrValidation
@@ -530,6 +612,77 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 	}
 	if info.IsDir() {
 		return COSUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "cos upload source path is a directory")
+	}
+	request.SourcePath = sourcePath
+	request.SourceRelativePath = sourceRelativePath
+	request.Secret, err = s.decryptCOSSecret(encryptedSecret)
+	if err != nil {
+		return COSUploadRequest{}, err
+	}
+	return request, nil
+}
+
+func (s Store) COSRecordingFileUploadRequest(ctx context.Context, payload COSRecordingFileJobPayload) (COSUploadRequest, error) {
+	if payload.COSObjectID <= 0 || payload.RecordingFileID <= 0 {
+		return COSUploadRequest{}, ErrValidation
+	}
+	var request COSUploadRequest
+	var encryptedSecret []byte
+	var sourceRelativePath string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT co.id,
+			co.recording_profile_id,
+			csp.region,
+			csp.bucket,
+			csp.prefix,
+			co.object_key,
+			rf.relative_path,
+			rf.size_bytes,
+			c.encrypted_secret
+		FROM cos_objects co
+		JOIN recording_files rf ON rf.id = co.recording_file_id
+			AND rf.kind = 'danmaku'
+			AND rf.file_status = 'CLOSED'
+			AND rf.deleted_at IS NULL
+		JOIN recordings rec ON rec.id = co.recording_id
+			AND rec.local_storage_status <> 'DELETED'
+		JOIN cos_storage_profiles csp ON csp.id = co.cos_storage_profile_id
+		JOIN credentials c ON c.id = csp.credential_id
+		WHERE co.id = ?
+			AND co.recording_file_id = ?
+			AND co.status IN ('PENDING', 'FAILED')
+			AND co.deleted_at IS NULL
+			AND csp.enabled = 1
+	`, payload.COSObjectID, payload.RecordingFileID).Scan(
+		&request.ObjectID,
+		&request.RecordingProfileID,
+		&request.Region,
+		&request.Bucket,
+		&request.Prefix,
+		&request.ObjectKey,
+		&sourceRelativePath,
+		&request.SourceSizeBytes,
+		&encryptedSecret,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return COSUploadRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return COSUploadRequest{}, fmt.Errorf("load cos recording file upload request: %w", err)
+	}
+	sourcePath, err := resolveWithinRoot(s.cfg.DataRoot, sourceRelativePath)
+	if err != nil {
+		return COSUploadRequest{}, fmt.Errorf("resolve cos recording file source: %w", err)
+	}
+	info, err := os.Stat(sourcePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return COSUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "cos recording file source is missing")
+	}
+	if err != nil {
+		return COSUploadRequest{}, fmt.Errorf("stat cos recording file source: %w", err)
+	}
+	if info.IsDir() {
+		return COSUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "cos recording file source path is a directory")
 	}
 	request.SourcePath = sourcePath
 	request.SourceRelativePath = sourceRelativePath
@@ -654,6 +807,64 @@ func (s Store) MarkCOSObjectUploadFailed(ctx context.Context, objectID int64, er
 	return nil
 }
 
+func (s Store) MarkCOSRecordingFileUploading(ctx context.Context, objectID int64) error {
+	if objectID <= 0 {
+		return ErrValidation
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE cos_objects
+		SET status = 'UPLOADING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, objectID)
+	if err != nil {
+		return fmt.Errorf("mark cos recording file uploading: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkCOSRecordingFileUploaded(ctx context.Context, objectID int64, result COSUploadResult) error {
+	if objectID <= 0 {
+		return ErrValidation
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE cos_objects
+		SET status = 'AVAILABLE',
+			etag = NULLIF(?, ''),
+			size_bytes = CASE WHEN ? > 0 THEN ? ELSE size_bytes END,
+			last_error = NULL,
+			uploaded_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, result.ETag, result.SizeBytes, result.SizeBytes, objectID)
+	if err != nil {
+		return fmt.Errorf("mark cos recording file uploaded: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkCOSRecordingFileUploadFailed(ctx context.Context, objectID int64, errorClass string, message string) error {
+	if objectID <= 0 {
+		return ErrValidation
+	}
+	status := "FAILED"
+	if errorClass == "SOURCE_MISSING" {
+		status = "SOURCE_MISSING"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE cos_objects
+		SET status = ?,
+			last_error = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, status, message, objectID)
+	if err != nil {
+		return fmt.Errorf("mark cos recording file failed: %w", err)
+	}
+	return nil
+}
+
 func (s Store) COSDownloadURLRequest(ctx context.Context, actor account.User, uploadSourceID int64, outputID int64) (COSDownloadURLRequest, error) {
 	if uploadSourceID <= 0 || outputID <= 0 {
 		return COSDownloadURLRequest{}, ErrValidation
@@ -711,6 +922,70 @@ func (s Store) COSDownloadURLRequest(ctx context.Context, actor account.User, up
 		return COSDownloadURLRequest{}, err
 	}
 	if sourceStatus != "READY_TO_UPLOAD" || outputStatus != "READY_TO_UPLOAD" || objectStatus != "AVAILABLE" {
+		return COSDownloadURLRequest{}, ErrNotReady
+	}
+	secret, err := s.decryptCOSSecret(encryptedSecret)
+	if err != nil {
+		return COSDownloadURLRequest{}, err
+	}
+	request.Secret = secret
+	return request, nil
+}
+
+func (s Store) COSRecordingFileDownloadURLRequest(ctx context.Context, actor account.User, fileID int64) (COSDownloadURLRequest, error) {
+	if fileID <= 0 {
+		return COSDownloadURLRequest{}, ErrValidation
+	}
+
+	var request COSDownloadURLRequest
+	var encryptedSecret []byte
+	var profileOwnerID int64
+	var fileStatus string
+	var objectStatus string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT co.id,
+			co.recording_profile_id,
+			csp.region,
+			csp.bucket,
+			co.object_key,
+			c.encrypted_secret,
+			p.owner_user_id,
+			rf.file_status,
+			co.status
+		FROM cos_objects co
+		JOIN recording_files rf ON rf.id = co.recording_file_id
+			AND rf.kind = 'danmaku'
+			AND rf.deleted_at IS NULL
+		JOIN recordings rec ON rec.id = co.recording_id
+		JOIN recording_profiles p ON p.id = co.recording_profile_id
+		JOIN cos_storage_profiles csp ON csp.id = co.cos_storage_profile_id
+		JOIN credentials c ON c.id = csp.credential_id
+		WHERE co.recording_file_id = ?
+			AND co.deleted_at IS NULL
+			AND csp.enabled = 1
+		ORDER BY co.updated_at DESC, co.id DESC
+		LIMIT 1
+	`, fileID).Scan(
+		&request.ObjectID,
+		&request.RecordingProfileID,
+		&request.Region,
+		&request.Bucket,
+		&request.ObjectKey,
+		&encryptedSecret,
+		&profileOwnerID,
+		&fileStatus,
+		&objectStatus,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return COSDownloadURLRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return COSDownloadURLRequest{}, fmt.Errorf("load cos recording file download request: %w", err)
+	}
+	if err := s.ensureCanDownloadUploadSourceOutput(ctx, actor, profileOwnerID); err != nil {
+		return COSDownloadURLRequest{}, err
+	}
+	if fileStatus != "CLOSED" || objectStatus != "AVAILABLE" {
 		return COSDownloadURLRequest{}, ErrNotReady
 	}
 	secret, err := s.decryptCOSSecret(encryptedSecret)
