@@ -351,7 +351,7 @@ func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (Com
 	}
 	defer os.RemoveAll(workDir)
 
-	tempOutput := filepath.Join(workDir, filepath.Base(outputPath)+".tmp")
+	tempOutput := compressionTempOutputPath(workDir, outputPath)
 	cmd := exec.CommandContext(ctx, m.FFmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-i", inputPath,
@@ -387,6 +387,16 @@ func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (Com
 		return CompressionResult{}, err
 	}
 	return CompressionResult{RelativePath: req.OutputRelativePath, SizeBytes: outputInfo.Size(), Preset: preset}, nil
+}
+
+func compressionTempOutputPath(workDir string, outputPath string) string {
+	base := filepath.Base(outputPath)
+	ext := filepath.Ext(base)
+	if ext == "" {
+		return filepath.Join(workDir, base+".tmp")
+	}
+	stem := strings.TrimSuffix(base, ext)
+	return filepath.Join(workDir, stem+".tmp"+ext)
 }
 
 func (m FFmpegMerger) probe(ctx context.Context, path string) error {

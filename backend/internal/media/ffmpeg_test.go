@@ -43,3 +43,10 @@ func TestPackageCreatesNamedSinglePart(t *testing.T) {
 		t.Fatalf("stat named output returned error: %v", err)
 	}
 }
+
+func TestCompressionTempOutputKeepsFinalExtension(t *testing.T) {
+	path := compressionTempOutputPath("/tmp/work", "/data/7grecorder/upload-sources/9/7G-20260908-p01.mp4")
+	if filepath.Base(path) != "7G-20260908-p01.tmp.mp4" {
+		t.Fatalf("unexpected temp output path: %q", path)
+	}
+}
