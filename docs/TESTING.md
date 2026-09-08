@@ -191,6 +191,8 @@ song processing FAILED
 - Upload source discovery covers the shared merge gap threshold, waiting until a profile is no longer recording,
   idempotent source creation, single-segment `PACKAGE_PENDING`, multi-segment `MERGE_PENDING`, backfilled missing merge
   and package jobs, and segment timeline metadata.
+- Upload source discovery must wait instead of finalizing a parent source when a later same-profile recording starts
+  inside the merge gap and is still `ACTIVE` or has a `WRITING` video file.
 - Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
   `PACKAGE_PENDING`, and terminal failure visibility.
 - Upload source package jobs cover worker dispatch, output part persistence, source transition to `READY_TO_UPLOAD`,

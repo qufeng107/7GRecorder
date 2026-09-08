@@ -770,6 +770,12 @@ source recording timestamps, relative paths, and each segment's timeline interva
 named `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv` using China-time date and the profile's live ordinal for that day.
 COS/Bilibili modules consume output parts from sources whose status is `READY_TO_UPLOAD`.
 
+Upload source discovery must not finalize a completed recording into a parent upload source while the same recording
+profile has an adjacent unfinished recording inside the configured merge gap. The merge gap is also the stability
+window: if the next segment starts within that window and is still `ACTIVE` or has a `WRITING` video file, discovery
+waits so the eventual parent source can include the full continuous session. Already finalized sources with
+upload/publication side effects are not silently rebuilt by the automatic scanner.
+
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
 `upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
 existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.

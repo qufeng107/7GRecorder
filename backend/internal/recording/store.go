@@ -149,6 +149,7 @@ type UploadSourceList struct {
 type UploadSourceDiscoverResult struct {
 	Created                  int   `json:"created"`
 	Ignored                  int   `json:"ignored"`
+	Delayed                  int   `json:"delayed"`
 	MergeJobsEnqueued        int   `json:"merge_jobs_enqueued"`
 	PackageJobsEnqueued      int   `json:"package_jobs_enqueued"`
 	MergeGapThresholdSeconds int64 `json:"merge_gap_threshold_seconds"`
@@ -623,6 +624,16 @@ func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64
 			current = nil
 			return nil
 		}
+		waiting, err := s.hasAdjacentUnfinishedRecording(ctx, current[len(current)-1], thresholdSeconds)
+		if err != nil {
+			return err
+		}
+		if waiting {
+			result.Ignored += len(current)
+			result.Delayed += len(current)
+			current = nil
+			return nil
+		}
 		created, err := s.insertUploadSource(ctx, current, thresholdSeconds)
 		if err != nil {
 			return err
@@ -808,6 +819,38 @@ func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) 
 		return nil, fmt.Errorf("iterate upload source candidates: %w", err)
 	}
 	return items, nil
+}
+
+func (s Store) hasAdjacentUnfinishedRecording(ctx context.Context, item Recording, thresholdSeconds int64) (bool, error) {
+	completed := recordingCompletedTime(item)
+	if completed.IsZero() {
+		return true, nil
+	}
+	latestAdjacentStart := completed.Add(time.Duration(thresholdSeconds) * time.Second).UTC().Format(time.RFC3339)
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM recordings next
+		WHERE next.recording_profile_id = ?
+			AND next.local_storage_status != 'DELETED'
+			AND next.local_deleted_at IS NULL
+			AND next.started_at > ?
+			AND next.started_at <= ?
+			AND (
+				next.recording_status = 'ACTIVE'
+				OR EXISTS (
+					SELECT 1
+					FROM recording_files f
+					WHERE f.recording_id = next.id
+						AND LOWER(f.kind) = 'video'
+						AND f.file_status = 'WRITING'
+						AND f.deleted_at IS NULL
+				)
+			)
+	`, item.RecordingProfileID, completed.UTC().Format(time.RFC3339), latestAdjacentStart).Scan(&count); err != nil {
+		return false, fmt.Errorf("check adjacent unfinished recording: %w", err)
+	}
+	return count > 0, nil
 }
 
 func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, thresholdSeconds int64) (bool, error) {

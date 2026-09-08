@@ -307,7 +307,9 @@ POST /api/v1/recording-files/{id}/actions/cos-download-url
 
 Discovery is SUPER_ADMIN-only and idempotent. It creates upload sources only when a profile is not currently live or
 recording and the newest segment in a continuous group has been completed for longer than the merge gap threshold. The
-same threshold controls both grouping adjacent segments and waiting before finalizing a group. Optional upload modules
+same threshold controls both grouping adjacent segments and waiting before finalizing a group. Discovery must also wait
+when the same profile already has a later adjacent `ACTIVE` recording or `WRITING` video file inside that threshold, so
+a temporary recorder file rollover does not lock the previous file into its own parent source. Optional upload modules
 must process only upload source output parts whose parent source status is `READY_TO_UPLOAD`. Multi-segment sources
 become `PACKAGE_PENDING` after the `MERGE_UPLOAD_SOURCE` job writes a derived file under
 `DATA_ROOT/upload-sources`; `PACKAGE_UPLOAD_SOURCE` then records one or more output parts and marks the source

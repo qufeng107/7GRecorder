@@ -223,6 +223,7 @@ type UploadSourceListResponse = {
 type UploadSourceDiscoverResult = {
   created: number;
   ignored: number;
+  delayed?: number;
   merge_jobs_enqueued?: number;
   package_jobs_enqueued?: number;
   merge_gap_threshold_seconds: number;
