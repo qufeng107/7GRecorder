@@ -121,6 +121,7 @@ type RecordingFile = {
   size_bytes: number;
   duration_ms: number;
   closed_at?: string;
+  cos_status?: string;
 };
 
 type RecordingItem = {
@@ -146,6 +147,7 @@ type RecordingItem = {
   local_protected: boolean;
   source_segments?: UploadSourceSegment[];
   source_outputs?: UploadSourceOutput[];
+  danmaku_files?: RecordingFile[];
   files: RecordingFile[] | null;
 };
 
@@ -209,6 +211,7 @@ type UploadSourceItem = {
   last_error?: string;
   segments: UploadSourceSegment[] | null;
   outputs: UploadSourceOutput[] | null;
+  danmaku_files?: RecordingFile[] | null;
 };
 
 type UploadSourceListResponse = {
@@ -220,6 +223,7 @@ type UploadSourceListResponse = {
 type UploadSourceDiscoverResult = {
   created: number;
   ignored: number;
+  delayed?: number;
   merge_jobs_enqueued?: number;
   package_jobs_enqueued?: number;
   merge_gap_threshold_seconds: number;
@@ -370,6 +374,8 @@ type UploadModuleReconcileResult = {
   bilibili_jobs_created: number;
   cos_objects_created: number;
   cos_jobs_created: number;
+  cos_file_objects_created?: number;
+  cos_file_jobs_created?: number;
 };
 
 type ProfileForm = {
@@ -634,6 +640,7 @@ const uiCopy = {
     jobPackageUploadSource: "封装可上传视频",
     jobUploadBilibili: "上传到 Bilibili",
     jobUploadCOS: "上传到 COS",
+    jobUploadCOSRecordingFile: "上传原始文件到 COS",
     jobStatusPending: "待开始",
     jobStatusRunning: "运行中",
     jobStatusSucceeded: "已成功",
@@ -700,6 +707,8 @@ const uiCopy = {
     compressionStatusFailed: "压缩失败",
     sourceSegments: "原始片段",
     sourceOutputs: "发布分片",
+    danmakuFiles: "原始弹幕",
+    downloadDanmakuFromCos: "下载弹幕",
     showSourceSegments: "显示原始片段",
     hideSourceSegments: "隐藏原始片段",
     timeline: "合并时间轴",
@@ -769,8 +778,8 @@ const uiCopy = {
     uploadConfigSaveFailed: "上传配置保存失败，请检查凭证、区域、Bucket 或 JSON。",
     reconcileUploadJobs: "生成上传任务",
     reconcileUploadHint: "只会为可上传视频补建缺失的 Bilibili/COS 任务。",
-    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number) =>
-      `上传任务：Bilibili 发布 ${publications}，Bilibili 任务 ${bilibiliJobs}，COS 对象 ${cosObjects}，COS 任务 ${cosJobs}。`,
+    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number, cosFileObjects: number, cosFileJobs: number) =>
+      `上传任务：Bilibili 发布 ${publications}，Bilibili 任务 ${bilibiliJobs}，COS 视频对象 ${cosObjects}，COS 视频任务 ${cosJobs}，COS 原始文件 ${cosFileObjects}，原始文件任务 ${cosFileJobs}。`,
     uploadReconcileFailed: "上传任务生成失败，请查看服务器日志。",
     uploadAccessBlocked: "当前账号没有上传模块配置权限。",
     emptyFiltered: "没有匹配结果。"
@@ -913,6 +922,7 @@ const uiCopy = {
     jobPackageUploadSource: "Package upload source",
     jobUploadBilibili: "Upload to Bilibili",
     jobUploadCOS: "Upload to COS",
+    jobUploadCOSRecordingFile: "Upload raw file to COS",
     jobStatusPending: "Pending",
     jobStatusRunning: "Running",
     jobStatusSucceeded: "Succeeded",
@@ -979,6 +989,8 @@ const uiCopy = {
     compressionStatusFailed: "Failed",
     sourceSegments: "Original Segments",
     sourceOutputs: "Publish Parts",
+    danmakuFiles: "Raw Danmaku",
+    downloadDanmakuFromCos: "Download Danmaku",
     showSourceSegments: "Show Original Segments",
     hideSourceSegments: "Hide Original Segments",
     timeline: "Timeline",
@@ -1048,8 +1060,8 @@ const uiCopy = {
     uploadConfigSaveFailed: "Upload config save failed. Check credential, region, bucket, or JSON.",
     reconcileUploadJobs: "Create Upload Jobs",
     reconcileUploadHint: "Backfills missing Bilibili/COS jobs for ready upload sources only.",
-    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number) =>
-      `Upload jobs: ${publications} Bilibili publications, ${bilibiliJobs} Bilibili jobs, ${cosObjects} COS objects, ${cosJobs} COS jobs.`,
+    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number, cosFileObjects: number, cosFileJobs: number) =>
+      `Upload jobs: ${publications} Bilibili publications, ${bilibiliJobs} Bilibili jobs, ${cosObjects} COS video objects, ${cosJobs} COS video jobs, ${cosFileObjects} COS raw files, ${cosFileJobs} raw file jobs.`,
     uploadReconcileFailed: "Upload job reconciliation failed. Check server logs.",
     uploadAccessBlocked: "This account cannot configure upload modules.",
     emptyFiltered: "No matching results."
@@ -1184,6 +1196,7 @@ function includesSearch(value: string | number | undefined, search: string): boo
 function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
   const segments = source.segments ?? [];
   const outputs = source.outputs ?? [];
+  const danmakuFiles = source.danmaku_files ?? [];
   return {
     id: segments[0]?.recording_id ?? source.id,
     upload_source_id: source.id,
@@ -1207,6 +1220,7 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     local_protected: Boolean(source.local_protected),
     source_segments: segments,
     source_outputs: outputs,
+    danmaku_files: danmakuFiles,
     files: segments.map((segment) => ({
       id: segment.recording_file_id,
       recording_id: segment.recording_id,
@@ -1654,6 +1668,17 @@ export function AdminDashboard() {
           body: "{}"
         }
       ),
+    onSuccess: (result) => {
+      window.location.assign(result.url);
+    }
+  });
+
+  const cosFileDownloadUrlMutation = useMutation({
+    mutationFn: (request: { fileId: number }) =>
+      requestJson<COSDownloadURLResponse>(`/api/v1/recording-files/${request.fileId}/actions/cos-download-url`, {
+        method: "POST",
+        body: "{}"
+      }),
     onSuccess: (result) => {
       window.location.assign(result.url);
     }
@@ -2110,6 +2135,8 @@ export function AdminDashboard() {
                 canScanLocalFiles={canScanLocalFiles}
                 cosDownloadPending={cosDownloadUrlMutation.isPending}
                 cosDownloadPendingOutputId={cosDownloadUrlMutation.variables?.outputId ?? null}
+                cosFileDownloadPending={cosFileDownloadUrlMutation.isPending}
+                cosFileDownloadPendingFileId={cosFileDownloadUrlMutation.variables?.fileId ?? null}
                 protectPending={protectRecordingMutation.isPending}
                 reconcileError={reconcileMutation.isError}
                 reconcilePending={reconcileMutation.isPending}
@@ -2121,6 +2148,7 @@ export function AdminDashboard() {
                 visibleTotal={visibleRecordings.length}
                 onReconcile={() => reconcileMutation.mutate()}
                 onDownloadOutput={(uploadSourceId, outputId) => cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })}
+                onDownloadFile={(fileId) => cosFileDownloadUrlMutation.mutate({ fileId })}
                 onSearchChange={setRecordingSearch}
                 onSortChange={setRecordingSort}
                 onToggleProtect={(recording) =>
@@ -3072,7 +3100,9 @@ function UploadSettingsPanel(props: {
               props.reconcileResult.publications_created,
               props.reconcileResult.bilibili_jobs_created,
               props.reconcileResult.cos_objects_created,
-              props.reconcileResult.cos_jobs_created
+              props.reconcileResult.cos_jobs_created,
+              props.reconcileResult.cos_file_objects_created ?? 0,
+              props.reconcileResult.cos_file_jobs_created ?? 0
             )}
           </p>
         ) : null}
@@ -3587,6 +3617,8 @@ function RecordingsPanel(props: {
   canScanLocalFiles: boolean;
   cosDownloadPending: boolean;
   cosDownloadPendingOutputId: number | null;
+  cosFileDownloadPending: boolean;
+  cosFileDownloadPendingFileId: number | null;
   isLoading: boolean;
   jobs: JobItem[];
   labels: AdminCopy;
@@ -3599,6 +3631,7 @@ function RecordingsPanel(props: {
   sort: RecordingSortKey;
   total: number;
   visibleTotal: number;
+  onDownloadFile: (fileId: number) => void;
   onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
   onReconcile: () => void;
   onSearchChange: (value: string) => void;
@@ -3922,6 +3955,14 @@ function RecordingsPanel(props: {
                               uploadSourceId={sourceId}
                               onDownloadOutput={props.onDownloadOutput}
                             />
+                            <DanmakuFilesTable
+                              canDownload={props.canManageLocalFiles}
+                              cosDownloadPending={props.cosFileDownloadPending}
+                              cosDownloadPendingFileId={props.cosFileDownloadPendingFileId}
+                              files={recording.danmaku_files ?? []}
+                              labels={props.labels}
+                              onDownloadFile={props.onDownloadFile}
+                            />
                             <UploadSourceSegmentsTable
                               isExpanded={originalSegmentsExpanded}
                               labels={props.labels}
@@ -3951,6 +3992,70 @@ function RecordingsPanel(props: {
         </table>
       </div>
     </section>
+  );
+}
+
+function DanmakuFilesTable(props: {
+  canDownload: boolean;
+  cosDownloadPending: boolean;
+  cosDownloadPendingFileId: number | null;
+  files: RecordingFile[];
+  labels: AdminCopy;
+  onDownloadFile: (fileId: number) => void;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-white p-3">
+      <h3 className="text-sm font-semibold">{props.labels.danmakuFiles}</h3>
+      <div className="mt-3 overflow-auto">
+        <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+          <thead className="bg-[#eef1eb] uppercase text-muted">
+            <tr>
+              <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.completedAt}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.cosStatus}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.files.map((file) => {
+              const cosAvailable = props.canDownload && file.cos_status === "AVAILABLE";
+              return (
+                <tr key={file.id} className="align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-ink">{file.original_name || file.relative_path.split("/").pop() || file.relative_path}</p>
+                    <p className="mt-1 break-all text-muted">{file.relative_path}</p>
+                  </td>
+                  <td className="px-3 py-3"><TableDateTime value={file.closed_at ?? ""} /></td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(file.size_bytes)}</td>
+                  <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(file.cos_status, props.labels)}</td>
+                  <td className="px-3 py-3">
+                    {cosAvailable ? (
+                      <button
+                        className="inline-flex h-8 w-32 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                        disabled={props.cosDownloadPending && props.cosDownloadPendingFileId === file.id}
+                        type="button"
+                        onClick={() => props.onDownloadFile(file.id)}
+                      >
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        {props.labels.downloadDanmakuFromCos}
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+            {props.files.length === 0 ? (
+              <tr>
+                <td className="px-3 py-6 text-center text-muted" colSpan={5}>
+                  {props.labels.noFile}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -4360,6 +4465,9 @@ function formatJobType(value: string, labels: AdminCopy): string {
   }
   if (value === "UPLOAD_COS_OBJECT") {
     return labels.jobUploadCOS;
+  }
+  if (value === "UPLOAD_COS_RECORDING_FILE") {
+    return labels.jobUploadCOSRecordingFile;
   }
   return value;
 }

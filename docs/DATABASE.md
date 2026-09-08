@@ -770,12 +770,34 @@ source recording timestamps, relative paths, and each segment's timeline interva
 named `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv` using China-time date and the profile's live ordinal for that day.
 COS/Bilibili modules consume output parts from sources whose status is `READY_TO_UPLOAD`.
 
+Upload source discovery must not finalize a completed recording into a parent upload source while the same recording
+profile has an adjacent unfinished recording inside the configured merge gap. The merge gap is also the stability
+window: if the next segment starts within that window and is still `ACTIVE` or has a `WRITING` video file, discovery
+waits so the eventual parent source can include the full continuous session. Already finalized sources with
+upload/publication side effects are not silently rebuilt by the automatic scanner.
+
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
 `upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
 existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.
 `PACKAGE_UPLOAD_SOURCE` marks the source `READY_TO_UPLOAD` after one or more output parts are recorded. Terminal merge
 failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
 `PACKAGE_FAILED`.
+
+---
+
+## 17. Raw Danmaku Archive
+
+Raw danmaku files are indexed as `recording_files.kind = 'danmaku'`.
+They are attachment assets for a recording, not video segments, and must not be consumed by upload source merge,
+package, Bilibili upload, or local storage cleanup decisions until a later timeline-alignment design is approved.
+
+The existing `cos_objects` table stores COS copies of raw recording-file assets. For the first raw archive use case,
+only closed danmaku files are eligible. The object key is derived from the configured COS prefix plus
+`raw/<recording_files.relative_path>`, so raw artifacts cannot collide with publishable video parts stored in
+`upload_source_cos_objects`.
+
+`UPLOAD_COS_RECORDING_FILE` jobs own raw file upload status transitions in `cos_objects`. Publishable video part
+upload status remains isolated in `upload_source_cos_objects`.
 
 备份写入：
 

@@ -579,6 +579,7 @@ Job 可把 `error_class + last_error` 保存到 SQLite，UI 按类别指导管�
 | UPLOAD_BILIBILI | 3 | 1m / 5m / 15m | stale/crash 后先 AMBIGUOUS，不盲重传 |
 | VERIFY_BILIBILI | 8–10 | 1m → 1h 逐步拉长 | 平台处理延迟允许较长验证窗口 |
 | UPLOAD_COS_OBJECT | 5 | 30s / 2m / 5m / 15m / 30m | AUTH/SOURCE_MISSING 不 retry |
+| UPLOAD_COS_RECORDING_FILE | 5 | 30s / 2m / 5m / 15m / 30m | raw danmaku archive; AUTH/SOURCE_MISSING 不 retry |
 | CUT_SONG_AUDIO | 2 | 1m | 同一输入重复失败通常需要人工看源文件 |
 | AI jobs | 2 | 5m | 最低优先级 |
 | CLEANUP | 3 | 1m / 5m / 15m | 删除前每次重新做安全条件检查 |

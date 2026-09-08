@@ -191,6 +191,8 @@ song processing FAILED
 - Upload source discovery covers the shared merge gap threshold, waiting until a profile is no longer recording,
   idempotent source creation, single-segment `PACKAGE_PENDING`, multi-segment `MERGE_PENDING`, backfilled missing merge
   and package jobs, and segment timeline metadata.
+- Upload source discovery must wait instead of finalizing a parent source when a later same-profile recording starts
+  inside the merge gap and is still `ACTIVE` or has a `WRITING` video file.
 - Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
   `PACKAGE_PENDING`, and terminal failure visibility.
 - Upload source package jobs cover worker dispatch, output part persistence, source transition to `READY_TO_UPLOAD`,
@@ -207,6 +209,9 @@ song processing FAILED
 - COS compression tests must verify that compression writes only to controlled temp/derived paths, never overwrites
   source output parts, validates the compressed file with ffprobe before upload, records source/uploaded sizes, and
   marks only the COS object failed when compression fails.
+- Raw danmaku archive tests must verify scan attachment to the matching recording, idempotent `cos_objects` and
+  `UPLOAD_COS_RECORDING_FILE` job creation, worker upload status transitions, and signed URL generation only after the
+  raw COS object is `AVAILABLE`.
 - Disk housekeeping tests must verify deploy/daily cleanup removes only whitelisted release artifacts, stale build
   cache, old DB backups, and safe temp leftovers; it must not delete original recordings, active upload-source files,
   BililiveRecorder workdir/images, SQLite WAL/SHM files, or unknown COS objects.

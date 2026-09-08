@@ -380,6 +380,91 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	}
 }
 
+func TestRunOnceUploadsCOSRecordingFile(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
+		t.Fatalf("complete initial sync job returned error: %v", err)
+	}
+	sourceRelativePath := "recordings/1741048619-7G/record-1741048619-20260905-224258-164-title.xml"
+	sourcePath := filepath.Join(cfg.DataRoot, sourceRelativePath)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create recording dir returned error: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("<i></i>"), 0o644); err != nil {
+		t.Fatalf("write danmaku source returned error: %v", err)
+	}
+	store := upload.NewStore(database, cfg)
+	credential, err := store.CreateCredential(ctx, actor, upload.CredentialCreate{
+		Scope:        "USER",
+		Platform:     "tencent_cos",
+		Purpose:      "STORAGE",
+		AccountLabel: "cos account",
+		Secret:       []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential returned error: %v", err)
+	}
+	if _, err := store.UpsertCOSConfig(ctx, actor, created.ID, upload.COSConfigUpsert{
+		CredentialID:    credential.ID,
+		Enabled:         true,
+		Region:          "ap-shanghai",
+		Bucket:          "bucket-1250000000",
+		Prefix:          "7grecorder/test/",
+		MaxManagedBytes: 1000000000,
+	}); err != nil {
+		t.Fatalf("UpsertCOSConfig returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO recordings
+			(id, recording_profile_id, title, started_at, completed_at, duration_ms, recording_status,
+				local_storage_status, source_room_id, streamer_name_snapshot)
+		VALUES (1, ?, 'ready upload', '2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z',
+			1800000, 'COMPLETED', 'AVAILABLE', '1741048619', '7G')
+	`, created.ID); err != nil {
+		t.Fatalf("insert recording returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO recording_files
+			(id, recording_id, relative_path, original_name, kind, file_status, size_bytes, closed_at)
+		VALUES (1, 1, ?, 'record-1741048619-20260905-224258-164-title.xml', 'danmaku', 'CLOSED', 7, '2026-09-05T10:30:00Z')
+	`, sourceRelativePath); err != nil {
+		t.Fatalf("insert danmaku file returned error: %v", err)
+	}
+	result, err := store.Reconcile(ctx, actor)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.COSFileObjectsCreated != 1 || result.COSFileJobsCreated != 1 {
+		t.Fatalf("unexpected reconcile result: %#v", result)
+	}
+
+	cosUploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "etag"}}
+	if err := NewWithCOSUploader(database, &fakeRecorder{}, cfg, cosUploader).RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if cosUploader.request.ObjectKey != "7grecorder/test/raw/recordings/1741048619-7G/record-1741048619-20260905-224258-164-title.xml" {
+		t.Fatalf("unexpected raw cos request: %#v", cosUploader.request)
+	}
+
+	var objectStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM cos_objects WHERE id = 1`).Scan(&objectStatus); err != nil {
+		t.Fatalf("query raw cos object returned error: %v", err)
+	}
+	if objectStatus != "AVAILABLE" {
+		t.Fatalf("unexpected raw cos object status: %s", objectStatus)
+	}
+}
+
 func TestRunOnceCompressesCOSObjectBeforeUpload(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDBWithConfig(t, ctx)

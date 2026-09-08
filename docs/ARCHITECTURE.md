@@ -702,6 +702,10 @@ Upload Source ready
 
 这样 COS 与 Bilibili 共享同一个上传边界；多段直播先合并成一个可上传视频，单段直播可直接引用原始文件。
 
+Raw danmaku files are separate recording-file attachments. COS may archive closed raw danmaku files under the profile
+prefix `raw/` path using `UPLOAD_COS_RECORDING_FILE`, but this does not make them upload-source segments and does not
+feed Bilibili publishing. Timeline alignment is a later design step after real raw files are inspected.
+
 COS 可在该边界之后、实际 PutObject 之前对每个 output part 生成压缩派生文件。推荐默认策略是保守稳定压缩：
 
 ```text

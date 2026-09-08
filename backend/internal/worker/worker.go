@@ -139,6 +139,8 @@ func (w Worker) RunOnce(ctx context.Context) error {
 		return w.runPackageJob(ctx, job)
 	case "UPLOAD_COS_OBJECT":
 		return w.runCOSUploadJob(ctx, job)
+	case "UPLOAD_COS_RECORDING_FILE":
+		return w.runCOSRecordingFileUploadJob(ctx, job)
 	case "UPLOAD_BILIBILI":
 		return w.runBilibiliUploadJob(ctx, job)
 	default:
@@ -301,6 +303,29 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
 
+func (w Worker) runCOSRecordingFileUploadJob(ctx context.Context, job workerJob) error {
+	var payload upload.COSRecordingFileJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode cos recording file upload payload: %w", err))
+	}
+	store := upload.NewStore(w.db, w.cfg)
+	request, err := store.COSRecordingFileUploadRequest(ctx, payload)
+	if err != nil {
+		return w.failCOSRecordingFileJob(ctx, job, payload.COSObjectID, classifyUploadError(err), err)
+	}
+	if err := store.MarkCOSRecordingFileUploading(ctx, request.ObjectID); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	result, err := w.cos.Upload(ctx, request)
+	if err != nil {
+		return w.failCOSRecordingFileJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
+	}
+	if err := store.MarkCOSRecordingFileUploaded(ctx, request.ObjectID, result); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
 func (w Worker) runBilibiliUploadJob(ctx context.Context, job workerJob) error {
 	var payload upload.BilibiliJobPayload
 	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
@@ -351,7 +376,7 @@ func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT', 'UPLOAD_BILIBILI')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 		ORDER BY priority ASC, run_after ASC, id ASC
@@ -431,6 +456,15 @@ func (w Worker) succeedJob(ctx context.Context, job workerJob, status recorder.R
 func (w Worker) failUploadJob(ctx context.Context, job workerJob, objectID int64, errorClass string, cause error) error {
 	if objectID > 0 {
 		if err := upload.NewStore(w.db, w.cfg).MarkCOSObjectUploadFailed(ctx, objectID, errorClass, truncateError(cause)); err != nil {
+			return err
+		}
+	}
+	return w.failJob(ctx, job, errorClass, cause)
+}
+
+func (w Worker) failCOSRecordingFileJob(ctx context.Context, job workerJob, objectID int64, errorClass string, cause error) error {
+	if objectID > 0 {
+		if err := upload.NewStore(w.db, w.cfg).MarkCOSRecordingFileUploadFailed(ctx, objectID, errorClass, truncateError(cause)); err != nil {
 			return err
 		}
 	}

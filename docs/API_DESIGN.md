@@ -302,11 +302,14 @@ Upload sources are the durable upload-facing recording list:
 GET  /api/v1/upload-sources?merge_gap_seconds=600
 POST /api/v1/upload-sources/actions/discover?merge_gap_seconds=600
 POST /api/v1/upload-sources/{id}/outputs/{output_id}/actions/download-url
+POST /api/v1/recording-files/{id}/actions/cos-download-url
 ```
 
 Discovery is SUPER_ADMIN-only and idempotent. It creates upload sources only when a profile is not currently live or
 recording and the newest segment in a continuous group has been completed for longer than the merge gap threshold. The
-same threshold controls both grouping adjacent segments and waiting before finalizing a group. Optional upload modules
+same threshold controls both grouping adjacent segments and waiting before finalizing a group. Discovery must also wait
+when the same profile already has a later adjacent `ACTIVE` recording or `WRITING` video file inside that threshold, so
+a temporary recorder file rollover does not lock the previous file into its own parent source. Optional upload modules
 must process only upload source output parts whose parent source status is `READY_TO_UPLOAD`. Multi-segment sources
 become `PACKAGE_PENDING` after the `MERGE_UPLOAD_SOURCE` job writes a derived file under
 `DATA_ROOT/upload-sources`; `PACKAGE_UPLOAD_SOURCE` then records one or more output parts and marks the source
@@ -343,6 +346,10 @@ Recording file APIs expose metadata for local storage management, not public dow
 go through upload-source output parts that have been uploaded to COS. The backend authenticates the session, checks
 profile visibility and download policy, and returns a short-lived Tencent COS signed URL. Later manager/public-user
 limits, such as allowed recording date windows and daily download counts, must be enforced before issuing that URL.
+
+Raw danmaku downloads use `POST /api/v1/recording-files/{id}/actions/cos-download-url`. This endpoint only supports
+closed `recording_files.kind = 'danmaku'` assets whose raw COS copy is `AVAILABLE`. It must not expose local server
+files and must not infer timeline alignment.
 
 下载行为见第 9 节。
 

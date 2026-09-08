@@ -103,6 +103,7 @@ type UploadSource struct {
 	COSStatus                string                `json:"cos_status"`
 	Segments                 []UploadSourceSegment `json:"segments"`
 	Outputs                  []UploadSourceOutput  `json:"outputs"`
+	DanmakuFiles             []File                `json:"danmaku_files"`
 }
 
 type UploadSourceSegment struct {
@@ -148,6 +149,7 @@ type UploadSourceList struct {
 type UploadSourceDiscoverResult struct {
 	Created                  int   `json:"created"`
 	Ignored                  int   `json:"ignored"`
+	Delayed                  int   `json:"delayed"`
 	MergeJobsEnqueued        int   `json:"merge_jobs_enqueued"`
 	PackageJobsEnqueued      int   `json:"package_jobs_enqueued"`
 	MergeGapThresholdSeconds int64 `json:"merge_gap_threshold_seconds"`
@@ -164,6 +166,7 @@ type File struct {
 	DurationMs   int64  `json:"duration_ms"`
 	ClosedAt     string `json:"closed_at,omitempty"`
 	UpdatedAt    string `json:"updated_at"`
+	COSStatus    string `json:"cos_status,omitempty"`
 }
 
 type ReconcileResult struct {
@@ -583,6 +586,10 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 		if err != nil {
 			return nil, err
 		}
+		item.DanmakuFiles, err = s.uploadSourceDanmakuFiles(ctx, item.ID)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -614,6 +621,16 @@ func (s Store) DiscoverUploadSources(ctx context.Context, thresholdSeconds int64
 		completed := recordingCompletedTime(current[len(current)-1])
 		if completed.IsZero() || now.Sub(completed) <= time.Duration(thresholdSeconds)*time.Second {
 			result.Ignored += len(current)
+			current = nil
+			return nil
+		}
+		waiting, err := s.hasAdjacentUnfinishedRecording(ctx, current[len(current)-1], thresholdSeconds)
+		if err != nil {
+			return err
+		}
+		if waiting {
+			result.Ignored += len(current)
+			result.Delayed += len(current)
 			current = nil
 			return nil
 		}
@@ -802,6 +819,38 @@ func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) 
 		return nil, fmt.Errorf("iterate upload source candidates: %w", err)
 	}
 	return items, nil
+}
+
+func (s Store) hasAdjacentUnfinishedRecording(ctx context.Context, item Recording, thresholdSeconds int64) (bool, error) {
+	completed := recordingCompletedTime(item)
+	if completed.IsZero() {
+		return true, nil
+	}
+	latestAdjacentStart := completed.Add(time.Duration(thresholdSeconds) * time.Second).UTC().Format(time.RFC3339)
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM recordings next
+		WHERE next.recording_profile_id = ?
+			AND next.local_storage_status != 'DELETED'
+			AND next.local_deleted_at IS NULL
+			AND next.started_at > ?
+			AND next.started_at <= ?
+			AND (
+				next.recording_status = 'ACTIVE'
+				OR EXISTS (
+					SELECT 1
+					FROM recording_files f
+					WHERE f.recording_id = next.id
+						AND LOWER(f.kind) = 'video'
+						AND f.file_status = 'WRITING'
+						AND f.deleted_at IS NULL
+				)
+			)
+	`, item.RecordingProfileID, completed.UTC().Format(time.RFC3339), latestAdjacentStart).Scan(&count); err != nil {
+		return false, fmt.Errorf("check adjacent unfinished recording: %w", err)
+	}
+	return count > 0, nil
 }
 
 func (s Store) insertUploadSource(ctx context.Context, recordings []Recording, thresholdSeconds int64) (bool, error) {
@@ -1332,6 +1381,57 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate upload source outputs: %w", err)
+	}
+	return items, nil
+}
+
+func (s Store) uploadSourceDanmakuFiles(ctx context.Context, uploadSourceID int64) ([]File, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT rf.id,
+			rf.recording_id,
+			rf.relative_path,
+			rf.original_name,
+			rf.kind,
+			rf.file_status,
+			COALESCE(rf.size_bytes, 0),
+			COALESCE(rf.duration_ms, 0),
+			COALESCE(rf.closed_at, ''),
+			rf.updated_at,
+			COALESCE((SELECT co.status FROM cos_objects co WHERE co.recording_file_id = rf.id AND co.deleted_at IS NULL ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), '')
+		FROM upload_source_segments uss
+		JOIN recording_files rf ON rf.recording_id = uss.recording_id
+			AND rf.kind = 'danmaku'
+			AND rf.deleted_at IS NULL
+		WHERE uss.upload_source_id = ?
+		ORDER BY rf.closed_at ASC, rf.id ASC
+	`, uploadSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list upload source danmaku files: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]File, 0)
+	for rows.Next() {
+		var item File
+		if err := rows.Scan(
+			&item.ID,
+			&item.RecordingID,
+			&item.RelativePath,
+			&item.OriginalName,
+			&item.Kind,
+			&item.FileStatus,
+			&item.SizeBytes,
+			&item.DurationMs,
+			&item.ClosedAt,
+			&item.UpdatedAt,
+			&item.COSStatus,
+		); err != nil {
+			return nil, fmt.Errorf("scan upload source danmaku file: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate upload source danmaku files: %w", err)
 	}
 	return items, nil
 }
@@ -1879,12 +1979,13 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 		if entry.IsDir() {
 			return nil
 		}
-		if !isVideoFile(entry.Name()) {
+		fileKind := localRecordingFileKind(entry.Name())
+		if fileKind == "" {
 			result.Skipped++
 			return nil
 		}
 		result.ScannedFiles++
-		imported, updated, err := s.reconcileFile(ctx, root, path, profiles)
+		imported, updated, err := s.reconcileFile(ctx, root, path, fileKind, profiles)
 		if err != nil {
 			return err
 		}
@@ -1913,7 +2014,8 @@ func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID i
 	}
 	query := `
 		SELECT f.id, f.recording_id, f.relative_path, f.original_name, f.kind, f.file_status,
-			COALESCE(f.size_bytes, 0), COALESCE(f.duration_ms, 0), COALESCE(f.closed_at, ''), f.updated_at
+			COALESCE(f.size_bytes, 0), COALESCE(f.duration_ms, 0), COALESCE(f.closed_at, ''), f.updated_at,
+			COALESCE((SELECT co.status FROM cos_objects co WHERE co.recording_file_id = f.id AND co.deleted_at IS NULL ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), '')
 		FROM recording_files f
 		JOIN recordings rec ON rec.id = f.recording_id
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
@@ -1937,6 +2039,7 @@ func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID i
 		&item.DurationMs,
 		&item.ClosedAt,
 		&item.UpdatedAt,
+		&item.COSStatus,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return File{}, ErrNotFound
@@ -1967,7 +2070,8 @@ func (s Store) ensureCanManageLocalFiles(ctx context.Context, actor account.User
 func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, recording_id, relative_path, original_name, kind, file_status,
-			COALESCE(size_bytes, 0), COALESCE(duration_ms, 0), COALESCE(closed_at, ''), updated_at
+			COALESCE(size_bytes, 0), COALESCE(duration_ms, 0), COALESCE(closed_at, ''), updated_at,
+			COALESCE((SELECT co.status FROM cos_objects co WHERE co.recording_file_id = recording_files.id AND co.deleted_at IS NULL ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), '')
 		FROM recording_files
 		WHERE recording_id = ?
 		ORDER BY id ASC
@@ -1991,6 +2095,7 @@ func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {
 			&item.DurationMs,
 			&item.ClosedAt,
 			&item.UpdatedAt,
+			&item.COSStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan recording file: %w", err)
 		}
@@ -2034,7 +2139,7 @@ func (s Store) activeProfiles(ctx context.Context) (map[string]profileRef, error
 	return items, nil
 }
 
-func (s Store) reconcileFile(ctx context.Context, root string, path string, profiles map[string]profileRef) (bool, bool, error) {
+func (s Store) reconcileFile(ctx context.Context, root string, path string, fileKind string, profiles map[string]profileRef) (bool, bool, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return false, false, fmt.Errorf("stat recording file: %w", err)
@@ -2066,6 +2171,10 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 	}
 	startedAt, title := recordingInfoFromName(filepath.Base(path), info.ModTime())
 	durationMs := durationMillis(startedAt, completedAt)
+	fileDurationMs := durationMs
+	if fileKind != "video" {
+		fileDurationMs = nil
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -2085,15 +2194,17 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 			UPDATE recording_files
 			SET file_status = ?, size_bytes = ?, duration_ms = ?, closed_at = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, fileStatus, info.Size(), durationMs, completedAt, fileID); err != nil {
+		`, fileStatus, info.Size(), fileDurationMs, completedAt, fileID); err != nil {
 			return false, false, fmt.Errorf("update recording file: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE recordings
-			SET recording_status = ?, completed_at = NULLIF(?, ''), duration_ms = ?, local_storage_status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?
-		`, recordingStatus, completedAt, durationMs, existingRecordingID); err != nil {
-			return false, false, fmt.Errorf("update recording: %w", err)
+		if fileKind == "video" {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE recordings
+				SET recording_status = ?, completed_at = NULLIF(?, ''), duration_ms = ?, local_storage_status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
+				WHERE id = ?
+			`, recordingStatus, completedAt, durationMs, existingRecordingID); err != nil {
+				return false, false, fmt.Errorf("update recording: %w", err)
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return false, false, fmt.Errorf("commit recording update: %w", err)
@@ -2104,30 +2215,69 @@ func (s Store) reconcileFile(ctx context.Context, root string, path string, prof
 		return false, false, fmt.Errorf("lookup recording file: %w", err)
 	}
 
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO recordings
-			(recording_profile_id, title, started_at, completed_at, duration_ms, recording_status,
-				local_storage_status, source_room_id, streamer_name_snapshot)
-		VALUES (?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, 'AVAILABLE', ?, ?)
-	`, profile.ID, title, startedAt, completedAt, durationMs, recordingStatus, profile.RoomID, profile.StreamerName)
+	recordingID, err := recordingIDForLocalFile(ctx, tx, profile.ID, startedAt)
 	if err != nil {
-		return false, false, fmt.Errorf("insert recording: %w", err)
+		return false, false, err
 	}
-	recordingID, err := result.LastInsertId()
-	if err != nil {
-		return false, false, fmt.Errorf("read recording id: %w", err)
+	if recordingID == 0 {
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO recordings
+				(recording_profile_id, title, started_at, completed_at, duration_ms, recording_status,
+					local_storage_status, source_room_id, streamer_name_snapshot)
+			VALUES (?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, 'AVAILABLE', ?, ?)
+		`, profile.ID, title, startedAt, completedAt, durationMs, recordingStatus, profile.RoomID, profile.StreamerName)
+		if err != nil {
+			return false, false, fmt.Errorf("insert recording: %w", err)
+		}
+		recordingID, err = result.LastInsertId()
+		if err != nil {
+			return false, false, fmt.Errorf("read recording id: %w", err)
+		}
+	} else if fileKind == "video" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE recordings
+			SET title = NULLIF(?, ''),
+				completed_at = NULLIF(?, ''),
+				duration_ms = ?,
+				recording_status = ?,
+				local_storage_status = 'AVAILABLE',
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, title, completedAt, durationMs, recordingStatus, recordingID); err != nil {
+			return false, false, fmt.Errorf("update matched recording: %w", err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO recording_files
 			(recording_id, relative_path, original_name, kind, file_status, size_bytes, duration_ms, closed_at)
-		VALUES (?, ?, ?, 'video', ?, ?, ?, NULLIF(?, ''))
-	`, recordingID, relativePath, filepath.Base(path), fileStatus, info.Size(), durationMs, completedAt); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+	`, recordingID, relativePath, filepath.Base(path), fileKind, fileStatus, info.Size(), fileDurationMs, completedAt); err != nil {
 		return false, false, fmt.Errorf("insert recording file: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return false, false, fmt.Errorf("commit recording insert: %w", err)
 	}
 	return true, false, nil
+}
+
+func recordingIDForLocalFile(ctx context.Context, tx *sql.Tx, profileID int64, startedAt string) (int64, error) {
+	var recordingID int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM recordings
+		WHERE recording_profile_id = ?
+			AND started_at = ?
+			AND local_storage_status <> 'DELETED'
+		ORDER BY id ASC
+		LIMIT 1
+	`, profileID, startedAt).Scan(&recordingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("lookup matching recording: %w", err)
+	}
+	return recordingID, nil
 }
 
 var recordingNamePattern = regexp.MustCompile(`^[^-]+-([0-9]+)-([0-9]{8})-([0-9]{6})-[0-9]+-(.*)\.[^.]+$`)
@@ -2183,6 +2333,27 @@ func isVideoFile(name string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func localRecordingFileKind(name string) string {
+	if isVideoFile(name) {
+		return "video"
+	}
+	lower := strings.ToLower(name)
+	switch filepath.Ext(lower) {
+	case ".xml":
+		if recordingNamePattern.MatchString(name) || strings.Contains(lower, "danmaku") || strings.Contains(lower, "comment") || strings.Contains(name, "弹幕") {
+			return "danmaku"
+		}
+		return ""
+	case ".json", ".jsonl", ".txt":
+		if strings.Contains(lower, "danmaku") || strings.Contains(lower, "comment") || strings.Contains(name, "弹幕") {
+			return "danmaku"
+		}
+		return ""
+	default:
+		return ""
 	}
 }
 

@@ -68,6 +68,67 @@ func TestReconcileLocalImportsRecordingFiles(t *testing.T) {
 	}
 }
 
+func TestReconcileLocalImportsDanmakuWithMatchingVideo(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	_, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+	if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	baseName := "record-1741048619-20260905-224258-164-title"
+	videoPath := filepath.Join(recordingDir, baseName+".flv")
+	danmakuPath := filepath.Join(recordingDir, baseName+".xml")
+	if err := os.WriteFile(videoPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile video returned error: %v", err)
+	}
+	if err := os.WriteFile(danmakuPath, []byte("<i></i>"), 0o644); err != nil {
+		t.Fatalf("WriteFile danmaku returned error: %v", err)
+	}
+	oldTime := closedTestTime()
+	if err := os.Chtimes(videoPath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes video returned error: %v", err)
+	}
+	if err := os.Chtimes(danmakuPath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes danmaku returned error: %v", err)
+	}
+
+	result, err := NewStore(database, cfg).ReconcileLocal(ctx, actor)
+	if err != nil {
+		t.Fatalf("ReconcileLocal returned error: %v", err)
+	}
+	if result.Imported != 2 {
+		t.Fatalf("expected two imported files, got %#v", result)
+	}
+
+	items, err := NewStore(database, cfg).List(ctx, actor)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one recording, got %d", len(items))
+	}
+	if len(items[0].Files) != 2 {
+		t.Fatalf("expected video and danmaku files, got %#v", items[0].Files)
+	}
+	kinds := map[string]bool{}
+	for _, file := range items[0].Files {
+		kinds[file.Kind] = true
+	}
+	if !kinds["video"] || !kinds["danmaku"] {
+		t.Fatalf("expected video and danmaku kinds, got %#v", items[0].Files)
+	}
+}
+
 func TestReconcileLocalUpdatesExistingRecordingFiles(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
@@ -612,6 +673,71 @@ func TestDiscoverUploadSourcesPersistsContinuousSegments(t *testing.T) {
 	}
 	if jobType != "MERGE_UPLOAD_SOURCE" {
 		t.Fatalf("unexpected merge job type: %s", jobType)
+	}
+}
+
+func TestDiscoverUploadSourcesWaitsForAdjacentUnfinishedRecording(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'OFFLINE', recorder_status = 'IDLE'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update runtime returned error: %v", err)
+	}
+
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-05T10:00:00Z",
+		CompletedAt: "2026-09-05T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	result, err := database.ExecContext(ctx, `
+		INSERT INTO recordings
+			(recording_profile_id, title, started_at, recording_status, local_storage_status,
+				source_room_id, streamer_name_snapshot)
+		VALUES (1, 'part 2', '2026-09-05T10:03:07Z', 'ACTIVE', 'AVAILABLE',
+			'1741048619', 'Streamer')
+	`)
+	if err != nil {
+		t.Fatalf("insert active recording returned error: %v", err)
+	}
+	recordingID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("LastInsertId returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO recording_files
+			(recording_id, relative_path, original_name, kind, file_status, size_bytes, opened_at)
+		VALUES (?, 'recordings/1741048619-Streamer/part 2.flv', 'part 2.flv',
+			'video', 'WRITING', 30, '2026-09-05T10:03:07Z')
+	`, recordingID); err != nil {
+		t.Fatalf("insert writing file returned error: %v", err)
+	}
+
+	discover, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+	if err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if discover.Created != 0 || discover.Delayed != 1 {
+		t.Fatalf("expected upload source creation to wait, got %#v", discover)
+	}
+	sources, err := NewStore(database, cfg).ListUploadSources(ctx, actor, 600)
+	if err != nil {
+		t.Fatalf("ListUploadSources returned error: %v", err)
+	}
+	if len(sources.Items) != 0 {
+		t.Fatalf("expected no upload source while adjacent recording is unfinished, got %#v", sources)
 	}
 }
 
