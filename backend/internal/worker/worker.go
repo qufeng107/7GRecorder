@@ -21,14 +21,15 @@ import (
 )
 
 type Worker struct {
-	db       *sql.DB
-	recorder recorder.SyncClient
-	cfg      config.Config
-	merger   media.Merger
-	packager media.Packager
-	cos      upload.COSUploader
-	bilibili upload.BilibiliUploader
-	lockID   string
+	db         *sql.DB
+	recorder   recorder.SyncClient
+	cfg        config.Config
+	merger     media.Merger
+	packager   media.Packager
+	compressor media.Compressor
+	cos        upload.COSUploader
+	bilibili   upload.BilibiliUploader
+	lockID     string
 }
 
 type workerJob struct {
@@ -54,14 +55,15 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		cfg = cfgs[0]
 	}
 	return Worker{
-		db:       database,
-		recorder: recorderClient,
-		cfg:      cfg,
-		merger:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		packager: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		cos:      upload.NewTencentCOSUploader(),
-		bilibili: upload.NewNoopBilibiliUploader(),
-		lockID:   fmt.Sprintf("%s:%d", host, os.Getpid()),
+		db:         database,
+		recorder:   recorderClient,
+		cfg:        cfg,
+		merger:     media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		packager:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		compressor: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		cos:        upload.NewTencentCOSUploader(),
+		bilibili:   upload.NewNoopBilibiliUploader(),
+		lockID:     fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
 }
 
@@ -80,6 +82,12 @@ func NewWithPackager(database *sql.DB, recorderClient recorder.SyncClient, cfg c
 func NewWithCOSUploader(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, cosUploader upload.COSUploader) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.cos = cosUploader
+	return worker
+}
+
+func NewWithCOSUploaderAndCompressor(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, cosUploader upload.COSUploader, compressor media.Compressor) Worker {
+	worker := NewWithCOSUploader(database, recorderClient, cfg, cosUploader)
+	worker.compressor = compressor
 	return worker
 }
 
@@ -247,12 +255,48 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 	if err := store.MarkCOSObjectUploading(ctx, request.ObjectID); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", err)
 	}
+	compressedForCOS := false
+	if w.cfg.COSCompressionEnabled {
+		compressedRelativePath := cosCompressedRelativePath(request)
+		compressedObjectKey := request.Prefix + compressedRelativePath
+		if err := store.MarkCOSObjectCompressing(ctx, request.ObjectID); err != nil {
+			return w.failJob(ctx, job, "PERMANENT", err)
+		}
+		compressed, err := w.compressor.Compress(ctx, media.CompressionRequest{
+			UploadSourceID:     request.UploadSourceID,
+			InputRelativePath:  request.SourceRelativePath,
+			OutputRelativePath: compressedRelativePath,
+			Preset:             w.cfg.COSCompressionPreset,
+		})
+		if err != nil {
+			message := truncateError(err)
+			if markErr := store.MarkCOSObjectCompressionFailed(ctx, request.ObjectID, message); markErr != nil {
+				return markErr
+			}
+			return w.failJob(ctx, job, "TRANSIENT", err)
+		}
+		if err := store.MarkCOSObjectCompressed(ctx, request.ObjectID, compressed.RelativePath, compressed.SizeBytes, compressed.Preset, compressedObjectKey); err != nil {
+			return w.failJob(ctx, job, "PERMANENT", err)
+		}
+		compressedPath, err := resolveWorkerPath(w.cfg.DataRoot, compressed.RelativePath)
+		if err != nil {
+			return w.failUploadJob(ctx, job, request.ObjectID, "PERMANENT", err)
+		}
+		request.SourcePath = compressedPath
+		request.SourceRelativePath = compressed.RelativePath
+		request.SourceSizeBytes = compressed.SizeBytes
+		request.ObjectKey = compressedObjectKey
+		compressedForCOS = true
+	}
 	result, err := w.cos.Upload(ctx, request)
 	if err != nil {
 		return w.failUploadJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
 	}
 	if err := store.MarkCOSObjectUploaded(ctx, request.ObjectID, result); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	if compressedForCOS {
+		_ = removeCOSCompressedFile(w.cfg.DataRoot, request.SourceRelativePath)
 	}
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
@@ -491,4 +535,66 @@ func retryDelaySeconds(attempts int) int {
 	default:
 		return 900
 	}
+}
+
+func cosCompressedRelativePath(request upload.COSUploadRequest) string {
+	base := strings.TrimSuffix(filepath.Base(request.SourceRelativePath), filepath.Ext(request.SourceRelativePath))
+	if base == "" {
+		base = fmt.Sprintf("output-%d", request.OutputID)
+	}
+	return filepath.ToSlash(filepath.Join(
+		"upload-sources",
+		fmt.Sprintf("%d", request.RecordingProfileID),
+		fmt.Sprintf("%d", request.UploadSourceID),
+		"cos",
+		base+".mp4",
+	))
+}
+
+func resolveWorkerPath(root string, relativePath string) (string, error) {
+	if root == "" || relativePath == "" || filepath.IsAbs(relativePath) {
+		return "", fmt.Errorf("unsafe path")
+	}
+	cleaned := filepath.Clean(relativePath)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe path")
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	candidateAbs, err := filepath.Abs(filepath.Join(rootAbs, cleaned))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(rootAbs, candidateAbs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe path")
+	}
+	return candidateAbs, nil
+}
+
+func removeCOSCompressedFile(root string, relativePath string) error {
+	normalized := filepath.ToSlash(relativePath)
+	if !strings.Contains(normalized, "/cos/") {
+		return fmt.Errorf("not a cos compression file")
+	}
+	path, err := resolveWorkerPath(root, relativePath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("cos compression path is a directory")
+	}
+	return os.Remove(path)
 }

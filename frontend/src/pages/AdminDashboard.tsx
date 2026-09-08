@@ -177,6 +177,10 @@ type UploadSourceOutput = {
   bilibili_status?: string;
   bilibili_url?: string;
   cos_status?: string;
+  cos_source_size_bytes?: number;
+  cos_uploaded_size_bytes?: number;
+  cos_compression_status?: string;
+  cos_compression_preset?: string;
 };
 
 type UploadSourceItem = {
@@ -654,6 +658,9 @@ const uiCopy = {
     completedAt: "完成时间",
     duration: "时长",
     size: "大小",
+    sourceSize: "源大小",
+    uploadedSize: "上传大小",
+    compressionStatus: "压缩",
     path: "路径",
     fileStatus: "文件状态",
     noFile: "无文件",
@@ -685,6 +692,12 @@ const uiCopy = {
     uploadStatusAvailable: "已上传",
     uploadStatusVerified: "已发布",
     uploadStatusFailed: "失败",
+    compressionStatusDisabled: "未启用",
+    compressionStatusPending: "待压缩",
+    compressionStatusCompressing: "压缩中",
+    compressionStatusCompressed: "已压缩",
+    compressionStatusSkippedLowGain: "收益低跳过",
+    compressionStatusFailed: "压缩失败",
     sourceSegments: "原始片段",
     sourceOutputs: "发布分片",
     showSourceSegments: "显示原始片段",
@@ -924,6 +937,9 @@ const uiCopy = {
     completedAt: "Completed",
     duration: "Duration",
     size: "Size",
+    sourceSize: "Source Size",
+    uploadedSize: "Uploaded Size",
+    compressionStatus: "Compression",
     path: "Path",
     fileStatus: "File Status",
     noFile: "NO_FILE",
@@ -955,6 +971,12 @@ const uiCopy = {
     uploadStatusAvailable: "Uploaded",
     uploadStatusVerified: "Published",
     uploadStatusFailed: "Failed",
+    compressionStatusDisabled: "Disabled",
+    compressionStatusPending: "Pending",
+    compressionStatusCompressing: "Compressing",
+    compressionStatusCompressed: "Compressed",
+    compressionStatusSkippedLowGain: "Skipped",
+    compressionStatusFailed: "Failed",
     sourceSegments: "Original Segments",
     sourceOutputs: "Publish Parts",
     showSourceSegments: "Show Original Segments",
@@ -4012,13 +4034,15 @@ function UploadSourceOutputsTable(props: {
     <div className="rounded-md border border-border bg-white p-3">
       <h3 className="text-sm font-semibold">{props.labels.sourceOutputs}</h3>
       <div className="mt-3 overflow-auto">
-        <table className="w-full min-w-[860px] border-collapse text-left text-xs">
+        <table className="w-full min-w-[1040px] border-collapse text-left text-xs">
           <thead className="bg-[#eef1eb] uppercase text-muted">
             <tr>
               <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.sourceSize}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.uploadedSize}</th>
+              <th className="px-3 py-2 font-semibold">{props.labels.compressionStatus}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.cosStatus}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.bilibiliStatus}</th>
               <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
@@ -4038,7 +4062,13 @@ function UploadSourceOutputsTable(props: {
                     {formatTimeline(output.timeline_start_ms)} - {formatTimeline(output.timeline_end_ms)}
                   </td>
                   <td className="px-3 py-3 text-muted">{formatDuration(output.duration_ms)}</td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(output.size_bytes)}</td>
+                  <td className="px-3 py-3 text-muted">{formatBytes(output.cos_source_size_bytes || output.size_bytes)}</td>
+                  <td className="px-3 py-3 text-muted">
+                    {output.cos_uploaded_size_bytes ? formatBytes(output.cos_uploaded_size_bytes) : "-"}
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    {formatCompressionStatus(output.cos_compression_status, props.labels)}
+                  </td>
                   <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(output.cos_status, props.labels)}</td>
                   <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(output.bilibili_status, props.labels)}</td>
                   <td className="px-3 py-3">
@@ -4071,7 +4101,7 @@ function UploadSourceOutputsTable(props: {
             })}
             {props.outputs.length === 0 ? (
               <tr>
-                <td className="px-3 py-6 text-center text-muted" colSpan={7}>
+                <td className="px-3 py-6 text-center text-muted" colSpan={9}>
                   {props.labels.noFile}
                 </td>
               </tr>
@@ -4407,6 +4437,28 @@ function formatModuleUploadStatus(value: string | undefined, labels: AdminCopy):
     return labels.uploadStatusFailed;
   }
   return value || labels.unknown;
+}
+
+function formatCompressionStatus(value: string | undefined, labels: AdminCopy): string {
+  if (value === "DISABLED") {
+    return labels.compressionStatusDisabled;
+  }
+  if (value === "PENDING") {
+    return labels.compressionStatusPending;
+  }
+  if (value === "COMPRESSING") {
+    return labels.compressionStatusCompressing;
+  }
+  if (value === "COMPRESSED") {
+    return labels.compressionStatusCompressed;
+  }
+  if (value === "SKIPPED_LOW_GAIN") {
+    return labels.compressionStatusSkippedLowGain;
+  }
+  if (value === "FAILED") {
+    return labels.compressionStatusFailed;
+  }
+  return value || "-";
 }
 
 function formatTimeline(value: number): string {

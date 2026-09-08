@@ -51,8 +51,8 @@ Rules:
 
 `PACKAGE_UPLOAD_SOURCE` is a MEDIA job. It applies one shared delivery boundary for COS and Bilibili:
 
-- target maximum part size should be below both COS and Bilibili limits. The next implementation should replace the
-  early 4 GiB default with a safer decimal limit such as `UPLOAD_MAX_PART_BYTES=3800000000`;
+- target maximum part size should be below both COS and Bilibili limits. The default is the safer decimal limit
+  `UPLOAD_MAX_PART_BYTES=3800000000`;
 - default maximum part duration is 2 hours (`UPLOAD_MAX_PART_DURATION_SECONDS=7200`);
 - the size default stays below the current 5GB COS simple upload limit and the more restrictive Bilibili per-file
   upload boundary, leaving room for platform/account variation;

@@ -457,7 +457,7 @@ object_key
 size_bytes
 checksum nullable
 etag nullable
-source_size_bytes nullable
+source_size_bytes not null default 0
 compression_status         DISABLED | PENDING | COMPRESSING | COMPRESSED | SKIPPED_LOW_GAIN | FAILED
 compression_preset nullable
 compression_settings_json nullable
@@ -481,7 +481,7 @@ updated_at
 对象不能覆盖已经上传成功的分片状态。下载入口只基于 `upload_source_cos_objects.status = AVAILABLE` 发放短时 COS
 签名 URL；本地 Upload Source 文件路径属于服务端实现细节，不作为下载契约。
 
-后续 COS 压缩上传在 `upload_source_cos_objects` 上记录压缩派生对象 metadata。`source_size_bytes` 是
+COS 压缩上传在 `upload_source_cos_objects` 上记录压缩派生对象 metadata。`source_size_bytes` 是
 `upload_source_outputs.size_bytes` 的快照；`size_bytes` 是实际上传到 COS 的对象大小。压缩只改变 COS 对象输入，
 不修改 `upload_source_outputs.relative_path`，也不覆盖本地源分片。`compressed_from_relative_path` 只保存受控相对
 路径，用于审计和清理；压缩临时/派生文件仍必须由 filesystem adapter 做 root escape 校验后才能读取或删除。

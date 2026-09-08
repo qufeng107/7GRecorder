@@ -41,6 +41,19 @@ type PackageRequest struct {
 	OutputBaseName        string
 }
 
+type CompressionRequest struct {
+	UploadSourceID     int64
+	InputRelativePath  string
+	OutputRelativePath string
+	Preset             string
+}
+
+type CompressionResult struct {
+	RelativePath string
+	SizeBytes    int64
+	Preset       string
+}
+
 type PackageOutput struct {
 	RelativePath    string
 	SizeBytes       int64
@@ -61,17 +74,22 @@ type Packager interface {
 	Package(ctx context.Context, req PackageRequest) (PackageResult, error)
 }
 
+type Compressor interface {
+	Compress(ctx context.Context, req CompressionRequest) (CompressionResult, error)
+}
+
 type FFmpegMerger struct {
-	DataRoot   string
-	TempRoot   string
-	FFmpegPath string
+	DataRoot    string
+	TempRoot    string
+	FFmpegPath  string
+	FFprobePath string
 }
 
 func NewFFmpegMerger(dataRoot string, tempRoot string, ffmpegPath string) FFmpegMerger {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	return FFmpegMerger{DataRoot: dataRoot, TempRoot: tempRoot, FFmpegPath: ffmpegPath}
+	return FFmpegMerger{DataRoot: dataRoot, TempRoot: tempRoot, FFmpegPath: ffmpegPath, FFprobePath: "ffprobe"}
 }
 
 func (m FFmpegMerger) Merge(ctx context.Context, req MergeRequest) (MergeResult, error) {
@@ -171,7 +189,7 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 	}
 	maxBytes := req.MaxPartBytes
 	if maxBytes <= 0 {
-		maxBytes = 4 * 1024 * 1024 * 1024
+		maxBytes = 3800000000
 	}
 	maxSeconds := req.MaxPartDurationSecs
 	if maxSeconds <= 0 {
@@ -291,6 +309,104 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 		return PackageResult{}, errors.New("ffmpeg package produced no outputs")
 	}
 	return PackageResult{Outputs: results}, nil
+}
+
+func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (CompressionResult, error) {
+	if req.UploadSourceID <= 0 || req.InputRelativePath == "" || req.OutputRelativePath == "" {
+		return CompressionResult{}, errors.New("invalid compression request")
+	}
+	preset := strings.TrimSpace(req.Preset)
+	if preset == "" {
+		preset = "h264_crf23_medium_mp4"
+	}
+	if preset != "h264_crf23_medium_mp4" {
+		return CompressionResult{}, fmt.Errorf("unsupported compression preset: %s", preset)
+	}
+	inputPath, err := resolveWithinRoot(m.DataRoot, req.InputRelativePath)
+	if err != nil {
+		return CompressionResult{}, fmt.Errorf("resolve compression input: %w", err)
+	}
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return CompressionResult{}, fmt.Errorf("stat compression input: %w", err)
+	}
+	if info.IsDir() {
+		return CompressionResult{}, errors.New("compression input is a directory")
+	}
+	outputPath, err := resolveWithinRoot(m.DataRoot, req.OutputRelativePath)
+	if err != nil {
+		return CompressionResult{}, fmt.Errorf("resolve compression output: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return CompressionResult{}, fmt.Errorf("create compression output dir: %w", err)
+	}
+
+	tempRoot := m.TempRoot
+	if tempRoot == "" {
+		tempRoot = filepath.Join(m.DataRoot, "temp")
+	}
+	workDir := filepath.Join(tempRoot, "cos-compression", fmt.Sprintf("%d", req.UploadSourceID))
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return CompressionResult{}, fmt.Errorf("create compression temp dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	tempOutput := filepath.Join(workDir, filepath.Base(outputPath)+".tmp")
+	cmd := exec.CommandContext(ctx, m.FFmpegPath,
+		"-hide_banner", "-loglevel", "error",
+		"-i", inputPath,
+		"-map", "0:v:0", "-map", "0:a?",
+		"-c:v", "libx264",
+		"-preset", "medium",
+		"-crf", "23",
+		"-pix_fmt", "yuv420p",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-movflags", "+faststart",
+		"-y", tempOutput,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return CompressionResult{}, fmt.Errorf("ffmpeg compression failed: %s", message)
+	}
+	if err := os.Rename(tempOutput, outputPath); err != nil {
+		return CompressionResult{}, fmt.Errorf("move compression output: %w", err)
+	}
+	outputInfo, err := os.Stat(outputPath)
+	if err != nil {
+		return CompressionResult{}, fmt.Errorf("stat compression output: %w", err)
+	}
+	if outputInfo.IsDir() || outputInfo.Size() <= 0 {
+		return CompressionResult{}, errors.New("compression output is invalid")
+	}
+	if err := m.probe(ctx, outputPath); err != nil {
+		return CompressionResult{}, err
+	}
+	return CompressionResult{RelativePath: req.OutputRelativePath, SizeBytes: outputInfo.Size(), Preset: preset}, nil
+}
+
+func (m FFmpegMerger) probe(ctx context.Context, path string) error {
+	ffprobePath := m.FFprobePath
+	if ffprobePath == "" {
+		ffprobePath = "ffprobe"
+	}
+	cmd := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffprobe validation failed: %s", message)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		return errors.New("ffprobe validation returned empty duration")
+	}
+	return nil
 }
 
 func escapeConcatPath(path string) string {

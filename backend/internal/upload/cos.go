@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -20,17 +21,21 @@ type COSSecret struct {
 type COSUploadRequest struct {
 	ObjectID           int64
 	UploadSourceID     int64
+	OutputID           int64
 	RecordingProfileID int64
 	Region             string
 	Bucket             string
+	Prefix             string
 	ObjectKey          string
 	SourcePath         string
+	SourceRelativePath string
 	SourceSizeBytes    int64
 	Secret             COSSecret
 }
 
 type COSUploadResult struct {
-	ETag string
+	ETag      string
+	SizeBytes int64
 }
 
 type COSDownloadURLRequest struct {
@@ -67,6 +72,13 @@ func (TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest) 
 	if request.Secret.SecretID == "" || request.Secret.SecretKey == "" {
 		return COSUploadResult{}, NewClassifiedError("AUTH", "cos credential is incomplete")
 	}
+	info, err := os.Stat(request.SourcePath)
+	if err != nil {
+		return COSUploadResult{}, NewClassifiedError("SOURCE_MISSING", fmt.Sprintf("cos upload source file is missing: %v", err))
+	}
+	if info.IsDir() {
+		return COSUploadResult{}, NewClassifiedError("SOURCE_MISSING", "cos upload source path is a directory")
+	}
 
 	bucketURL, err := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com", request.Bucket, request.Region))
 	if err != nil {
@@ -90,7 +102,7 @@ func (TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest) 
 	if response != nil {
 		etag = strings.Trim(response.Header.Get("ETag"), `"`)
 	}
-	return COSUploadResult{ETag: etag}, nil
+	return COSUploadResult{ETag: etag, SizeBytes: info.Size()}, nil
 }
 
 func (TencentCOSUploader) SignedDownloadURL(ctx context.Context, request COSDownloadURLRequest, expiresIn time.Duration) (COSDownloadURLResult, error) {
