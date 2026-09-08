@@ -62,4 +62,31 @@ fi
 docker version >/dev/null || sudo docker version >/dev/null
 df -h /data/7grecorder
 
+if command -v systemctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+  cat > /etc/systemd/system/7grecorder-housekeeping.service <<'EOF'
+[Unit]
+Description=7GRecorder safe disk housekeeping
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash -lc 'if [ -x /opt/7grecorder/current/source/scripts/deploy/housekeeping.sh ]; then /opt/7grecorder/current/source/scripts/deploy/housekeeping.sh; fi'
+EOF
+
+  cat > /etc/systemd/system/7grecorder-housekeeping.timer <<'EOF'
+[Unit]
+Description=Run 7GRecorder safe disk housekeeping daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now 7grecorder-housekeeping.timer >/dev/null
+fi
+
 echo "7GRecorder server bootstrap complete."
