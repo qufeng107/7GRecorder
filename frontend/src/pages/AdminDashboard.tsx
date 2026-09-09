@@ -262,6 +262,8 @@ type ReconcileResult = {
   imported: number;
   updated: number;
   skipped: number;
+  errors?: number;
+  last_error?: string;
 };
 
 type RecordingScanResult = {
@@ -1008,8 +1010,8 @@ const uiCopy = {
       `Repair: checked ${result.checked}, reset ${result.reset_to_merge} to merge and ${result.reset_to_package} to package, reset ${result.merge_jobs_reset + result.package_jobs_reset} merge/package jobs, cancelled ${result.upload_jobs_cancelled} upload jobs, blocked ${result.source_missing_blocks} sources with missing raw files.`,
     repairUploadSourcesFailed: "Repair failed. Check server logs.",
     refresh: "Refresh",
-    scanResult: (imported: number, updated: number, skipped: number) =>
-      `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored.`,
+    scanResult: (imported: number, updated: number, skipped: number, errors?: number, lastError?: string) =>
+      `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored${errors ? `, ${errors} errors (last: ${lastError || "unknown"})` : ""}.`,
     scanFailed: "Scan failed. Check server logs.",
     startTime: "Recording Time",
     completedAt: "Completed",
@@ -4010,6 +4012,13 @@ function RecordingsPanel(props: {
             props.reconcileResult.reconcile.updated,
             props.reconcileResult.reconcile.skipped
           )}
+          {props.reconcileResult.reconcile.errors ? (
+            <>
+              {" "}
+              Scan errors: {props.reconcileResult.reconcile.errors}
+              {props.reconcileResult.reconcile.last_error ? ` (${props.reconcileResult.reconcile.last_error})` : ""}
+            </>
+          ) : null}
           {" "}
           {props.labels.uploadSourceDiscoverResult(
             props.reconcileResult.discover.created,
@@ -4870,7 +4879,13 @@ function SelectField(props: { label: string; value: string; onChange: (value: st
       >
         <option value="original">original</option>
         <option value="high">high</option>
-        <option value="medium">medium</option>
+        <option value="super">super</option>
+        <option value="hd">hd</option>
+        <option value="smooth">smooth</option>
+        <option value="4k">4k</option>
+        <option value="2k">2k</option>
+        <option value="dolby">dolby</option>
+        <option value="blue_ray_dolby">blue_ray_dolby</option>
       </select>
     </label>
   );

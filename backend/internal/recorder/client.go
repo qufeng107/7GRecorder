@@ -211,19 +211,23 @@ func segmentMinutes(seconds int64) int64 {
 func qualityQN(quality string) string {
 	switch strings.ToLower(strings.TrimSpace(quality)) {
 	case "4k":
-		return "20000"
-	case "blue_ray_dolby", "dolby":
-		return "401"
+		return "avc20000,hevc20000,avc10000,hevc10000"
+	case "2k":
+		return "avc15000,hevc15000,avc10000,hevc10000"
+	case "dolby":
+		return "avc30000,hevc30000,avc10000,hevc10000"
+	case "blue_ray_dolby":
+		return "avc401,hevc401,avc10000,hevc10000"
 	case "blue_ray", "high":
-		return "400"
+		return "avc400,hevc400,avc10000,hevc10000"
 	case "super":
-		return "250"
+		return "avc250,hevc250,avc10000,hevc10000"
 	case "hd":
-		return "150"
+		return "avc150,hevc150,avc10000,hevc10000"
 	case "smooth":
-		return "80"
+		return "avc80,hevc80,avc10000,hevc10000"
 	default:
-		return "10000"
+		return "avc10000,hevc10000"
 	}
 }
 

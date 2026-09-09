@@ -205,6 +205,8 @@ type ReconcileResult struct {
 	Imported     int `json:"imported"`
 	Updated      int `json:"updated"`
 	Skipped      int `json:"skipped"`
+	Errors       int `json:"errors"`
+	LastError    string `json:"last_error,omitempty"`
 }
 
 type LocalStorageStatus struct {
@@ -2827,9 +2829,14 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 
 	root := filepath.Join(s.cfg.DataRoot, "recordings")
 	result := ReconcileResult{}
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return result, nil
+	}
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			result.Errors++
+			result.LastError = fmt.Sprintf("%s: %v", filepath.ToSlash(path), walkErr)
+			return nil
 		}
 		if entry.IsDir() {
 			return nil
@@ -2842,6 +2849,11 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 		result.ScannedFiles++
 		imported, updated, err := s.reconcileFile(ctx, root, path, fileKind, profiles)
 		if err != nil {
+			if isTransientFileScanError(err) {
+				result.Errors++
+				result.LastError = fmt.Sprintf("%s: %v", filepath.ToSlash(path), err)
+				return nil
+			}
 			return err
 		}
 		switch {
@@ -2861,6 +2873,10 @@ func (s Store) ReconcileLocal(ctx context.Context, actor account.User) (Reconcil
 		return ReconcileResult{}, fmt.Errorf("reconcile local recordings: %w", err)
 	}
 	return result, nil
+}
+
+func isTransientFileScanError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission)
 }
 
 func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID int64) (File, error) {

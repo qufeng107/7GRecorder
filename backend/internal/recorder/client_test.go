@@ -50,6 +50,7 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 		RoomID:             "1741048619",
 		Enabled:            true,
 		AutoRecord:         true,
+		Quality:            "4k",
 		RecordDanmaku:      true,
 		SegmentDurationSec: 1800,
 	})
@@ -78,6 +79,9 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 	}
 	if configPayload["CuttingNumber"] != float64(30) {
 		t.Fatalf("expected 30 minute segments, got %#v", configPayload["CuttingNumber"])
+	}
+	if configPayload["RecordingQuality"] != "avc20000,hevc20000,avc10000,hevc10000" {
+		t.Fatalf("unexpected recording quality: %#v", configPayload["RecordingQuality"])
 	}
 }
 
