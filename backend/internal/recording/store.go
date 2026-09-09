@@ -201,11 +201,11 @@ type File struct {
 }
 
 type ReconcileResult struct {
-	ScannedFiles int `json:"scanned_files"`
-	Imported     int `json:"imported"`
-	Updated      int `json:"updated"`
-	Skipped      int `json:"skipped"`
-	Errors       int `json:"errors"`
+	ScannedFiles int    `json:"scanned_files"`
+	Imported     int    `json:"imported"`
+	Updated      int    `json:"updated"`
+	Skipped      int    `json:"skipped"`
+	Errors       int    `json:"errors"`
 	LastError    string `json:"last_error,omitempty"`
 }
 
