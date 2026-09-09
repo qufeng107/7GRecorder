@@ -225,12 +225,15 @@ Early upload-module bootstrap implements credential metadata creation and module
   "title_template": "{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播",
   "description_template": "主播：{{streamer_name}}\n直播间：{{room_id}}\n录制时间：{{started_at_china}} - {{completed_at_china}}",
   "tags": ["录播"],
-  "copyright": 2
+  "copyright": 2,
+  "source": "https://live.bilibili.com/{{room_id}}"
 }
 ```
 
   Supported template variables are `profile_name`, `streamer_name`, `room_id`, `source_title`, `date`, `date_compact`,
   `start_time`, `end_time`, `started_at_china`, `completed_at_china`, `live_ordinal`, and `part_count`.
+  `source` is used for Bilibili repost submissions. When `copyright` is `2` and `source` is omitted, the backend
+  defaults it to the room URL template `https://live.bilibili.com/{{room_id}}`.
 - `GET/PUT /api/v1/recording-profiles/{id}/storage/cos` reads or saves the COS storage profile.
 - `POST /api/v1/upload-modules/actions/reconcile` is SUPER_ADMIN-only and creates idempotent Bilibili/COS upload jobs
   for `READY_TO_UPLOAD` upload sources. Bilibili jobs render title/description templates and store the request snapshot

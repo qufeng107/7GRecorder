@@ -16,6 +16,7 @@ import (
 const (
 	defaultBilibiliTitleTemplate       = "{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播"
 	defaultBilibiliDescriptionTemplate = "主播：{{streamer_name}}\n直播间：{{room_id}}\n录制时间：{{started_at_china}} - {{completed_at_china}}\n分片：{{part_count}} 个\n\n由 7GRecorder 自动归档。"
+	defaultBilibiliSourceTemplate      = "https://live.bilibili.com/{{room_id}}"
 )
 
 type BilibiliPublishingSettings struct {
@@ -209,7 +210,7 @@ func (s Store) BilibiliUploadRequest(ctx context.Context, payload BilibiliJobPay
 	request.Description = renderBilibiliTemplate(settings.DescriptionTemplate, vars)
 	request.Tags = settings.Tags
 	request.Copyright = settings.Copyright
-	request.Source = settings.Source
+	request.Source = renderBilibiliTemplate(settings.Source, vars)
 	request.Parts = parts
 	request.Settings = settings
 	request.Secret = secret
@@ -329,6 +330,10 @@ func parseBilibiliSettings(raw json.RawMessage) (BilibiliPublishingSettings, err
 		return BilibiliPublishingSettings{}, ErrValidation
 	}
 	settings.Tags = cleanTags(settings.Tags)
+	settings.Source = strings.TrimSpace(settings.Source)
+	if settings.Copyright == 2 && settings.Source == "" {
+		settings.Source = defaultBilibiliSourceTemplate
+	}
 	return settings, nil
 }
 

@@ -123,6 +123,59 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	}
 }
 
+func TestBilibiliUploadRequestDefaultsRepostSourceToLiveRoom(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create profile returned error: %v", err)
+	}
+	store := NewStore(database, cfg)
+	credential, err := store.CreateCredential(ctx, actor, CredentialCreate{
+		Scope:        "USER",
+		Platform:     "bilibili",
+		Purpose:      "PUBLISHER",
+		AccountLabel: "bili account",
+		Secret:       []byte(`{"cookie_info":{},"token_info":{}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential returned error: %v", err)
+	}
+	if _, err := store.UpsertBilibiliConfig(ctx, actor, 1, PublishingConfigUpsert{
+		CredentialID: credential.ID,
+		Enabled:      true,
+		Settings:     []byte(`{"copyright":2}`),
+	}); err != nil {
+		t.Fatalf("UpsertBilibiliConfig returned error: %v", err)
+	}
+	insertReadyUploadSource(t, ctx, database)
+	outputPath := filepath.Join(cfg.DataRoot, "upload-sources", "1", "1", "parts", "7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv")
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		t.Fatalf("create output dir returned error: %v", err)
+	}
+	if err := os.WriteFile(outputPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write output file returned error: %v", err)
+	}
+	if _, err := store.Reconcile(ctx, actor); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	request, err := store.BilibiliUploadRequest(ctx, BilibiliJobPayload{PublicationID: 1, UploadSourceID: 1})
+	if err != nil {
+		t.Fatalf("BilibiliUploadRequest returned error: %v", err)
+	}
+	if request.Copyright != 2 {
+		t.Fatalf("expected repost copyright, got %d", request.Copyright)
+	}
+	if request.Source != "https://live.bilibili.com/1741048619" {
+		t.Fatalf("unexpected repost source: %q", request.Source)
+	}
+}
+
 func TestReconcileSkipsUploadSourceWithAdjacentRecordingOutsideSource(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

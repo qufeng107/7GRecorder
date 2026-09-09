@@ -460,6 +460,7 @@ type UploadSettingsForm = {
   bilibili_description_template: string;
   bilibili_tags: string;
   bilibili_copyright: number;
+  bilibili_source: string;
   cos_enabled: boolean;
   cos_credential_id: string;
   cos_region: string;
@@ -525,6 +526,7 @@ const emptyUploadSettingsForm: UploadSettingsForm = {
   bilibili_description_template: defaultBilibiliDescriptionTemplate,
   bilibili_tags: "录播,七宫筱野",
   bilibili_copyright: 2,
+  bilibili_source: "https://live.bilibili.com/{{room_id}}",
   cos_enabled: false,
   cos_credential_id: "",
   cos_region: "",
@@ -818,6 +820,7 @@ const uiCopy = {
     bilibiliCopyright: "版权类型",
     bilibiliCopyrightOriginal: "自制",
     bilibiliCopyrightRepost: "转载",
+    bilibiliSource: "转载来源",
     bilibiliTemplateHint: "可用变量：{{profile_name}}、{{streamer_name}}、{{room_id}}、{{date}}、{{date_compact}}、{{start_time}}、{{end_time}}、{{started_at_china}}、{{completed_at_china}}、{{live_ordinal}}、{{part_count}}。",
     cosRegion: "COS 地域",
     cosBucket: "COS Bucket",
@@ -1120,6 +1123,7 @@ const uiCopy = {
     bilibiliCopyright: "Copyright",
     bilibiliCopyrightOriginal: "Original",
     bilibiliCopyrightRepost: "Repost",
+    bilibiliSource: "Repost Source",
     bilibiliTemplateHint: "Variables: {{profile_name}}, {{streamer_name}}, {{room_id}}, {{date}}, {{date_compact}}, {{start_time}}, {{end_time}}, {{started_at_china}}, {{completed_at_china}}, {{live_ordinal}}, {{part_count}}.",
     cosRegion: "COS Region",
     cosBucket: "COS Bucket",
@@ -1177,7 +1181,8 @@ function bilibiliSettingsFromConfig(value: unknown) {
       : typeof settings.tags === "string"
         ? settings.tags
         : "录播,七宫筱野",
-    copyright: typeof settings.copyright === "number" ? settings.copyright : 2
+    copyright: typeof settings.copyright === "number" ? settings.copyright : 2,
+    source: typeof settings.source === "string" ? settings.source : "https://live.bilibili.com/{{room_id}}"
   };
 }
 
@@ -1189,7 +1194,8 @@ function bilibiliSettingsPayload(form: UploadSettingsForm) {
       .split(/[,\n，]/)
       .map((tag) => tag.trim())
       .filter(Boolean),
-    copyright: form.bilibili_copyright
+    copyright: form.bilibili_copyright,
+    source: form.bilibili_source.trim()
   };
 }
 
@@ -1604,7 +1610,8 @@ export function AdminDashboard() {
       bilibili_title_template: settings.title_template,
       bilibili_description_template: settings.description_template,
       bilibili_tags: settings.tags,
-      bilibili_copyright: settings.copyright
+      bilibili_copyright: settings.copyright,
+      bilibili_source: settings.source
     }));
   }, [bilibiliConfigQuery.data]);
 
@@ -3308,6 +3315,14 @@ function UploadSettingsPanel(props: {
                   <option value={2}>{props.labels.bilibiliCopyrightRepost}</option>
                 </select>
               </label>
+              {props.settingsForm.bilibili_copyright === 2 ? (
+                <TextField
+                  disabled={!props.canEditBilibiliModule}
+                  label={props.labels.bilibiliSource}
+                  value={props.settingsForm.bilibili_source}
+                  onChange={(value) => updateSettings("bilibili_source", value)}
+                />
+              ) : null}
               <p className="text-xs leading-5 text-muted">{props.labels.bilibiliTemplateHint}</p>
               {props.bilibiliConfigError ? (
                 <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p>
