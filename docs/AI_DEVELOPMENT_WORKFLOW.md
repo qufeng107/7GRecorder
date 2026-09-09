@@ -20,6 +20,7 @@
 
 - 产品需求与非目标：`REQUIREMENTS.md`
 - 架构、模块边界、集成方式和技术约束：`ARCHITECTURE.md`
+- 当前线上状态、新会话交接与下一步：`CURRENT_STATUS.md`
 - 当前目标数据库结构：`DATABASE.md`
 - 测试义务和 Release Gate：`TESTING.md`
 - 当前阶段、实现顺序和验收：`DEVELOPMENT_PLAN.md`

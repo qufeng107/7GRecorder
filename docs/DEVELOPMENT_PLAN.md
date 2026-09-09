@@ -1,5 +1,9 @@
 # 7GRecorder — Pre-v1 开发计划
 
+> New-chat handoff: read `docs/CURRENT_STATUS.md` first for the current production SHA, recent upload-source repair
+> work, known server state, and the immediate Bilibili/COS test plan. This development plan describes the broader
+> phase roadmap.
+
 ## 1. 开发原则
 
 ```text
