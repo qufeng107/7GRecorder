@@ -1101,8 +1101,9 @@ func (s Store) replaceUploadSourceGroup(ctx context.Context, sourceIDs []int64, 
 func (s Store) ensureUploadSourceMergeJobs(ctx context.Context) (int, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO jobs
-			(recording_profile_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
 		SELECT us.recording_profile_id,
+			us.id,
 			'MERGE_UPLOAD_SOURCE',
 			'MEDIA',
 			'upload-source:' || us.id || ':merge',
@@ -1742,9 +1743,9 @@ func insertUploadSourceTx(ctx context.Context, tx *sql.Tx, recordings []Recordin
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO jobs
-				(recording_profile_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
-			VALUES (?, 'MERGE_UPLOAD_SOURCE', 'MEDIA', ?, ?, 'PENDING', 60, 3)
-		`, first.RecordingProfileID, fmt.Sprintf("upload-source:%d:merge", uploadSourceID), string(payload)); err != nil {
+				(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+			VALUES (?, ?, 'MERGE_UPLOAD_SOURCE', 'MEDIA', ?, ?, 'PENDING', 60, 3)
+		`, first.RecordingProfileID, uploadSourceID, fmt.Sprintf("upload-source:%d:merge", uploadSourceID), string(payload)); err != nil {
 			return false, fmt.Errorf("enqueue upload source merge: %w", err)
 		}
 	}
@@ -1970,9 +1971,24 @@ func (s Store) MarkUploadSourcePackageSucceeded(ctx context.Context, id int64, o
 			ready_at = CURRENT_TIMESTAMP,
 			last_error = NULL,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status IN ('PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
+		WHERE id = ? AND status IN ('MERGE_PENDING', 'MERGE_FAILED', 'PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
 	`, totalBytes, totalDurationMs, totalDurationMs, id); err != nil {
 		return fmt.Errorf("mark upload source package succeeded: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'CANCELLED',
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = 'packaged directly from source segments',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND type = 'PACKAGE_UPLOAD_SOURCE'
+			AND status IN ('PENDING', 'FAILED', 'CANCELLED')
+	`, id); err != nil {
+		return fmt.Errorf("cancel obsolete upload source package jobs: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE publications

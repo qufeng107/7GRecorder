@@ -794,11 +794,13 @@ removes only old `upload_source_segments`; and creates a new upload source from 
 `recording_files`. It must not delete original recordings, upload-source output files, COS objects, or publication rows.
 Normal upload-source lists hide `REPLACED` rows, while historical rows remain in SQLite for audit and future cleanup.
 
-Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates a derived file and stores
-`upload_sources.output_relative_path`, then move to `PACKAGE_PENDING`. Single-segment sources can reference the
-existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied consistently.
-`PACKAGE_UPLOAD_SOURCE` marks the source `READY_TO_UPLOAD` after one or more output parts are recorded. Terminal merge
-failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
+Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates the final upload parts directly from
+the original segment timeline. The worker groups adjacent source files into part-sized batches, concatenates only the
+segments needed for each output part, records `upload_source_outputs`, and marks the source `READY_TO_UPLOAD` without
+creating a whole-recording intermediate file. Single-segment sources can reference the existing closed video file but
+still enter `PACKAGE_PENDING` so size/duration limits are applied consistently. `PACKAGE_UPLOAD_SOURCE` remains the
+legacy/single-input packaging path and marks the source `READY_TO_UPLOAD` after one or more output parts are recorded.
+Terminal merge failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
 `PACKAGE_FAILED`.
 
 Upload-source repair is allowed to correct DB/filesystem drift without deleting external metadata. If package output

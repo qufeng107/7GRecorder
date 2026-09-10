@@ -16,7 +16,11 @@ import (
 var ErrUnsafeRelativePath = errors.New("unsafe relative path")
 
 type Segment struct {
-	RelativePath string
+	RelativePath    string
+	SizeBytes       int64
+	DurationMs      int64
+	TimelineStartMs int64
+	TimelineEndMs   int64
 }
 
 type MergeRequest struct {
@@ -36,6 +40,15 @@ type PackageRequest struct {
 	OutputDirRelativePath string
 	DurationMs            int64
 	SizeBytes             int64
+	MaxPartBytes          int64
+	MaxPartDurationSecs   int64
+	OutputBaseName        string
+}
+
+type SegmentPackageRequest struct {
+	UploadSourceID        int64
+	Segments              []Segment
+	OutputDirRelativePath string
 	MaxPartBytes          int64
 	MaxPartDurationSecs   int64
 	OutputBaseName        string
@@ -72,6 +85,7 @@ type Merger interface {
 
 type Packager interface {
 	Package(ctx context.Context, req PackageRequest) (PackageResult, error)
+	PackageSegments(ctx context.Context, req SegmentPackageRequest) (PackageResult, error)
 }
 
 type Compressor interface {
@@ -309,6 +323,209 @@ func (m FFmpegMerger) Package(ctx context.Context, req PackageRequest) (PackageR
 		return PackageResult{}, errors.New("ffmpeg package produced no outputs")
 	}
 	return PackageResult{Outputs: results}, nil
+}
+
+func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageRequest) (PackageResult, error) {
+	if req.UploadSourceID <= 0 || len(req.Segments) == 0 {
+		return PackageResult{}, errors.New("invalid segment package request")
+	}
+	maxBytes := req.MaxPartBytes
+	if maxBytes <= 0 {
+		maxBytes = 3800000000
+	}
+	maxSeconds := req.MaxPartDurationSecs
+	if maxSeconds <= 0 {
+		maxSeconds = 7200
+	}
+	outputDir := req.OutputDirRelativePath
+	if outputDir == "" {
+		outputDir = filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", req.UploadSourceID), "parts"))
+	}
+	outputBaseName := sanitizePackageBaseName(req.OutputBaseName)
+	if outputBaseName == "" {
+		outputBaseName = fmt.Sprintf("upload-source-%d", req.UploadSourceID)
+	}
+	outputDirPath, err := resolveWithinRoot(m.DataRoot, outputDir)
+	if err != nil {
+		return PackageResult{}, fmt.Errorf("resolve segment package output dir: %w", err)
+	}
+	if err := os.MkdirAll(outputDirPath, 0o755); err != nil {
+		return PackageResult{}, fmt.Errorf("create segment package output dir: %w", err)
+	}
+	if err := clearPackageOutputs(outputDirPath, outputBaseName); err != nil {
+		return PackageResult{}, fmt.Errorf("clear segment package output dir: %w", err)
+	}
+
+	segments := make([]Segment, 0, len(req.Segments))
+	for _, segment := range req.Segments {
+		absolutePath, err := resolveWithinRoot(m.DataRoot, segment.RelativePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("resolve segment package input: %w", err)
+		}
+		info, err := os.Lstat(absolutePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("stat segment package input: %w", err)
+		}
+		if info.IsDir() {
+			return PackageResult{}, errors.New("segment package input is a directory")
+		}
+		if segment.SizeBytes <= 0 {
+			segment.SizeBytes = info.Size()
+		}
+		if segment.DurationMs <= 0 && segment.TimelineEndMs > segment.TimelineStartMs {
+			segment.DurationMs = segment.TimelineEndMs - segment.TimelineStartMs
+		}
+		segments = append(segments, segment)
+	}
+
+	groups := packageSegmentGroups(segments, maxBytes, maxSeconds*1000)
+	if len(groups) == 0 {
+		return PackageResult{}, errors.New("segment package produced no groups")
+	}
+
+	tempRoot := m.TempRoot
+	if tempRoot == "" {
+		tempRoot = filepath.Join(m.DataRoot, "temp")
+	}
+	workDir := filepath.Join(tempRoot, "upload-sources", fmt.Sprintf("%d", req.UploadSourceID), "parts-work")
+	if err := os.RemoveAll(workDir); err != nil {
+		return PackageResult{}, fmt.Errorf("clear segment package temp dir: %w", err)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return PackageResult{}, fmt.Errorf("create segment package temp dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	results := make([]PackageOutput, 0, len(groups))
+	for index, group := range groups {
+		outputRelativePath := filepath.ToSlash(filepath.Join(outputDir, fmt.Sprintf("%s-p%02d.flv", outputBaseName, index+1)))
+		outputPath, err := resolveWithinRoot(m.DataRoot, outputRelativePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("resolve segment package output: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return PackageResult{}, fmt.Errorf("create segment package part dir: %w", err)
+		}
+		if len(group.Segments) == 1 {
+			inputPath, err := resolveWithinRoot(m.DataRoot, group.Segments[0].RelativePath)
+			if err != nil {
+				return PackageResult{}, fmt.Errorf("resolve segment package single input: %w", err)
+			}
+			if inputPath != outputPath {
+				if err := os.Remove(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return PackageResult{}, fmt.Errorf("clear segment package single output: %w", err)
+				}
+				if err := os.Link(inputPath, outputPath); err != nil {
+					if err := copyFile(inputPath, outputPath); err != nil {
+						return PackageResult{}, fmt.Errorf("copy segment package single output: %w", err)
+					}
+				}
+			}
+		} else if err := m.concatSegmentGroup(ctx, workDir, group.Segments, outputPath, index); err != nil {
+			return PackageResult{}, err
+		}
+		info, err := os.Stat(outputPath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("stat segment package output: %w", err)
+		}
+		results = append(results, PackageOutput{
+			RelativePath:    outputRelativePath,
+			SizeBytes:       info.Size(),
+			DurationMs:      group.DurationMs,
+			TimelineStartMs: group.TimelineStartMs,
+			TimelineEndMs:   group.TimelineEndMs,
+		})
+	}
+	return PackageResult{Outputs: results}, nil
+}
+
+type segmentPackageGroup struct {
+	Segments        []Segment
+	SizeBytes       int64
+	DurationMs      int64
+	TimelineStartMs int64
+	TimelineEndMs   int64
+}
+
+func packageSegmentGroups(segments []Segment, maxBytes int64, maxDurationMs int64) []segmentPackageGroup {
+	var groups []segmentPackageGroup
+	var current segmentPackageGroup
+	flush := func() {
+		if len(current.Segments) == 0 {
+			return
+		}
+		if current.TimelineEndMs <= current.TimelineStartMs {
+			current.TimelineEndMs = current.TimelineStartMs + current.DurationMs
+		}
+		groups = append(groups, current)
+		current = segmentPackageGroup{}
+	}
+	for _, segment := range segments {
+		segmentDuration := segment.DurationMs
+		if segmentDuration <= 0 && segment.TimelineEndMs > segment.TimelineStartMs {
+			segmentDuration = segment.TimelineEndMs - segment.TimelineStartMs
+		}
+		wouldExceedBytes := maxBytes > 0 && current.SizeBytes > 0 && current.SizeBytes+segment.SizeBytes > maxBytes
+		wouldExceedDuration := maxDurationMs > 0 && current.DurationMs > 0 && current.DurationMs+segmentDuration > maxDurationMs
+		if len(current.Segments) > 0 && (wouldExceedBytes || wouldExceedDuration) {
+			flush()
+		}
+		if len(current.Segments) == 0 {
+			current.TimelineStartMs = segment.TimelineStartMs
+		}
+		current.Segments = append(current.Segments, segment)
+		current.SizeBytes += segment.SizeBytes
+		current.DurationMs += segmentDuration
+		if segment.TimelineEndMs > 0 {
+			current.TimelineEndMs = segment.TimelineEndMs
+		} else {
+			current.TimelineEndMs = current.TimelineStartMs + current.DurationMs
+		}
+	}
+	flush()
+	return groups
+}
+
+func (m FFmpegMerger) concatSegmentGroup(ctx context.Context, workDir string, segments []Segment, outputPath string, index int) error {
+	listPath := filepath.Join(workDir, fmt.Sprintf("concat-%03d.txt", index+1))
+	listFile, err := os.Create(listPath)
+	if err != nil {
+		return fmt.Errorf("create segment concat list: %w", err)
+	}
+	writer := bufio.NewWriter(listFile)
+	for _, segment := range segments {
+		absolutePath, err := resolveWithinRoot(m.DataRoot, segment.RelativePath)
+		if err != nil {
+			_ = listFile.Close()
+			return fmt.Errorf("resolve segment concat input: %w", err)
+		}
+		if _, err := fmt.Fprintf(writer, "file '%s'\n", escapeConcatPath(absolutePath)); err != nil {
+			_ = listFile.Close()
+			return fmt.Errorf("write segment concat list: %w", err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		_ = listFile.Close()
+		return fmt.Errorf("flush segment concat list: %w", err)
+	}
+	if err := listFile.Close(); err != nil {
+		return fmt.Errorf("close segment concat list: %w", err)
+	}
+
+	tempOutput := filepath.Join(workDir, fmt.Sprintf("part-%03d.tmp.flv", index+1))
+	cmd := exec.CommandContext(ctx, m.FFmpegPath, "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", "-y", tempOutput)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffmpeg segment package failed: %s", message)
+	}
+	if err := os.Rename(tempOutput, outputPath); err != nil {
+		return fmt.Errorf("move segment package output: %w", err)
+	}
+	return nil
 }
 
 func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (CompressionResult, error) {

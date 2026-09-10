@@ -51,9 +51,10 @@ type fakeBilibiliUploader struct {
 }
 
 type fakePackager struct {
-	request media.PackageRequest
-	result  media.PackageResult
-	err     error
+	request        media.PackageRequest
+	segmentRequest media.SegmentPackageRequest
+	result         media.PackageResult
+	err            error
 }
 
 type fakeCompressor struct {
@@ -64,6 +65,11 @@ type fakeCompressor struct {
 
 func (f *fakePackager) Package(_ context.Context, request media.PackageRequest) (media.PackageResult, error) {
 	f.request = request
+	return f.result, f.err
+}
+
+func (f *fakePackager) PackageSegments(_ context.Context, request media.SegmentPackageRequest) (media.PackageResult, error) {
+	f.segmentRequest = request
 	return f.result, f.err
 }
 
@@ -182,26 +188,35 @@ func TestRunOnceMergesPendingUploadSource(t *testing.T) {
 		t.Fatalf("insert merge job returned error: %v", err)
 	}
 
-	merger := &fakeMerger{result: media.MergeResult{RelativePath: "upload-sources/1/1/upload-source-1.flv", SizeBytes: 45}}
-	if err := NewWithMerger(database, &fakeRecorder{}, cfg, merger).RunOnce(ctx); err != nil {
+	packager := &fakePackager{result: media.PackageResult{Outputs: []media.PackageOutput{
+		{RelativePath: "upload-sources/1/1/parts/7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv", SizeBytes: 20, DurationMs: 180000, TimelineStartMs: 0, TimelineEndMs: 180000},
+		{RelativePath: "upload-sources/1/1/parts/7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad-p02.flv", SizeBytes: 30, DurationMs: 180000, TimelineStartMs: 180000, TimelineEndMs: 360000},
+	}}}
+	if err := NewWithPackager(database, &fakeRecorder{}, cfg, packager).RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce returned error: %v", err)
 	}
-	if len(merger.request.Segments) != 2 || merger.request.OutputRelativePath != "upload-sources/1/1/upload-source-1.flv" {
-		t.Fatalf("unexpected merge request: %#v", merger.request)
+	if len(packager.segmentRequest.Segments) != 2 || packager.segmentRequest.OutputDirRelativePath != "upload-sources/1/1/parts" {
+		t.Fatalf("unexpected segment package request: %#v", packager.segmentRequest)
+	}
+	if packager.segmentRequest.OutputBaseName != "7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad" {
+		t.Fatalf("unexpected segment package output base name: %q", packager.segmentRequest.OutputBaseName)
 	}
 
 	var sourceStatus string
 	var outputPath string
 	var totalBytes int64
+	var outputCount int
 	if err := database.QueryRowContext(ctx, `
-		SELECT status, COALESCE(output_relative_path, ''), total_bytes
-		FROM upload_sources
-		WHERE id = 1
-	`).Scan(&sourceStatus, &outputPath, &totalBytes); err != nil {
+		SELECT us.status, COALESCE(us.output_relative_path, ''), us.total_bytes, COUNT(uso.id)
+		FROM upload_sources us
+		LEFT JOIN upload_source_outputs uso ON uso.upload_source_id = us.id
+		WHERE us.id = 1
+		GROUP BY us.id
+	`).Scan(&sourceStatus, &outputPath, &totalBytes, &outputCount); err != nil {
 		t.Fatalf("query upload source returned error: %v", err)
 	}
-	if sourceStatus != "PACKAGE_PENDING" || outputPath != "upload-sources/1/1/upload-source-1.flv" || totalBytes != 45 {
-		t.Fatalf("unexpected upload source result: status=%s output=%s bytes=%d", sourceStatus, outputPath, totalBytes)
+	if sourceStatus != "READY_TO_UPLOAD" || outputPath != "" || totalBytes != 50 || outputCount != 2 {
+		t.Fatalf("unexpected upload source result: status=%s output=%s bytes=%d outputs=%d", sourceStatus, outputPath, totalBytes, outputCount)
 	}
 
 	var jobStatus string

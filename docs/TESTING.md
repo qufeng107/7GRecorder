@@ -199,8 +199,8 @@ song processing FAILED
   inside the merge gap and is still `ACTIVE` or has a `WRITING` video file.
 - Upload source discovery filesystem fallback must inspect only `DATA_ROOT/recordings`, delay for fresh same-room video
   files whose parsed start time is inside the merge gap, and ignore derived files under upload/processing directories.
-- Upload source merge jobs cover worker dispatch, FFmpeg adapter request construction, source transition to
-  `PACKAGE_PENDING`, and terminal failure visibility.
+- Upload source merge jobs cover worker dispatch, direct segment-to-output packaging, source transition to
+  `READY_TO_UPLOAD`, upload-facing part names, timeline metadata, and terminal failure visibility.
 - Upload source package jobs cover worker dispatch, output part persistence, source transition to `READY_TO_UPLOAD`,
   post-package timeline metadata, upload-facing part names, and China-time live ordinals.
 - Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`

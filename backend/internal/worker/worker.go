@@ -178,13 +178,25 @@ func (w Worker) runMergeJob(ctx context.Context, job workerJob) error {
 	}
 	segments := make([]media.Segment, 0, len(source.Segments))
 	for _, segment := range source.Segments {
-		segments = append(segments, media.Segment{RelativePath: segment.RelativePath})
+		segments = append(segments, media.Segment{
+			RelativePath:    segment.RelativePath,
+			SizeBytes:       segment.SizeBytes,
+			DurationMs:      segment.DurationMs,
+			TimelineStartMs: segment.TimelineStartMs,
+			TimelineEndMs:   segment.TimelineEndMs,
+		})
 	}
-	outputRelativePath := filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", source.RecordingProfileID), fmt.Sprintf("%d", source.ID), fmt.Sprintf("upload-source-%d.flv", source.ID)))
-	result, err := w.merger.Merge(ctx, media.MergeRequest{
-		UploadSourceID:     source.ID,
-		Segments:           segments,
-		OutputRelativePath: outputRelativePath,
+	outputBaseName, err := store.UploadSourcePackageBaseName(ctx, source)
+	if err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	result, err := w.packager.PackageSegments(ctx, media.SegmentPackageRequest{
+		UploadSourceID:        source.ID,
+		Segments:              segments,
+		OutputDirRelativePath: filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", source.RecordingProfileID), fmt.Sprintf("%d", source.ID), "parts")),
+		MaxPartBytes:          w.cfg.UploadMaxPartBytes,
+		MaxPartDurationSecs:   w.cfg.UploadMaxPartDurationSecs,
+		OutputBaseName:        outputBaseName,
 	})
 	if err != nil {
 		terminal := job.Attempts >= job.MaxAttempts
@@ -194,7 +206,7 @@ func (w Worker) runMergeJob(ctx context.Context, job workerJob) error {
 		}
 		return w.failJob(ctx, job, "TRANSIENT", err)
 	}
-	if err := store.MarkUploadSourceMergeSucceeded(ctx, source.ID, result.RelativePath, result.SizeBytes); err != nil {
+	if err := store.MarkUploadSourcePackageSucceeded(ctx, source.ID, result.Outputs); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", err)
 	}
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
