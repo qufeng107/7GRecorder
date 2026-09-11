@@ -351,16 +351,16 @@ func TestApproveUploadSourceReviewResetsFrozenRemoteUploads(t *testing.T) {
 		VALUES (1, 1, ?, 1, 1, '7grecorder/test/upload-sources/1/1/parts/review-p01.flv',
 			5, 5, 'FAILED', 'cancelled manually: freeze for review');
 		INSERT INTO jobs
-			(id, recording_profile_id, upload_source_id, publication_id, type, resource_class,
+			(recording_profile_id, upload_source_id, publication_id, type, resource_class,
 				business_key, payload_json, status, priority, max_attempts, attempts, last_error)
 		VALUES
-			(1, ?, 1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'upload-source:1:bilibili:upload',
+			(?, 1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'upload-source:1:bilibili:upload',
 				'{"publication_id":1,"upload_source_id":1}', 'CANCELLED', 80, 3, 1,
 				'cancelled manually: freeze for review'),
-			(2, ?, 1, NULL, 'UPLOAD_COS_OBJECT', 'NETWORK', 'upload-source:1:output:1:cos:1',
+			(?, 1, NULL, 'UPLOAD_COS_OBJECT', 'NETWORK', 'upload-source:1:output:1:cos:1',
 				'{"cos_object_id":1,"upload_source_id":1,"output_id":1}', 'CANCELLED', 90, 5, 1,
 				'cancelled manually: freeze for review');
-	`, actor.ID, actor.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID); err != nil {
+	`, actor.ID, actor.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID); err != nil {
 		t.Fatalf("seed frozen upload source returned error: %v", err)
 	}
 
@@ -378,10 +378,10 @@ func TestApproveUploadSourceReviewResetsFrozenRemoteUploads(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT status FROM upload_source_cos_objects WHERE id = 1`).Scan(&cosStatus); err != nil {
 		t.Fatalf("query cos object returned error: %v", err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = 1`).Scan(&bilibiliJobStatus); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:bilibili:upload'`).Scan(&bilibiliJobStatus); err != nil {
 		t.Fatalf("query bilibili job returned error: %v", err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = 2`).Scan(&cosJobStatus); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:output:1:cos:1'`).Scan(&cosJobStatus); err != nil {
 		t.Fatalf("query cos job returned error: %v", err)
 	}
 	if publicationStatus != "PENDING" || cosStatus != "PENDING" || bilibiliJobStatus != "PENDING" || cosJobStatus != "PENDING" {
