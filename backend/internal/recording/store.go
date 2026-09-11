@@ -30,23 +30,23 @@ var (
 const gibibyte int64 = 1024 * 1024 * 1024
 
 type Recording struct {
-	ID                       int64  `json:"id"`
-	RecordingProfileID       int64  `json:"recording_profile_id"`
-	ProfileName              string `json:"profile_name"`
-	RoomID                   string `json:"room_id"`
-	StreamerName             string `json:"streamer_name"`
-	Title                    string `json:"title,omitempty"`
-	StartedAt                string `json:"started_at"`
-	CompletedAt              string `json:"completed_at,omitempty"`
-	DurationMs               int64  `json:"duration_ms"`
-	RecordingStatus          string `json:"recording_status"`
-	LocalStorageStatus       string `json:"local_storage_status"`
-	LocalProtected           bool   `json:"local_protected"`
-	UploadReviewStatus       string `json:"upload_review_status"`
-	UploadReviewRequestedAt  string `json:"upload_review_requested_at,omitempty"`
-	UploadReviewCompletedAt  string `json:"upload_review_completed_at,omitempty"`
-	UploadReviewNotes        string `json:"upload_review_notes,omitempty"`
-	Files                    []File `json:"files"`
+	ID                      int64  `json:"id"`
+	RecordingProfileID      int64  `json:"recording_profile_id"`
+	ProfileName             string `json:"profile_name"`
+	RoomID                  string `json:"room_id"`
+	StreamerName            string `json:"streamer_name"`
+	Title                   string `json:"title,omitempty"`
+	StartedAt               string `json:"started_at"`
+	CompletedAt             string `json:"completed_at,omitempty"`
+	DurationMs              int64  `json:"duration_ms"`
+	RecordingStatus         string `json:"recording_status"`
+	LocalStorageStatus      string `json:"local_storage_status"`
+	LocalProtected          bool   `json:"local_protected"`
+	UploadReviewStatus      string `json:"upload_review_status"`
+	UploadReviewRequestedAt string `json:"upload_review_requested_at,omitempty"`
+	UploadReviewCompletedAt string `json:"upload_review_completed_at,omitempty"`
+	UploadReviewNotes       string `json:"upload_review_notes,omitempty"`
+	Files                   []File `json:"files"`
 }
 
 type RecordingGroup struct {
