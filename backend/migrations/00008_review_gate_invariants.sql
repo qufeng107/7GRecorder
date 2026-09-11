@@ -1,6 +1,7 @@
 -- +goose Up
 PRAGMA foreign_keys = ON;
 
+-- +goose StatementBegin
 CREATE TRIGGER trg_bilibili_publication_review_gate_insert
 BEFORE INSERT ON publications
 FOR EACH ROW
@@ -15,7 +16,9 @@ WHEN NEW.platform = 'bilibili'
 BEGIN
   SELECT RAISE(ABORT, 'upload source is waiting for review');
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER trg_bilibili_publication_review_gate_update
 BEFORE UPDATE OF status ON publications
 FOR EACH ROW
@@ -30,7 +33,9 @@ WHEN NEW.platform = 'bilibili'
 BEGIN
   SELECT RAISE(ABORT, 'upload source is waiting for review');
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER trg_cos_upload_source_review_gate_insert
 BEFORE INSERT ON upload_source_cos_objects
 FOR EACH ROW
@@ -45,7 +50,9 @@ WHEN NEW.upload_source_output_id IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'upload source is waiting for review');
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER trg_cos_upload_source_review_gate_update
 BEFORE UPDATE OF status ON upload_source_cos_objects
 FOR EACH ROW
@@ -60,6 +67,7 @@ WHEN NEW.upload_source_output_id IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'upload source is waiting for review');
 END;
+-- +goose StatementEnd
 
 -- +goose Down
 DROP TRIGGER IF EXISTS trg_cos_upload_source_review_gate_update;
