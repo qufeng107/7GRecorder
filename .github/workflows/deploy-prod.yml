@@ -25,6 +25,12 @@ jobs:
         with:
           node-version: 22.18.0
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+          cache: false
+
       - name: Setup pnpm
         run: |
           set -euo pipefail
@@ -38,14 +44,13 @@ jobs:
           pnpm install --no-frozen-lockfile
           pnpm build
 
-      - name: Build backend image
+      - name: Build backend binary
         run: |
           set -euo pipefail
-          docker build \
-            --build-arg GIT_SHA="${GITHUB_SHA}" \
-            --build-arg GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
-            -t "7grecorder:${GITHUB_SHA}" \
-            .
+          mkdir -p dist
+          cd backend
+          go mod tidy
+          go build -ldflags "-X github.com/7grecorder/7grecorder/backend/internal/version.BuildSHA=${GITHUB_SHA}" -o ../dist/7grecorder ./cmd/7grecorder
 
       - name: Create release artifact
         run: |
@@ -54,7 +59,8 @@ jobs:
           git archive --format=tar --output=release/source.tar HEAD
           mkdir -p release/frontend
           cp -R frontend/dist release/frontend/dist
-          docker save "7grecorder:${GITHUB_SHA}" | gzip -6 > release/7grecorder-image.tar.gz
+          mkdir -p release/bin
+          cp dist/7grecorder release/bin/7grecorder
           echo "${GITHUB_SHA}" > release/RELEASE_SHA
           tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
           sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS

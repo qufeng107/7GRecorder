@@ -74,12 +74,22 @@ if [ -f "${image_archive}" ]; then
   docker load -i "${image_archive}"
   docker image inspect "7grecorder:${RELEASE_SHA}" >/dev/null
 else
-  echo "release image archive missing; falling back to server-side docker build" >&2
+  runtime_image="${RUNTIME_IMAGE:-7grecorder-runtime:bookworm-20250811-biliup-1.2.4-v1}"
+  if ! docker image inspect "${runtime_image}" >/dev/null 2>&1; then
+    echo "runtime image ${runtime_image} missing; building it once on this server" >&2
+    docker build \
+      -f "${release_root}/source/Dockerfile.runtime" \
+      --build-arg BILIUP_VERSION="${BILIUP_VERSION:-1.2.4}" \
+      -t "${runtime_image}" \
+      "${release_root}/source"
+  fi
+
+  test -x "${release_root}/bin/7grecorder" || { echo "backend binary missing from release"; exit 1; }
   docker build \
-    --build-arg GIT_SHA="${RELEASE_SHA}" \
-    --build-arg GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
+    -f "${release_root}/source/Dockerfile.app" \
+    --build-arg RUNTIME_IMAGE="${runtime_image}" \
     -t "7grecorder:${RELEASE_SHA}" \
-    "${release_root}/source"
+    "${release_root}"
 fi
 
 test -d "${release_root}/frontend/dist" || { echo "frontend dist missing from release"; exit 1; }

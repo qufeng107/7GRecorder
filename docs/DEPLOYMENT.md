@@ -170,17 +170,18 @@ Bilibili/COS/网易云 Secret、master key 等保留在正式服务器，由应�
 
 CI 在 GitHub-hosted Runner 完成，用于保证测试、类型检查和构建门禁通过。
 
-生产 Release 由 GitHub-hosted Runner 构建 `7grecorder:<sha>` Docker image，并把压缩后的
-`7grecorder-image.tar.gz` 与 `source.tar`、`frontend/dist` 一起上传到正式服务器。正式服务器正常发布时只
-执行 `docker load` 和容器切换，不再依赖生产机现场 `apt`/`pip` 下载构建依赖。
+生产 Release 由 GitHub-hosted Runner 构建 Linux `7grecorder` binary，并把 `bin/7grecorder` 与
+`source.tar`、`frontend/dist` 一起上传到正式服务器。正式服务器保留固定 tag 的 runtime base image
+`7grecorder-runtime:bookworm-20250811-biliup-1.2.4-v1`，正常发布时只用本次 binary 拼一个很小的
+`7grecorder:<sha>` 应用镜像。
 
 约束：
 
 - `main` 部署仍必须先通过 GitHub CI；
-- 服务器端 `docker build` 只作为旧格式或手工 release 缺少 image archive 时的 fallback；
+- 服务器端大依赖构建只允许发生在 runtime base image 缺失时；
 - Runtime 仍不包含 Node production server；
 - 构建依赖版本仍必须固定；
-- 如果压缩 image 传输仍然过慢，再评估 registry / 对象存储分发等方案。
+- 每次发布不得重新下载 `ffmpeg`、`python3`、`biliup` 这类 runtime 依赖。
 
 每个 Release 以 Git commit SHA 标识：
 
@@ -193,7 +194,7 @@ Release 包建议包含：
 ```text
 7grecorder-release-<sha>.tar
 ├── source.tar
-├── 7grecorder-image.tar.gz
+├── bin/7grecorder
 ├── frontend/dist/
 └── RELEASE_SHA
 
@@ -227,17 +228,16 @@ COS_UPLOAD_MAX_BYTES_PER_SECOND=0
 `0` leaves COS unlimited. Bilibili uses the per-profile `upload_limit` setting passed to biliup as `--limit`; the pinned
 CLI does not provide a hard bytes-per-second limiter.
 
-Production deploys build the `7grecorder:<sha>` Docker image on GitHub Actions and include it as
-`7grecorder-image.tar.gz` in the release artifact. The production server loads that image with `docker load` and does
-not normally run `docker build`, so releases do not depend on slow or unavailable Debian/PyPI downloads from the
-production host. The server deploy script keeps a fallback build path only for manually assembled or legacy release
-artifacts that do not include the image archive.
+Production deploys build the Go binary on GitHub Actions and include it as `bin/7grecorder` in the release artifact.
+The production server builds a small app image from the cached runtime base image and the release binary. The deploy
+script only builds the large runtime base image when `7grecorder-runtime:bookworm-20250811-biliup-1.2.4-v1` is missing.
+Legacy releases that include `7grecorder-image.tar.gz` are still accepted and loaded with `docker load`.
 
 Server deploy uses:
 
 ```text
-7grecorder-image.tar.gz
-→ docker load 7grecorder:<sha>
+bin/7grecorder
+→ docker build -f Dockerfile.app 7grecorder:<sha>
 frontend/dist
 → releases/<sha>/frontend/dist
 ```
