@@ -50,7 +50,22 @@ jobs:
         run: cd backend && go vet ./...
 
       - name: Backend test
-        run: cd backend && go test ./...
+        run: |
+          cd backend
+          set +e
+          go test ./... 2>&1 | tee /tmp/7grecorder-backend-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "::group::backend test tail"
+              tail -n 120 /tmp/7grecorder-backend-test.log
+              echo "::endgroup::"
+            }
+            message="$(tail -n 40 /tmp/7grecorder-backend-test.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+            echo "::error title=Backend test failed::${message}"
+            exit "$status"
+          fi
 
       - name: Backend build
         run: mkdir -p dist && cd backend && go build -ldflags "-X github.com/7grecorder/7grecorder/backend/internal/version.BuildSHA=${GITHUB_SHA}" -o ../dist/7grecorder ./cmd/7grecorder
