@@ -69,11 +69,18 @@ if [ -f "/data/7grecorder/db/7grecorder.db" ]; then
   cp "/data/7grecorder/db/7grecorder.db" "/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db"
 fi
 
-docker build \
-  --build-arg GIT_SHA="${RELEASE_SHA}" \
-  --build-arg GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
-  -t "7grecorder:${RELEASE_SHA}" \
-  "${release_root}/source"
+image_archive="${release_root}/7grecorder-image.tar.gz"
+if [ -f "${image_archive}" ]; then
+  docker load -i "${image_archive}"
+  docker image inspect "7grecorder:${RELEASE_SHA}" >/dev/null
+else
+  echo "release image archive missing; falling back to server-side docker build" >&2
+  docker build \
+    --build-arg GIT_SHA="${RELEASE_SHA}" \
+    --build-arg GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
+    -t "7grecorder:${RELEASE_SHA}" \
+    "${release_root}/source"
+fi
 
 test -d "${release_root}/frontend/dist" || { echo "frontend dist missing from release"; exit 1; }
 cp "${release_root}/source/deploy/compose.yaml" /opt/7grecorder/deploy/compose.yaml

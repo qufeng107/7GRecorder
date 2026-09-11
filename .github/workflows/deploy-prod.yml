@@ -38,6 +38,15 @@ jobs:
           pnpm install --no-frozen-lockfile
           pnpm build
 
+      - name: Build backend image
+        run: |
+          set -euo pipefail
+          docker build \
+            --build-arg GIT_SHA="${GITHUB_SHA}" \
+            --build-arg GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
+            -t "7grecorder:${GITHUB_SHA}" \
+            .
+
       - name: Create release artifact
         run: |
           set -euo pipefail
@@ -45,6 +54,7 @@ jobs:
           git archive --format=tar --output=release/source.tar HEAD
           mkdir -p release/frontend
           cp -R frontend/dist release/frontend/dist
+          docker save "7grecorder:${GITHUB_SHA}" | gzip -1 > release/7grecorder-image.tar.gz
           echo "${GITHUB_SHA}" > release/RELEASE_SHA
           tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
           sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS

@@ -170,15 +170,17 @@ Bilibili/COS/网易云 Secret、master key 等保留在正式服务器，由应�
 
 CI 在 GitHub-hosted Runner 完成，用于保证测试、类型检查和构建门禁通过。
 
-生产 Release 不再从 GitHub Runner 上传 Docker image。由于 GitHub 到国内轻量服务器的 SCP 链路可能极慢，第一版生产部署上传源码小包，并在正式服务器上执行 Docker build 与前端静态构建。
+生产 Release 由 GitHub-hosted Runner 构建 `7grecorder:<sha>` Docker image，并把压缩后的
+`7grecorder-image.tar.gz` 与 `source.tar`、`frontend/dist` 一起上传到正式服务器。正式服务器正常发布时只
+执行 `docker load` 和容器切换，不再依赖生产机现场 `apt`/`pip` 下载构建依赖。
 
 约束：
 
 - `main` 部署仍必须先通过 GitHub CI；
-- 服务器构建只发生在 `main` 生产部署阶段；
+- 服务器端 `docker build` 只作为旧格式或手工 release 缺少 image archive 时的 fallback；
 - Runtime 仍不包含 Node production server；
 - 构建依赖版本仍必须固定；
-- 如果服务器资源压力影响录制，再改回 registry / 压缩 image / 对象存储分发等方案。
+- 如果压缩 image 传输仍然过慢，再评估 registry / 对象存储分发等方案。
 
 每个 Release 以 Git commit SHA 标识：
 
@@ -191,9 +193,11 @@ Release 包建议包含：
 ```text
 7grecorder-release-<sha>.tar
 ├── source.tar
+├── 7grecorder-image.tar.gz
 ├── frontend/dist/
-├── RELEASE_SHA
-└── SHA256SUMS
+└── RELEASE_SHA
+
+SHA256SUMS
 ```
 
 Backend image：
@@ -223,11 +227,17 @@ COS_UPLOAD_MAX_BYTES_PER_SECOND=0
 `0` leaves COS unlimited. Bilibili uses the per-profile `upload_limit` setting passed to biliup as `--limit`; the pinned
 CLI does not provide a hard bytes-per-second limiter.
 
-Server deploy builds:
+Production deploys build the `7grecorder:<sha>` Docker image on GitHub Actions and include it as
+`7grecorder-image.tar.gz` in the release artifact. The production server loads that image with `docker load` and does
+not normally run `docker build`, so releases do not depend on slow or unavailable Debian/PyPI downloads from the
+production host. The server deploy script keeps a fallback build path only for manually assembled or legacy release
+artifacts that do not include the image archive.
+
+Server deploy uses:
 
 ```text
-source.tar
-→ docker build 7grecorder:<sha>
+7grecorder-image.tar.gz
+→ docker load 7grecorder:<sha>
 frontend/dist
 → releases/<sha>/frontend/dist
 ```
