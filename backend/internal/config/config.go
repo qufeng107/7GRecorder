@@ -16,7 +16,7 @@ type Config struct {
 	MasterKeyPath             string
 	UploadMaxPartBytes        int64
 	UploadMaxPartDurationSecs int64
-	COSUploadMaxBytesPerSec    int64
+	COSUploadMaxBytesPerSec   int64
 	COSCompressionEnabled     bool
 	COSCompressionPreset      string
 	LogLevel                  string
@@ -38,7 +38,7 @@ func LoadFromEnv() Config {
 		MasterKeyPath:             env("MASTER_KEY_PATH", "/etc/7grecorder/master.key"),
 		UploadMaxPartBytes:        envInt64("UPLOAD_MAX_PART_BYTES", 3800000000),
 		UploadMaxPartDurationSecs: envInt64("UPLOAD_MAX_PART_DURATION_SECONDS", 7200),
-		COSUploadMaxBytesPerSec:    envInt64("COS_UPLOAD_MAX_BYTES_PER_SECOND", 0),
+		COSUploadMaxBytesPerSec:   envInt64("COS_UPLOAD_MAX_BYTES_PER_SECOND", 0),
 		COSCompressionEnabled:     envBool("COS_COMPRESSION_ENABLED", true),
 		COSCompressionPreset:      env("COS_COMPRESSION_PRESET", "h264_crf23_medium_mp4"),
 		LogLevel:                  env("LOG_LEVEL", "info"),
