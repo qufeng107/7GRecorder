@@ -116,6 +116,16 @@ func (u TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest
 	if response != nil {
 		etag = strings.Trim(response.Header.Get("ETag"), `"`)
 	}
+	headResponse, err := client.Object.Head(ctx, request.ObjectKey, nil)
+	if err != nil {
+		return COSUploadResult{}, classifyCOSSDKError(err)
+	}
+	if headResponse != nil && headResponse.Body != nil {
+		defer headResponse.Body.Close()
+	}
+	if etag == "" && headResponse != nil {
+		etag = strings.Trim(headResponse.Header.Get("ETag"), `"`)
+	}
 	if progress != nil {
 		progress(ctx, UploadProgress{CurrentBytes: info.Size(), TotalBytes: info.Size(), Message: "uploaded to cos"})
 	}

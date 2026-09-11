@@ -265,8 +265,9 @@ GenerateSignedDownloadURL
 ```
 
 COS Adapter 可以接收原始 output part，也可以接收 FFmpeg Adapter 生成的压缩派生文件。压缩文件只存在于本地
-受控 temp/derived path，上传成功后可以按 housekeeping 策略删除。COS object metadata 必须记录该对象来自哪个
-`upload_source_output`、使用的压缩 preset、源文件大小和上传对象大小，便于 UI 显示压缩收益和排查问题。
+受控 temp/derived path，上传成功后可以按 housekeeping 策略删除。PutObject 返回成功后必须对同一个 object key
+执行 HeadObject 验证，只有确认 COS 可见后才允许把对象标记为 `AVAILABLE`。COS object metadata 必须记录该对象
+来自哪个 `upload_source_output`、使用的压缩 preset、源文件大小和上传对象大小，便于 UI 显示压缩收益和排查问题。
 
 Raw danmaku archive uses the same Tencent COS SDK Adapter, but bypasses FFmpeg compression and upload-source output
 packaging. The source file is a closed `recording_files.kind = 'danmaku'` asset and is uploaded byte-for-byte to the

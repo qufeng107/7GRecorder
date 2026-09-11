@@ -2,8 +2,10 @@ package media
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -45,8 +47,12 @@ func TestPackageCreatesNamedSinglePart(t *testing.T) {
 }
 
 func TestPackageSegmentsCreatesPartsWithoutWholeMerge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake ffmpeg script uses POSIX shell")
+	}
 	ctx := context.Background()
 	root := t.TempDir()
+	ffmpegPath := writeFakeSegmentFFmpeg(t, root, 2)
 	segments := []Segment{
 		{RelativePath: "recordings/part1.flv", SizeBytes: 5, DurationMs: 60_000, TimelineStartMs: 0, TimelineEndMs: 60_000},
 		{RelativePath: "recordings/part2.flv", SizeBytes: 5, DurationMs: 60_000, TimelineStartMs: 60_000, TimelineEndMs: 120_000},
@@ -61,12 +67,12 @@ func TestPackageSegmentsCreatesPartsWithoutWholeMerge(t *testing.T) {
 		}
 	}
 
-	result, err := NewFFmpegMerger(root, filepath.Join(root, "temp"), "ffmpeg").PackageSegments(ctx, SegmentPackageRequest{
+	result, err := NewFFmpegMerger(root, filepath.Join(root, "temp"), ffmpegPath).PackageSegments(ctx, SegmentPackageRequest{
 		UploadSourceID:        1,
 		Segments:              segments,
 		OutputDirRelativePath: "upload-sources/1/1/parts",
-		MaxPartBytes:          6,
-		MaxPartDurationSecs:   7200,
+		MaxPartBytes:          100,
+		MaxPartDurationSecs:   60,
 		OutputBaseName:        "7G-20260905-live-01",
 	})
 	if err != nil {
@@ -88,21 +94,28 @@ func TestPackageSegmentsCreatesPartsWithoutWholeMerge(t *testing.T) {
 	}
 }
 
-func TestPackageSegmentGroupsBatchesAdjacentSegments(t *testing.T) {
-	groups := packageSegmentGroups([]Segment{
-		{RelativePath: "a.flv", SizeBytes: 4, DurationMs: 1000, TimelineStartMs: 0, TimelineEndMs: 1000},
-		{RelativePath: "b.flv", SizeBytes: 4, DurationMs: 1000, TimelineStartMs: 1000, TimelineEndMs: 2000},
-		{RelativePath: "c.flv", SizeBytes: 4, DurationMs: 1000, TimelineStartMs: 2000, TimelineEndMs: 3000},
-	}, 8, 10_000)
-	if len(groups) != 2 {
-		t.Fatalf("expected two groups, got %d", len(groups))
+func TestPackageSegmentSecondsPrefersTwoHoursAndFallsBackToOneHour(t *testing.T) {
+	if seconds := packageSegmentSeconds(3_000_000_000, 2*60*60*1000, 3_800_000_000, 7200); seconds != 7200 {
+		t.Fatalf("expected two hour segment, got %d", seconds)
 	}
-	if len(groups[0].Segments) != 2 || groups[0].SizeBytes != 8 || groups[0].TimelineEndMs != 2000 {
-		t.Fatalf("unexpected first group: %#v", groups[0])
+	if seconds := packageSegmentSeconds(5_000_000_000, 2*60*60*1000, 3_800_000_000, 7200); seconds != 3600 {
+		t.Fatalf("expected one hour fallback, got %d", seconds)
 	}
-	if len(groups[1].Segments) != 1 || groups[1].TimelineStartMs != 2000 {
-		t.Fatalf("unexpected second group: %#v", groups[1])
+}
+
+func writeFakeSegmentFFmpeg(t *testing.T, root string, outputCount int) string {
+	t.Helper()
+	path := filepath.Join(root, "fake-ffmpeg.sh")
+	script := "#!/bin/sh\nset -eu\npattern=\"\"\nfor arg in \"$@\"; do pattern=\"$arg\"; done\n"
+	for i := 0; i < outputCount; i++ {
+		script += fmt.Sprintf("file=$(printf \"$pattern\" %d)\n", i)
+		script += "mkdir -p \"$(dirname \"$file\")\"\n"
+		script += "printf video > \"$file\"\n"
 	}
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg returned error: %v", err)
+	}
+	return path
 }
 
 func TestCompressionTempOutputKeepsFinalExtension(t *testing.T) {

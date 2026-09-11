@@ -799,11 +799,13 @@ removes only old `upload_source_segments`; and creates a new upload source from 
 Normal upload-source lists hide `REPLACED` rows, while historical rows remain in SQLite for audit and future cleanup.
 
 Multi-segment sources remain `MERGE_PENDING` until `MERGE_UPLOAD_SOURCE` creates the final upload parts directly from
-the original segment timeline. The worker groups adjacent source files into part-sized batches, concatenates only the
-segments needed for each output part, records `upload_source_outputs`, and marks the source `READY_TO_UPLOAD` without
-creating a whole-recording intermediate file. Single-segment sources can reference the existing closed video file but
-still enter `PACKAGE_PENDING` so size/duration limits are applied consistently. `PACKAGE_UPLOAD_SOURCE` remains the
-legacy/single-input packaging path and marks the source `READY_TO_UPLOAD` after one or more output parts are recorded.
+the original segment timeline. The worker feeds the original files to FFmpeg's concat demuxer and segment muxer so it
+can cut publishable parts by target duration without creating a whole-recording intermediate file. The default target
+is two hours per part; when estimated part size would exceed the configured upload/COS object cap, the target falls
+back to one hour, and only then to a smaller safety estimate for unusually high bitrate sources. Single-segment sources
+can reference the existing closed video file but still enter `PACKAGE_PENDING` so size/duration limits are applied
+consistently. `PACKAGE_UPLOAD_SOURCE` remains the legacy/single-input packaging path and marks the source
+`READY_TO_UPLOAD` after one or more output parts are recorded.
 Terminal merge failures keep the source metadata and mark the source `MERGE_FAILED`; terminal packaging failures mark
 `PACKAGE_FAILED`.
 
