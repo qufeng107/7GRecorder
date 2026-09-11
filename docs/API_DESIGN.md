@@ -632,8 +632,9 @@ Go Request/Response DTO
   - Marks an active or completed recording as requiring upload review.
   - If an upload source already contains the recording, the upload source is also marked `review_status=REQUIRED`.
 - `POST /api/v1/upload-sources/{id}/actions/require-review`
-  - Marks the parent upload source as requiring review and cancels pending remote upload jobs.
-  - Running remote upload jobs are not interrupted; the API returns not-ready when a remote upload is already running.
+  - Atomically marks the parent upload source as requiring review and cancels pending, failed, and running remote upload jobs.
+  - Running Bilibili/COS requests are interrupted cooperatively by the worker after the persisted cancellation is observed.
+  - Publication/COS state is returned to `PENDING` while the review gate remains authoritative, and late worker completion must not overwrite the review freeze.
 - `POST /api/v1/upload-sources/{id}/actions/approve-review`
   - Clears the review gate by setting `review_status=APPROVED`.
   - Frozen or failed Bilibili/COS upload records and jobs for the source are reset to `PENDING`, but disabled publishing/COS profiles are not re-enabled implicitly.

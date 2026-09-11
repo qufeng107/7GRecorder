@@ -1567,7 +1567,7 @@ func cancelPendingUploadJobsForReviewTx(ctx context.Context, tx *sql.Tx, uploadS
 			updated_at = CURRENT_TIMESTAMP
 		WHERE upload_source_id = ?
 			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
-			AND status IN ('PENDING', 'FAILED')
+			AND status IN ('PENDING', 'FAILED', 'RUNNING')
 	`, uploadSourceID)
 	if err != nil {
 		return 0, fmt.Errorf("cancel pending upload jobs for review: %w", err)
@@ -1575,6 +1575,28 @@ func cancelPendingUploadJobsForReviewTx(ctx context.Context, tx *sql.Tx, uploadS
 	changed, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("read review-cancelled upload job count: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE publications
+		SET status = 'PENDING',
+			last_error = 'upload source is waiting for review',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND platform = 'bilibili'
+			AND status IN ('PENDING', 'FAILED', 'UPLOADING', 'VERIFYING', 'SOURCE_MISSING', 'AMBIGUOUS')
+	`, uploadSourceID); err != nil {
+		return 0, fmt.Errorf("freeze bilibili publication for review: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET status = 'PENDING',
+			last_error = 'upload source is waiting for review',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND upload_source_output_id IS NOT NULL
+			AND status IN ('PENDING', 'FAILED', 'UPLOADING', 'SOURCE_MISSING')
+	`, uploadSourceID); err != nil {
+		return 0, fmt.Errorf("freeze cos objects for review: %w", err)
 	}
 	return int(changed), nil
 }
@@ -3281,11 +3303,6 @@ func (s Store) RequireRecordingUploadReview(ctx context.Context, actor account.U
 func (s Store) RequireUploadSourceReview(ctx context.Context, actor account.User, uploadSourceID int64, req UploadReviewRequest) (UploadSource, error) {
 	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
 		return UploadSource{}, err
-	}
-	if running, err := s.hasRunningRemoteUploadJobs(ctx, uploadSourceID); err != nil {
-		return UploadSource{}, err
-	} else if running {
-		return UploadSource{}, ErrNotReady
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

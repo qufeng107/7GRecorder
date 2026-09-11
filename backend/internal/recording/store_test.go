@@ -389,6 +389,89 @@ func TestApproveUploadSourceReviewResetsFrozenRemoteUploads(t *testing.T) {
 	}
 }
 
+func TestRequireUploadSourceReviewFreezesRunningRemoteUploads(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO credentials (id, owner_user_id, scope, platform, purpose, account_label, encrypted_secret, status)
+		VALUES
+			(1, ?, 'USER', 'bilibili', 'PUBLISHER', 'bili account', X'00', 'UNVERIFIED'),
+			(2, ?, 'USER', 'tencent_cos', 'STORAGE', 'cos account', X'00', 'UNVERIFIED');
+		INSERT INTO cos_storage_profiles
+			(id, recording_profile_id, credential_id, enabled, region, bucket, prefix, max_managed_bytes)
+		VALUES (1, ?, 2, 1, 'ap-shanghai', 'bucket-1250000000', '7grecorder/test/', 1000000000);
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, total_bytes, recording_count,
+				file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES (1, ?, 'profile:1:1:1', 'review me', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000,
+			'READY_TO_UPLOAD', 5, 1, 1, 0, 600, CURRENT_TIMESTAMP);
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms,
+				timeline_start_ms, timeline_end_ms, status)
+		VALUES (1, 1, 0, 'upload-sources/1/1/parts/review-p01.flv', 5, 1800000,
+			0, 1800000, 'READY_TO_UPLOAD');
+		INSERT INTO publications
+			(id, recording_profile_id, upload_source_id, platform, credential_id, status)
+		VALUES (1, ?, 1, 'bilibili', 1, 'UPLOADING');
+		INSERT INTO upload_source_cos_objects
+			(id, cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id,
+				object_key, size_bytes, source_size_bytes, status)
+		VALUES (1, 1, ?, 1, 1, '7grecorder/test/upload-sources/1/1/parts/review-p01.flv',
+			5, 5, 'UPLOADING');
+		INSERT INTO jobs
+			(recording_profile_id, upload_source_id, publication_id, type, resource_class,
+				business_key, payload_json, status, priority, max_attempts, attempts, locked_by)
+		VALUES
+			(?, 1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'upload-source:1:bilibili:upload',
+				'{"publication_id":1,"upload_source_id":1}', 'RUNNING', 80, 3, 1, 'worker:1'),
+			(?, 1, NULL, 'UPLOAD_COS_OBJECT', 'NETWORK', 'upload-source:1:output:1:cos:1',
+				'{"cos_object_id":1,"upload_source_id":1,"output_id":1}', 'RUNNING', 90, 5, 1, 'worker:2');
+	`, actor.ID, actor.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID); err != nil {
+		t.Fatalf("seed running upload source returned error: %v", err)
+	}
+
+	item, err := NewStore(database, cfg).RequireUploadSourceReview(ctx, actor, 1, UploadReviewRequest{})
+	if err != nil {
+		t.Fatalf("RequireUploadSourceReview returned error: %v", err)
+	}
+	if item.ReviewStatus != "REQUIRED" {
+		t.Fatalf("expected review required, got %#v", item)
+	}
+	var publicationStatus, cosStatus, bilibiliJobStatus, cosJobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM publications WHERE id = 1`).Scan(&publicationStatus); err != nil {
+		t.Fatalf("query publication returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM upload_source_cos_objects WHERE id = 1`).Scan(&cosStatus); err != nil {
+		t.Fatalf("query cos object returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:bilibili:upload'`).Scan(&bilibiliJobStatus); err != nil {
+		t.Fatalf("query bilibili job returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE business_key = 'upload-source:1:output:1:cos:1'`).Scan(&cosJobStatus); err != nil {
+		t.Fatalf("query cos job returned error: %v", err)
+	}
+	if publicationStatus != "PENDING" || cosStatus != "PENDING" || bilibiliJobStatus != "CANCELLED" || cosJobStatus != "CANCELLED" {
+		t.Fatalf("expected running uploads frozen, publication=%s cos=%s bili_job=%s cos_job=%s", publicationStatus, cosStatus, bilibiliJobStatus, cosJobStatus)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE publications SET status = 'VERIFIED' WHERE id = 1`); err == nil {
+		t.Fatal("expected review gate to reject late bilibili completion")
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE upload_source_cos_objects SET status = 'AVAILABLE' WHERE id = 1`); err == nil {
+		t.Fatal("expected review gate to reject late cos completion")
+	}
+}
+
 func TestApproveUploadSourceReviewRejectsPendingEditDecision(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

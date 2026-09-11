@@ -713,6 +713,7 @@ WebSocket 基础设施
 
 - The admin recording list must show active recordings before an upload source exists, so operators can see today's recording as soon as recorder sync imports it.
 - Operators must be able to mark a recording or parent upload source as requiring review before remote publishing starts.
+- Operators must also be able to freeze an upload source after Bilibili/COS transfer has started. A successful freeze response means the persisted review gate is authoritative, the running worker request is being cancelled, and late completion cannot release or overwrite the reviewed source.
 - A reviewed upload source may continue local merge/package work, but Bilibili publishing and upload-source COS video upload must wait until review is approved.
 - While a parent upload source is waiting for review, operators with local-file permission may download the local packaged parts for inspection without waiting for COS.
 - Operators may submit cut ranges against the parent upload-source timeline. The system must produce edited local publish parts, keep the source waiting for review, and only release Bilibili/COS upload after the operator approves review.

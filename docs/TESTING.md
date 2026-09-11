@@ -343,4 +343,5 @@ System:
 - Worker request loaders for Bilibili and upload-source COS must reject reviewed upload sources even if an older pending job exists.
 - Recording store tests must cover local packaged-output download being available only for reviewed upload sources and only when the local file still exists.
 - Worker tests must cover `APPLY_UPLOAD_SOURCE_EDIT` producing edited outputs, clearing `edit_decision_json`, and keeping the upload source blocked until review approval.
+- Review tests must cover freezing running Bilibili/COS jobs, resetting their remote state, cancelling the worker context, and ignoring late worker completion after the persisted job is no longer `RUNNING`.
 - Frontend checks should cover active recordings merged into the recording list once UI tests are expanded.

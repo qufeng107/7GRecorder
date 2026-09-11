@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
@@ -147,6 +148,31 @@ func TestRunOnceSyncsPendingRecorderProfile(t *testing.T) {
 	}
 	if jobStatus != "SUCCEEDED" || syncStatus != "SYNCED" || streamStatus != "LIVE" || recorderStatus != "RECORDING" {
 		t.Fatalf("unexpected statuses job=%s sync=%s stream=%s recorder=%s", jobStatus, syncStatus, streamStatus, recorderStatus)
+	}
+}
+
+func TestCancelWhenJobStopsCancelsClaimedJobContext(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO jobs (type, resource_class, status, priority, max_attempts)
+		VALUES ('UPLOAD_BILIBILI', 'NETWORK', 'RUNNING', 80, 3)
+	`); err != nil {
+		t.Fatalf("seed running job returned error: %v", err)
+	}
+	jobCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	worker := New(database, &fakeRecorder{})
+	go worker.cancelWhenJobStops(ctx, 1, cancel, done)
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'CANCELLED' WHERE id = 1`); err != nil {
+		t.Fatalf("cancel job returned error: %v", err)
+	}
+	select {
+	case <-jobCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker job context was not cancelled after persisted job cancellation")
 	}
 }
 

@@ -171,6 +171,22 @@ func (w Worker) runOnceForResource(ctx context.Context, resourceClass string) er
 }
 
 func (w Worker) runClaimedJob(ctx context.Context, job workerJob) error {
+	jobCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go w.cancelWhenJobStops(ctx, job.ID, cancel, done)
+	err := w.executeClaimedJob(jobCtx, job)
+	close(done)
+	cancel()
+	if err != nil && ctx.Err() == nil {
+		status, statusErr := w.jobStatus(ctx, job.ID)
+		if statusErr == nil && status == "CANCELLED" {
+			return nil
+		}
+	}
+	return err
+}
+
+func (w Worker) executeClaimedJob(ctx context.Context, job workerJob) error {
 	switch job.Type {
 	case "SYNC_RECORDER_PROFILE":
 		return w.runSyncJob(ctx, job)
@@ -189,6 +205,45 @@ func (w Worker) runClaimedJob(ctx context.Context, job workerJob) error {
 	default:
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("unknown job type %q", job.Type))
 	}
+}
+
+func (w Worker) cancelWhenJobStops(ctx context.Context, jobID int64, cancel context.CancelFunc, done <-chan struct{}) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		running, err := w.jobIsRunning(ctx, jobID)
+		if err == nil && !running {
+			cancel()
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (w Worker) jobIsRunning(ctx context.Context, jobID int64) (bool, error) {
+	status, err := w.jobStatus(ctx, jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return status == "RUNNING", nil
+}
+
+func (w Worker) jobStatus(ctx context.Context, jobID int64) (string, error) {
+	var status string
+	err := w.db.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&status)
+	if err != nil {
+		return "", fmt.Errorf("read job status: %w", err)
+	}
+	return status, nil
 }
 
 func (w Worker) runSyncJob(ctx context.Context, job workerJob) error {
@@ -562,7 +617,7 @@ func (w Worker) succeedJob(ctx context.Context, job workerJob, status recorder.R
 			progress_message = NULL,
 			progress_updated_at = CASE WHEN progress_total_bytes > 0 THEN CURRENT_TIMESTAMP ELSE progress_updated_at END,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		WHERE id = ? AND status = 'RUNNING'
 	`, job.ID); err != nil {
 		return fmt.Errorf("mark job succeeded: %w", err)
 	}
@@ -651,7 +706,7 @@ func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, c
 			last_error = ?,
 			progress_message = NULL,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		WHERE id = ? AND status = 'RUNNING'
 	`, runAfter), nextStatus, errorClass, message, job.ID); err != nil {
 		return fmt.Errorf("mark job failed: %w", err)
 	}
