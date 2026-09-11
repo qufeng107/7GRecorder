@@ -551,6 +551,10 @@ heartbeat_at nullable
 locked_by nullable
 last_error_class nullable       TRANSIENT | AUTH | SOURCE_MISSING | PERMANENT | AMBIGUOUS
 last_error nullable
+progress_current_bytes
+progress_total_bytes
+progress_message nullable
+progress_updated_at nullable
 created_at
 updated_at
 ```

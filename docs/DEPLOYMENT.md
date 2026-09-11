@@ -214,6 +214,15 @@ BILIUP_PATH=biliup
 Bilibili credential material is not deployed as a file. Store the biliup-generated `cookies.json` content in the
 encrypted credential vault from the admin Upload Settings page.
 
+Optional upload pressure controls:
+
+```env
+COS_UPLOAD_MAX_BYTES_PER_SECOND=0
+```
+
+`0` leaves COS unlimited. Bilibili uses the per-profile `upload_limit` setting passed to biliup as `--limit`; the pinned
+CLI does not provide a hard bytes-per-second limiter.
+
 Server deploy builds:
 
 ```text

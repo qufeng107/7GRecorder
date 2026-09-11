@@ -17,6 +17,8 @@ const (
 	defaultBilibiliTitleTemplate       = "{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播"
 	defaultBilibiliDescriptionTemplate = "主播：{{streamer_name}}\n直播间：{{room_id}}\n录制时间：{{started_at_china}} - {{completed_at_china}}\n分片：{{part_count}} 个\n\n由 7GRecorder 自动归档。"
 	defaultBilibiliSourceTemplate      = "https://live.bilibili.com/{{room_id}}"
+	defaultBilibiliTID                 = 2047
+	defaultBilibiliFallbackTID         = 27
 )
 
 type BilibiliPublishingSettings struct {
@@ -26,6 +28,7 @@ type BilibiliPublishingSettings struct {
 	Copyright           int      `json:"copyright,omitempty"`
 	Source              string   `json:"source,omitempty"`
 	TID                 int      `json:"tid,omitempty"`
+	FallbackTID         int      `json:"fallback_tid,omitempty"`
 	Submit              string   `json:"submit,omitempty"`
 	Line                string   `json:"line,omitempty"`
 	UploadLimit         int      `json:"upload_limit,omitempty"`
@@ -67,8 +70,16 @@ type BilibiliUploadResult struct {
 	ExternalURL string
 }
 
+type UploadProgress struct {
+	CurrentBytes int64
+	TotalBytes   int64
+	Message      string
+}
+
+type ProgressReporter func(ctx context.Context, progress UploadProgress)
+
 type BilibiliUploader interface {
-	Upload(ctx context.Context, request BilibiliUploadRequest) (BilibiliUploadResult, error)
+	Upload(ctx context.Context, request BilibiliUploadRequest, progress ProgressReporter) (BilibiliUploadResult, error)
 }
 
 type NoopBilibiliUploader struct{}
@@ -77,7 +88,7 @@ func NewNoopBilibiliUploader() NoopBilibiliUploader {
 	return NoopBilibiliUploader{}
 }
 
-func (NoopBilibiliUploader) Upload(_ context.Context, _ BilibiliUploadRequest) (BilibiliUploadResult, error) {
+func (NoopBilibiliUploader) Upload(_ context.Context, _ BilibiliUploadRequest, _ ProgressReporter) (BilibiliUploadResult, error) {
 	return BilibiliUploadResult{}, NewClassifiedError("PERMANENT", "bilibili uploader adapter is not configured yet")
 }
 

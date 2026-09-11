@@ -61,7 +61,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		merger:     media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		packager:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		compressor: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		cos:        upload.NewTencentCOSUploader(),
+		cos:        upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
 		bilibili:   upload.NewBiliupCLIUploader(cfg),
 		lockID:     fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
@@ -101,10 +101,15 @@ func (w Worker) Run(ctx context.Context) {
 	if err := w.discoverUploadSources(ctx); err != nil {
 		log.Printf("worker reconcile failed: %v", err)
 	}
-	if err := w.RunOnce(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		log.Printf("worker run once failed: %v", err)
-	}
-	ticker := time.NewTicker(10 * time.Second)
+	go w.runDiscoveryLoop(ctx)
+	go w.runResourceLoop(ctx, "LIGHT", 1)
+	go w.runResourceLoop(ctx, "MEDIA", 1)
+	go w.runResourceLoop(ctx, "NETWORK", 1)
+	w.runResourceLoop(ctx, "NETWORK", 2)
+}
+
+func (w Worker) runDiscoveryLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -114,9 +119,26 @@ func (w Worker) Run(ctx context.Context) {
 			if err := w.discoverUploadSources(ctx); err != nil {
 				log.Printf("worker reconcile failed: %v", err)
 			}
-			if err := w.RunOnce(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("worker run once failed: %v", err)
-			}
+		}
+	}
+}
+
+func (w Worker) runResourceLoop(ctx context.Context, resourceClass string, slot int) {
+	for {
+		err := w.runOnceForResource(ctx, resourceClass)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("worker %s-%d failed: %v", resourceClass, slot, err)
+		}
+		wait := 2 * time.Second
+		if errors.Is(err, sql.ErrNoRows) {
+			wait = 10 * time.Second
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
 		}
 	}
 }
@@ -129,7 +151,18 @@ func (w Worker) RunOnce(ctx context.Context) error {
 		}
 		return err
 	}
+	return w.runClaimedJob(ctx, job)
+}
 
+func (w Worker) runOnceForResource(ctx context.Context, resourceClass string) error {
+	job, err := w.claimJobForResource(ctx, resourceClass)
+	if err != nil {
+		return err
+	}
+	return w.runClaimedJob(ctx, job)
+}
+
+func (w Worker) runClaimedJob(ctx context.Context, job workerJob) error {
 	switch job.Type {
 	case "SYNC_RECORDER_PROFILE":
 		return w.runSyncJob(ctx, job)
@@ -302,7 +335,7 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 		request.ObjectKey = compressedObjectKey
 		compressedForCOS = true
 	}
-	result, err := w.cos.Upload(ctx, request)
+	result, err := w.cos.Upload(ctx, request, w.progressReporter(job))
 	if err != nil {
 		return w.failUploadJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
 	}
@@ -328,7 +361,7 @@ func (w Worker) runCOSRecordingFileUploadJob(ctx context.Context, job workerJob)
 	if err := store.MarkCOSRecordingFileUploading(ctx, request.ObjectID); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", err)
 	}
-	result, err := w.cos.Upload(ctx, request)
+	result, err := w.cos.Upload(ctx, request, w.progressReporter(job))
 	if err != nil {
 		return w.failCOSRecordingFileJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
 	}
@@ -351,7 +384,7 @@ func (w Worker) runBilibiliUploadJob(ctx context.Context, job workerJob) error {
 	if err := store.MarkBilibiliUploading(ctx, request.PublicationID, request); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", err)
 	}
-	result, err := w.bilibili.Upload(ctx, request)
+	result, err := w.bilibili.Upload(ctx, request, w.progressReporter(job))
 	if err != nil {
 		return w.failBilibiliJob(ctx, job, request.PublicationID, classifyUploadError(err), err)
 	}
@@ -381,6 +414,14 @@ func accountSuperAdmin() account.User {
 }
 
 func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
+	return w.claimJobWhere(ctx, "", nil)
+}
+
+func (w Worker) claimJobForResource(ctx context.Context, resourceClass string) (workerJob, error) {
+	return w.claimJobWhere(ctx, "AND resource_class = ?", []interface{}{resourceClass})
+}
+
+func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs []interface{}) (workerJob, error) {
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return workerJob{}, fmt.Errorf("begin job claim: %w", err)
@@ -388,15 +429,17 @@ func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 	defer tx.Rollback()
 
 	var job workerJob
+	args := append([]interface{}{}, extraArgs...)
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
 		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
+			`+extraWhere+`
 		ORDER BY priority ASC, run_after ASC, id ASC
 		LIMIT 1
-	`).Scan(&job.ID, &job.Type, &job.RecordingProfileID, &job.PayloadJSON, &job.Attempts, &job.MaxAttempts)
+	`, args...).Scan(&job.ID, &job.Type, &job.RecordingProfileID, &job.PayloadJSON, &job.Attempts, &job.MaxAttempts)
 	if err != nil {
 		return workerJob{}, err
 	}
@@ -408,6 +451,10 @@ func (w Worker) claimJob(ctx context.Context) (workerJob, error) {
 			locked_at = CURRENT_TIMESTAMP,
 			heartbeat_at = CURRENT_TIMESTAMP,
 			locked_by = ?,
+			progress_current_bytes = 0,
+			progress_total_bytes = 0,
+			progress_message = NULL,
+			progress_updated_at = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status = 'PENDING'
 	`, w.lockID, job.ID)
@@ -457,6 +504,9 @@ func (w Worker) succeedJob(ctx context.Context, job workerJob, status recorder.R
 			locked_by = NULL,
 			last_error_class = NULL,
 			last_error = NULL,
+			progress_current_bytes = CASE WHEN progress_total_bytes > 0 THEN progress_total_bytes ELSE progress_current_bytes END,
+			progress_message = NULL,
+			progress_updated_at = CASE WHEN progress_total_bytes > 0 THEN CURRENT_TIMESTAMP ELSE progress_updated_at END,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, job.ID); err != nil {
@@ -545,6 +595,7 @@ func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, c
 			locked_by = NULL,
 			last_error_class = ?,
 			last_error = ?,
+			progress_message = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, runAfter), nextStatus, errorClass, message, job.ID); err != nil {
@@ -552,6 +603,44 @@ func (w Worker) failJob(ctx context.Context, job workerJob, errorClass string, c
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit job failure: %w", err)
+	}
+	return nil
+}
+
+func (w Worker) progressReporter(job workerJob) upload.ProgressReporter {
+	return func(ctx context.Context, progress upload.UploadProgress) {
+		if progress.TotalBytes < 0 || progress.CurrentBytes < 0 {
+			return
+		}
+		if progress.TotalBytes > 0 && progress.CurrentBytes > progress.TotalBytes {
+			progress.CurrentBytes = progress.TotalBytes
+		}
+		if err := w.updateJobProgress(ctx, job.ID, progress); err != nil {
+			log.Printf("update job progress failed: %v", err)
+		}
+	}
+}
+
+func (w Worker) updateJobProgress(ctx context.Context, jobID int64, progress upload.UploadProgress) error {
+	if jobID <= 0 {
+		return nil
+	}
+	message := strings.TrimSpace(progress.Message)
+	if len(message) > 160 {
+		message = message[:160]
+	}
+	_, err := w.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET progress_current_bytes = ?,
+			progress_total_bytes = ?,
+			progress_message = NULLIF(?, ''),
+			progress_updated_at = CURRENT_TIMESTAMP,
+			heartbeat_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'RUNNING'
+	`, progress.CurrentBytes, progress.TotalBytes, message, jobID)
+	if err != nil {
+		return fmt.Errorf("update job progress: %w", err)
 	}
 	return nil
 }

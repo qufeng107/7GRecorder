@@ -53,7 +53,7 @@ cat "$BILIUP_SUCCESS_FIXTURE"
 		},
 		Settings: BilibiliPublishingSettings{TID: 65, Submit: "web", UploadLimit: 2, Line: "bda2"},
 		Secret:   cookie,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Upload returned error: %v", err)
 	}
@@ -126,6 +126,105 @@ func TestNormalizeBiliupCookieAllowsUnknownJSONFileShape(t *testing.T) {
 	}
 	if strings.TrimSpace(string(normalized)) != strings.TrimSpace(string(raw)) {
 		t.Fatalf("normalized cookie mismatch:\n%s", normalized)
+	}
+}
+
+func TestBiliupCLIUploaderReportsProgress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell executable test is Linux-only")
+	}
+
+	tempRoot := t.TempDir()
+	fakeBiliup := filepath.Join(tempRoot, "fake-biliup")
+	script := `#!/bin/sh
+set -eu
+printf ' 12.00 MiB/24.00 MiB (1.00 MiB/s, 12s)\r'
+printf 'Upload completed: part1.flv => cost 1.0s, 1.0 MB/s.\n'
+printf 'ResponseData { code: 0, data: Some(Object {"bvid": String("BV1abcDEF234")}), message: "OK" }\n'
+`
+	if err := os.WriteFile(fakeBiliup, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake biliup: %v", err)
+	}
+
+	var progresses []UploadProgress
+	reporter := func(_ context.Context, progress UploadProgress) {
+		progresses = append(progresses, progress)
+	}
+	cookie := json.RawMessage(`{"cookie_info":{"cookies":[{"name":"SESSDATA","value":"redacted"}]},"token_info":{"access_token":"redacted"}}`)
+	uploader := NewBiliupCLIUploader(config.Config{DataRoot: tempRoot, TempRoot: filepath.Join(tempRoot, "tmp"), BiliupPath: fakeBiliup})
+	_, err := uploader.Upload(context.Background(), BilibiliUploadRequest{
+		PublicationID:  42,
+		UploadSourceID: 7,
+		Title:          "title",
+		Description:    "description",
+		Copyright:      1,
+		Parts: []BilibiliUploadPart{
+			{SourcePath: filepath.Join(tempRoot, "part1.flv"), SizeBytes: 24 * 1024 * 1024},
+		},
+		Secret: cookie,
+	}, reporter)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if len(progresses) == 0 {
+		t.Fatal("expected progress updates")
+	}
+	last := progresses[len(progresses)-1]
+	if last.CurrentBytes != last.TotalBytes || last.TotalBytes != 24*1024*1024 {
+		t.Fatalf("last progress = %#v", last)
+	}
+}
+
+func TestBiliupCLIUploaderFallsBackWhenPartitionIsRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell executable test is Linux-only")
+	}
+
+	tempRoot := t.TempDir()
+	fakeBiliup := filepath.Join(tempRoot, "fake-biliup")
+	argsOut := filepath.Join(tempRoot, "args.txt")
+	script := `#!/bin/sh
+set -eu
+printf '%s\n' "$@" >> "$BILIUP_ARGS_OUT"
+for arg in "$@"; do
+  if [ "$arg" = "2047" ]; then
+    printf '分区不可用 tid=2047\n' >&2
+    exit 1
+  fi
+done
+printf 'ResponseData { code: 0, data: Some(Object {"bvid": String("BV1fallback")}), message: "OK" }\n'
+`
+	if err := os.WriteFile(fakeBiliup, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake biliup: %v", err)
+	}
+	t.Setenv("BILIUP_ARGS_OUT", argsOut)
+
+	cookie := json.RawMessage(`{"cookie_info":{"cookies":[{"name":"SESSDATA","value":"redacted"}]},"token_info":{"access_token":"redacted"}}`)
+	uploader := NewBiliupCLIUploader(config.Config{DataRoot: tempRoot, TempRoot: filepath.Join(tempRoot, "tmp"), BiliupPath: fakeBiliup})
+	result, err := uploader.Upload(context.Background(), BilibiliUploadRequest{
+		PublicationID:  42,
+		UploadSourceID: 7,
+		Title:          "title",
+		Description:    "description",
+		Copyright:      1,
+		Parts: []BilibiliUploadPart{
+			{SourcePath: filepath.Join(tempRoot, "part1.flv"), SizeBytes: 24 * 1024 * 1024},
+		},
+		Secret: cookie,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if result.ExternalID != "BV1fallback" {
+		t.Fatalf("ExternalID = %q", result.ExternalID)
+	}
+	argsRaw, err := os.ReadFile(argsOut)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	args := string(argsRaw)
+	if !strings.Contains(args, "2047") || !strings.Contains(args, "27") {
+		t.Fatalf("expected primary and fallback tids in args:\n%s", args)
 	}
 }
 

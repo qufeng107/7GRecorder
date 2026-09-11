@@ -345,6 +345,10 @@ type JobItem = {
   locked_by?: string;
   last_error_class?: string;
   last_error?: string;
+  progress_current_bytes?: number;
+  progress_total_bytes?: number;
+  progress_message?: string;
+  progress_updated_at?: string;
   created_at: string;
   updated_at: string;
   profile_name?: string;
@@ -461,6 +465,7 @@ type UploadSettingsForm = {
   bilibili_tags: string;
   bilibili_copyright: number;
   bilibili_source: string;
+  bilibili_upload_limit: number;
   cos_enabled: boolean;
   cos_credential_id: string;
   cos_region: string;
@@ -527,6 +532,7 @@ const emptyUploadSettingsForm: UploadSettingsForm = {
   bilibili_tags: "录播,七宫筱野",
   bilibili_copyright: 2,
   bilibili_source: "https://live.bilibili.com/{{room_id}}",
+  bilibili_upload_limit: 1,
   cos_enabled: false,
   cos_credential_id: "",
   cos_region: "",
@@ -821,6 +827,7 @@ const uiCopy = {
     bilibiliCopyrightOriginal: "自制",
     bilibiliCopyrightRepost: "转载",
     bilibiliSource: "转载来源",
+    bilibiliUploadLimit: "Bilibili 上传并发",
     bilibiliTemplateHint: "可用变量：{{profile_name}}、{{streamer_name}}、{{room_id}}、{{date}}、{{date_compact}}、{{start_time}}、{{end_time}}、{{started_at_china}}、{{completed_at_china}}、{{live_ordinal}}、{{part_count}}。",
     cosRegion: "COS 地域",
     cosBucket: "COS Bucket",
@@ -1124,6 +1131,7 @@ const uiCopy = {
     bilibiliCopyrightOriginal: "Original",
     bilibiliCopyrightRepost: "Repost",
     bilibiliSource: "Repost Source",
+    bilibiliUploadLimit: "Bilibili Upload Concurrency",
     bilibiliTemplateHint: "Variables: {{profile_name}}, {{streamer_name}}, {{room_id}}, {{date}}, {{date_compact}}, {{start_time}}, {{end_time}}, {{started_at_china}}, {{completed_at_china}}, {{live_ordinal}}, {{part_count}}.",
     cosRegion: "COS Region",
     cosBucket: "COS Bucket",
@@ -1182,7 +1190,8 @@ function bilibiliSettingsFromConfig(value: unknown) {
         ? settings.tags
         : "录播,七宫筱野",
     copyright: typeof settings.copyright === "number" ? settings.copyright : 2,
-    source: typeof settings.source === "string" ? settings.source : "https://live.bilibili.com/{{room_id}}"
+    source: typeof settings.source === "string" ? settings.source : "https://live.bilibili.com/{{room_id}}",
+    upload_limit: typeof settings.upload_limit === "number" ? settings.upload_limit : 1
   };
 }
 
@@ -1195,7 +1204,8 @@ function bilibiliSettingsPayload(form: UploadSettingsForm) {
       .map((tag) => tag.trim())
       .filter(Boolean),
     copyright: form.bilibili_copyright,
-    source: form.bilibili_source.trim()
+    source: form.bilibili_source.trim(),
+    upload_limit: Math.min(8, Math.max(1, Math.round(form.bilibili_upload_limit || 1)))
   };
 }
 
@@ -1611,7 +1621,8 @@ export function AdminDashboard() {
       bilibili_description_template: settings.description_template,
       bilibili_tags: settings.tags,
       bilibili_copyright: settings.copyright,
-      bilibili_source: settings.source
+      bilibili_source: settings.source,
+      bilibili_upload_limit: settings.upload_limit
     }));
   }, [bilibiliConfigQuery.data]);
 
@@ -3323,6 +3334,18 @@ function UploadSettingsPanel(props: {
                   onChange={(value) => updateSettings("bilibili_source", value)}
                 />
               ) : null}
+              <label className="flex flex-col gap-1 text-sm font-medium">
+                {props.labels.bilibiliUploadLimit}
+                <input
+                  className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
+                  disabled={!props.canEditBilibiliModule}
+                  min={1}
+                  max={8}
+                  type="number"
+                  value={props.settingsForm.bilibili_upload_limit}
+                  onChange={(event) => updateSettings("bilibili_upload_limit", Number(event.target.value))}
+                />
+              </label>
               <p className="text-xs leading-5 text-muted">{props.labels.bilibiliTemplateHint}</p>
               {props.bilibiliConfigError ? (
                 <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p>
@@ -4489,6 +4512,7 @@ function JobsPanel(props: {
                   <td className="px-3 py-3 text-muted">
                     <p>{formatJobStatus(job.status, props.labels)}</p>
                     <p className="mt-1 text-xs">{formatDateTime(job.updated_at, props.labels)}</p>
+                    <JobProgress job={job} />
                   </td>
                   <td className="px-3 py-3 text-muted">
                     {job.attempts} / {job.max_attempts}
@@ -4564,6 +4588,31 @@ function TextField(props: {
         onChange={(event) => props.onChange(event.target.value)}
       />
     </label>
+  );
+}
+
+function JobProgress(props: { job: JobItem }) {
+  const total = props.job.progress_total_bytes ?? 0;
+  const current = props.job.progress_current_bytes ?? 0;
+  const message = props.job.progress_message ?? "";
+  if (total <= 0 && !message) {
+    return null;
+  }
+  const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((current / total) * 100))) : 0;
+  return (
+    <div className="mt-2 w-36">
+      {total > 0 ? (
+        <>
+          <div className="h-1.5 overflow-hidden rounded-sm bg-[#e5e8e1]">
+            <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            {percent}% - {current > 0 ? formatBytes(current) : "0 B"} / {formatBytes(total)}
+          </p>
+        </>
+      ) : null}
+      {message ? <p className="mt-1 break-words text-xs text-muted">{message}</p> : null}
+    </div>
   );
 }
 

@@ -411,6 +411,9 @@ Current admin API supports operational visibility for queued work. Super admins 
 Managers can list and operate only on jobs attached to their own recording profiles. `retry` is allowed only for
 `FAILED` and `CANCELLED` jobs and resets attempts, locks, and last error fields. `cancel` is allowed for queued or
 failed non-terminal jobs, but not for `RUNNING`, `SUCCEEDED`, or already `CANCELLED` jobs.
+Job DTOs expose optional `progress_current_bytes`, `progress_total_bytes`, `progress_message`, and
+`progress_updated_at` fields. Long-running Bilibili and COS uploads update these fields and refresh `heartbeat_at` while
+they run.
 
 ### Storage / System
 

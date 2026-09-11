@@ -78,13 +78,23 @@ func (f *fakeCompressor) Compress(_ context.Context, request media.CompressionRe
 	return f.result, f.err
 }
 
-func (f *fakeCOSUploader) Upload(_ context.Context, request upload.COSUploadRequest) (upload.COSUploadResult, error) {
+func (f *fakeCOSUploader) Upload(ctx context.Context, request upload.COSUploadRequest, progress upload.ProgressReporter) (upload.COSUploadResult, error) {
 	f.request = request
+	if progress != nil {
+		progress(ctx, upload.UploadProgress{CurrentBytes: request.SourceSizeBytes, TotalBytes: request.SourceSizeBytes, Message: "test cos upload"})
+	}
 	return f.result, f.err
 }
 
-func (f *fakeBilibiliUploader) Upload(_ context.Context, request upload.BilibiliUploadRequest) (upload.BilibiliUploadResult, error) {
+func (f *fakeBilibiliUploader) Upload(ctx context.Context, request upload.BilibiliUploadRequest, progress upload.ProgressReporter) (upload.BilibiliUploadResult, error) {
 	f.request = request
+	if progress != nil {
+		var total int64
+		for _, part := range request.Parts {
+			total += part.SizeBytes
+		}
+		progress(ctx, upload.UploadProgress{CurrentBytes: total, TotalBytes: total, Message: "test bilibili upload"})
+	}
 	return f.result, f.err
 }
 

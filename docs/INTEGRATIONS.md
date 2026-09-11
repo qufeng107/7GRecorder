@@ -114,8 +114,9 @@ biliup -u <job-temp-cookies.json> upload --submit <app|web|client> --limit <n> -
 The default upload settings are:
 
 - submit mode: `app`
-- upload concurrency limit: `3`
-- Bilibili partition `tid`: `171`
+- upload concurrency limit: `1`
+- Bilibili partition `tid`: default `2047` (virtual creator). If biliup/Bilibili rejects the partition explicitly, retry
+  once with fallback `27` instead of retrying on ambiguous network or submission errors.
 - copyright: `1` when the stored config omits or corrupts the value
 
 Credential secret JSON should contain the content of a biliup-generated `cookies.json`, either directly or under
@@ -174,6 +175,11 @@ adapter receives a stable upload request and must not read plaintext credential 
 CLI 文本解析集中在 Adapter。
 
 升级 biliup 必须更新 fixture。
+
+Biliup does not expose a hard bytes-per-second upload limit in the pinned CLI. 7GRecorder exposes and persists the
+CLI concurrency limit (`upload_limit`, default 1) and streams adapter output to job progress. A true Bilibili bandwidth
+cap requires an explicit external shaper/proxy design. COS upload progress is measured in-process by wrapping the SDK
+request body.
 
 ---
 

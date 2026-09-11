@@ -569,6 +569,12 @@ Job 可把 `error_class + last_error` 保存到 SQLite，UI 按类别指导管�
 
 ### 默认 Retry Policy
 
+Worker execution is resource-class concurrent: one `LIGHT` loop, one `MEDIA` loop, and two `NETWORK` loops. This allows
+one Bilibili upload and one COS upload to progress at the same time while keeping FFmpeg media work serialized. Long
+uploads refresh job progress and `heartbeat_at`; `COS_UPLOAD_MAX_BYTES_PER_SECOND` can cap COS request-body throughput
+per COS worker. Bilibili throughput is controlled by the persisted biliup `upload_limit` concurrency setting until a
+separate network shaper is designed.
+
 不是全局统一指数退避，Job Handler 使用简单默认值：
 
 | Job | 自动尝试 | 建议退避 | 特殊规则 |

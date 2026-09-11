@@ -16,27 +16,31 @@ var (
 )
 
 type Job struct {
-	ID                 int64  `json:"id"`
-	RecordingProfileID int64  `json:"recording_profile_id,omitempty"`
-	RecordingID        int64  `json:"recording_id,omitempty"`
-	RecordingFileID    int64  `json:"recording_file_id,omitempty"`
-	Type               string `json:"type"`
-	ResourceClass      string `json:"resource_class"`
-	BusinessKey        string `json:"business_key,omitempty"`
-	Status             string `json:"status"`
-	Priority           int    `json:"priority"`
-	Attempts           int    `json:"attempts"`
-	MaxAttempts        int    `json:"max_attempts"`
-	RunAfter           string `json:"run_after"`
-	LockedAt           string `json:"locked_at,omitempty"`
-	HeartbeatAt        string `json:"heartbeat_at,omitempty"`
-	LockedBy           string `json:"locked_by,omitempty"`
-	LastErrorClass     string `json:"last_error_class,omitempty"`
-	LastError          string `json:"last_error,omitempty"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
-	ProfileName        string `json:"profile_name,omitempty"`
-	OwnerUsername      string `json:"owner_username,omitempty"`
+	ID                   int64  `json:"id"`
+	RecordingProfileID   int64  `json:"recording_profile_id,omitempty"`
+	RecordingID          int64  `json:"recording_id,omitempty"`
+	RecordingFileID      int64  `json:"recording_file_id,omitempty"`
+	Type                 string `json:"type"`
+	ResourceClass        string `json:"resource_class"`
+	BusinessKey          string `json:"business_key,omitempty"`
+	Status               string `json:"status"`
+	Priority             int    `json:"priority"`
+	Attempts             int    `json:"attempts"`
+	MaxAttempts          int    `json:"max_attempts"`
+	RunAfter             string `json:"run_after"`
+	LockedAt             string `json:"locked_at,omitempty"`
+	HeartbeatAt          string `json:"heartbeat_at,omitempty"`
+	LockedBy             string `json:"locked_by,omitempty"`
+	LastErrorClass       string `json:"last_error_class,omitempty"`
+	LastError            string `json:"last_error,omitempty"`
+	ProgressCurrentBytes int64  `json:"progress_current_bytes,omitempty"`
+	ProgressTotalBytes   int64  `json:"progress_total_bytes,omitempty"`
+	ProgressMessage      string `json:"progress_message,omitempty"`
+	ProgressUpdatedAt    string `json:"progress_updated_at,omitempty"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
+	ProfileName          string `json:"profile_name,omitempty"`
+	OwnerUsername        string `json:"owner_username,omitempty"`
 }
 
 type Store struct {
@@ -73,6 +77,10 @@ func (s Store) List(ctx context.Context, actor account.User, limit int) ([]Job, 
 			COALESCE(j.locked_by, ''),
 			COALESCE(j.last_error_class, ''),
 			COALESCE(j.last_error, ''),
+			COALESCE(j.progress_current_bytes, 0),
+			COALESCE(j.progress_total_bytes, 0),
+			COALESCE(j.progress_message, ''),
+			COALESCE(j.progress_updated_at, ''),
 			j.created_at,
 			j.updated_at,
 			COALESCE(p.name, ''),
@@ -120,6 +128,10 @@ func (s Store) List(ctx context.Context, actor account.User, limit int) ([]Job, 
 			&item.LockedBy,
 			&item.LastErrorClass,
 			&item.LastError,
+			&item.ProgressCurrentBytes,
+			&item.ProgressTotalBytes,
+			&item.ProgressMessage,
+			&item.ProgressUpdatedAt,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 			&item.ProfileName,
@@ -156,6 +168,10 @@ func (s Store) Retry(ctx context.Context, actor account.User, id int64) (Job, er
 			locked_by = NULL,
 			last_error_class = NULL,
 			last_error = NULL,
+			progress_current_bytes = 0,
+			progress_total_bytes = 0,
+			progress_message = NULL,
+			progress_updated_at = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, id); err != nil {
@@ -222,6 +238,10 @@ func (s Store) listByID(ctx context.Context, actor account.User, id int64) ([]Jo
 			COALESCE(j.locked_by, ''),
 			COALESCE(j.last_error_class, ''),
 			COALESCE(j.last_error, ''),
+			COALESCE(j.progress_current_bytes, 0),
+			COALESCE(j.progress_total_bytes, 0),
+			COALESCE(j.progress_message, ''),
+			COALESCE(j.progress_updated_at, ''),
 			j.created_at,
 			j.updated_at,
 			COALESCE(p.name, ''),
@@ -268,6 +288,10 @@ func (s Store) listByID(ctx context.Context, actor account.User, id int64) ([]Jo
 			&item.LockedBy,
 			&item.LastErrorClass,
 			&item.LastError,
+			&item.ProgressCurrentBytes,
+			&item.ProgressTotalBytes,
+			&item.ProgressMessage,
+			&item.ProgressUpdatedAt,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 			&item.ProfileName,

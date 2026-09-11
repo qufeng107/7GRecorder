@@ -6,19 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 )
 
 const defaultBiliupPath = "biliup"
 
-var bilibiliBVIDPattern = regexp.MustCompile(`BV[0-9A-Za-z]+`)
+var (
+	bilibiliBVIDPattern     = regexp.MustCompile(`BV[0-9A-Za-z]+`)
+	biliupFileProgressRegex = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s+([KMGT]?i?B)/([0-9]+(?:\.[0-9]+)?)\s+([KMGT]?i?B)`)
+	biliupCompletedRegex    = regexp.MustCompile(`Upload completed:\s+(.+?)\s+=>`)
+)
 
 type BiliupCLIUploader struct {
 	Path     string
@@ -37,7 +43,7 @@ func NewBiliupCLIUploader(cfg config.Config) BiliupCLIUploader {
 	return BiliupCLIUploader{Path: path, TempRoot: tempRoot}
 }
 
-func (u BiliupCLIUploader) Upload(ctx context.Context, request BilibiliUploadRequest) (BilibiliUploadResult, error) {
+func (u BiliupCLIUploader) Upload(ctx context.Context, request BilibiliUploadRequest, progress ProgressReporter) (BilibiliUploadResult, error) {
 	if strings.TrimSpace(u.Path) == "" {
 		return BilibiliUploadResult{}, NewClassifiedError("PERMANENT", "biliup path is not configured")
 	}
@@ -58,13 +64,46 @@ func (u BiliupCLIUploader) Upload(ctx context.Context, request BilibiliUploadReq
 		return BilibiliUploadResult{}, err
 	}
 
+	primaryTID := bilibiliTID(request.Settings)
+	fallbackTID := bilibiliFallbackTID(request.Settings)
+	for _, part := range request.Parts {
+		if strings.TrimSpace(part.SourcePath) == "" {
+			return BilibiliUploadResult{}, NewClassifiedError("SOURCE_MISSING", "bilibili upload part has no source path")
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, u.Path, buildBiliupArgs(cookieFile, request, primaryTID)...)
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "HOME="+workDir)
+	output, err := runBiliupCommand(ctx, cmd, request, progress)
+	if err != nil && fallbackTID > 0 && fallbackTID != primaryTID && isBiliupPartitionFailure(output) {
+		if progress != nil {
+			progress(ctx, UploadProgress{CurrentBytes: 0, TotalBytes: totalBilibiliPartBytes(request), Message: fmt.Sprintf("retrying with fallback tid %d", fallbackTID)})
+		}
+		cmd = exec.CommandContext(ctx, u.Path, buildBiliupArgs(cookieFile, request, fallbackTID)...)
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(), "HOME="+workDir)
+		output, err = runBiliupCommand(ctx, cmd, request, progress)
+	}
+	if err != nil {
+		return BilibiliUploadResult{}, classifyBiliupFailure(err, output)
+	}
+	externalID := parseBiliupExternalID(output)
+	externalURL := ""
+	if externalID != "" {
+		externalURL = "https://www.bilibili.com/video/" + externalID
+	}
+	return BilibiliUploadResult{ExternalID: externalID, ExternalURL: externalURL}, nil
+}
+
+func buildBiliupArgs(cookieFile string, request BilibiliUploadRequest, tid int) []string {
 	args := []string{
 		"-u", cookieFile,
 		"upload",
 		"--submit", bilibiliSubmitMode(request.Settings),
 		"--limit", strconv.Itoa(bilibiliUploadLimit(request.Settings)),
 		"--copyright", strconv.Itoa(bilibiliCopyright(request)),
-		"--tid", strconv.Itoa(bilibiliTID(request.Settings)),
+		"--tid", strconv.Itoa(tid),
 		"--title", request.Title,
 		"--desc", request.Description,
 	}
@@ -78,25 +117,157 @@ func (u BiliupCLIUploader) Upload(ctx context.Context, request BilibiliUploadReq
 		args = append(args, "--line", line)
 	}
 	for _, part := range request.Parts {
-		if strings.TrimSpace(part.SourcePath) == "" {
-			return BilibiliUploadResult{}, NewClassifiedError("SOURCE_MISSING", "bilibili upload part has no source path")
-		}
 		args = append(args, part.SourcePath)
 	}
+	return args
+}
 
-	cmd := exec.CommandContext(ctx, u.Path, args...)
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "HOME="+workDir)
-	output, err := cmd.CombinedOutput()
+func runBiliupCommand(ctx context.Context, cmd *exec.Cmd, request BilibiliUploadRequest, progress ProgressReporter) ([]byte, error) {
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return BilibiliUploadResult{}, classifyBiliupFailure(err, output)
+		return nil, fmt.Errorf("open biliup stdout: %w", err)
 	}
-	externalID := parseBiliupExternalID(output)
-	externalURL := ""
-	if externalID != "" {
-		externalURL = "https://www.bilibili.com/video/" + externalID
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("open biliup stderr: %w", err)
 	}
-	return BilibiliUploadResult{ExternalID: externalID, ExternalURL: externalURL}, nil
+	state := newBiliupProgressState(request)
+	var output bytes.Buffer
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	done := make(chan error, 2)
+	var outputMu sync.Mutex
+	go func() { done <- collectBiliupOutput(ctx, stdout, &output, &outputMu, state, progress) }()
+	go func() { done <- collectBiliupOutput(ctx, stderr, &output, &outputMu, state, progress) }()
+	var collectErr error
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil && collectErr == nil {
+			collectErr = err
+		}
+	}
+	waitErr := cmd.Wait()
+	if progress != nil && waitErr == nil {
+		progress(ctx, UploadProgress{CurrentBytes: state.totalBytes, TotalBytes: state.totalBytes, Message: "upload submitted"})
+	}
+	if waitErr != nil {
+		return output.Bytes(), waitErr
+	}
+	if collectErr != nil {
+		return output.Bytes(), collectErr
+	}
+	return output.Bytes(), nil
+}
+
+func collectBiliupOutput(ctx context.Context, reader io.Reader, output *bytes.Buffer, outputMu *sync.Mutex, state *biliupProgressState, progress ProgressReporter) error {
+	chunk := make([]byte, 4096)
+	line := strings.Builder{}
+	for {
+		n, err := reader.Read(chunk)
+		if n > 0 {
+			text := string(chunk[:n])
+			outputMu.Lock()
+			output.WriteString(text)
+			outputMu.Unlock()
+			for _, r := range text {
+				if r == '\n' || r == '\r' {
+					state.observe(ctx, line.String(), progress)
+					line.Reset()
+					continue
+				}
+				line.WriteRune(r)
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			if line.Len() > 0 {
+				state.observe(ctx, line.String(), progress)
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+type biliupProgressState struct {
+	mu             sync.Mutex
+	totalBytes     int64
+	completedBytes int64
+	partSizes      map[string]int64
+	lastCurrent    int64
+}
+
+func newBiliupProgressState(request BilibiliUploadRequest) *biliupProgressState {
+	state := &biliupProgressState{partSizes: map[string]int64{}}
+	for _, part := range request.Parts {
+		state.totalBytes += part.SizeBytes
+		state.partSizes[filepath.Base(part.SourcePath)] = part.SizeBytes
+	}
+	return state
+}
+
+func (s *biliupProgressState) observe(ctx context.Context, line string, progress ProgressReporter) {
+	if progress == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	if match := biliupCompletedRegex.FindStringSubmatch(line); len(match) == 2 {
+		if size := s.partSizes[strings.TrimSpace(match[1])]; size > 0 {
+			s.completedBytes += size
+			if s.completedBytes > s.totalBytes {
+				s.completedBytes = s.totalBytes
+			}
+			s.lastCurrent = s.completedBytes
+			progress(ctx, UploadProgress{CurrentBytes: s.completedBytes, TotalBytes: s.totalBytes, Message: "uploaded " + filepath.Base(match[1])})
+		}
+		return
+	}
+	if match := biliupFileProgressRegex.FindStringSubmatch(line); len(match) == 5 {
+		current := parseBiliupBytes(match[1], match[2])
+		absolute := s.completedBytes + current
+		if absolute < s.lastCurrent {
+			absolute = s.lastCurrent
+		}
+		if s.totalBytes > 0 && absolute > s.totalBytes {
+			absolute = s.totalBytes
+		}
+		s.lastCurrent = absolute
+		progress(ctx, UploadProgress{CurrentBytes: absolute, TotalBytes: s.totalBytes, Message: "uploading to bilibili"})
+		return
+	}
+	if strings.Contains(line, "pre_upload") || strings.Contains(line, "Retry attempt") || strings.Contains(line, "APP") {
+		progress(ctx, UploadProgress{CurrentBytes: s.lastCurrent, TotalBytes: s.totalBytes, Message: truncateBiliupProgressMessage(line)})
+	}
+}
+
+func parseBiliupBytes(number string, unit string) int64 {
+	value, err := strconv.ParseFloat(number, 64)
+	if err != nil {
+		return 0
+	}
+	switch strings.ToLower(unit) {
+	case "gib", "gb":
+		value *= 1024 * 1024 * 1024
+	case "mib", "mb":
+		value *= 1024 * 1024
+	case "kib", "kb":
+		value *= 1024
+	}
+	return int64(value)
+}
+
+func truncateBiliupProgressMessage(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 160 {
+		return value[:160]
+	}
+	return value
 }
 
 func writeBiliupCookieFile(path string, raw json.RawMessage) error {
@@ -171,11 +342,34 @@ func parseBiliupExternalID(output []byte) string {
 	return strings.TrimSpace(match)
 }
 
+func isBiliupPartitionFailure(output []byte) bool {
+	message := strings.ToLower(string(output))
+	return strings.Contains(message, "tid") ||
+		strings.Contains(message, "partition") ||
+		strings.Contains(message, "category") ||
+		strings.Contains(string(output), "分区")
+}
+
+func totalBilibiliPartBytes(request BilibiliUploadRequest) int64 {
+	var total int64
+	for _, part := range request.Parts {
+		total += part.SizeBytes
+	}
+	return total
+}
+
 func bilibiliTID(settings BilibiliPublishingSettings) int {
 	if settings.TID > 0 {
 		return settings.TID
 	}
-	return 171
+	return defaultBilibiliTID
+}
+
+func bilibiliFallbackTID(settings BilibiliPublishingSettings) int {
+	if settings.FallbackTID > 0 {
+		return settings.FallbackTID
+	}
+	return defaultBilibiliFallbackTID
 }
 
 func bilibiliCopyright(request BilibiliUploadRequest) int {
@@ -201,7 +395,7 @@ func bilibiliUploadLimit(settings BilibiliPublishingSettings) int {
 	if settings.UploadLimit > 0 && settings.UploadLimit <= 8 {
 		return settings.UploadLimit
 	}
-	return 3
+	return 1
 }
 
 func bilibiliUploadLine(settings BilibiliPublishingSettings) string {

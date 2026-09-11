@@ -3,10 +3,12 @@ package upload
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tencentyun/cos-go-sdk-v5"
@@ -56,16 +58,22 @@ type COSDownloadURLResult struct {
 }
 
 type COSUploader interface {
-	Upload(ctx context.Context, request COSUploadRequest) (COSUploadResult, error)
+	Upload(ctx context.Context, request COSUploadRequest, progress ProgressReporter) (COSUploadResult, error)
 }
 
-type TencentCOSUploader struct{}
-
-func NewTencentCOSUploader() TencentCOSUploader {
-	return TencentCOSUploader{}
+type TencentCOSUploader struct {
+	MaxBytesPerSecond int64
 }
 
-func (TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest) (COSUploadResult, error) {
+func NewTencentCOSUploader(maxBytesPerSecond ...int64) TencentCOSUploader {
+	uploader := TencentCOSUploader{}
+	if len(maxBytesPerSecond) > 0 {
+		uploader.MaxBytesPerSecond = maxBytesPerSecond[0]
+	}
+	return uploader
+}
+
+func (u TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest, progress ProgressReporter) (COSUploadResult, error) {
 	if request.Region == "" || request.Bucket == "" || request.ObjectKey == "" || request.SourcePath == "" {
 		return COSUploadResult{}, NewClassifiedError("PERMANENT", "cos upload request is incomplete")
 	}
@@ -85,10 +93,16 @@ func (TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest) 
 		return COSUploadResult{}, NewClassifiedError("PERMANENT", fmt.Sprintf("invalid cos bucket endpoint: %v", err))
 	}
 	client := cos.NewClient(&cos.BaseURL{BucketURL: bucketURL}, &http.Client{
-		Transport: &cos.AuthorizationTransport{
-			SecretID:     request.Secret.SecretID,
-			SecretKey:    request.Secret.SecretKey,
-			SessionToken: request.Secret.SessionToken,
+		Transport: &uploadProgressTransport{
+			base: &cos.AuthorizationTransport{
+				SecretID:     request.Secret.SecretID,
+				SecretKey:    request.Secret.SecretKey,
+				SessionToken: request.Secret.SessionToken,
+			},
+			ctx:               ctx,
+			totalBytes:        info.Size(),
+			maxBytesPerSecond: u.MaxBytesPerSecond,
+			progress:          progress,
 		},
 	})
 	response, err := client.Object.PutFromFile(ctx, request.ObjectKey, request.SourcePath, nil)
@@ -102,7 +116,84 @@ func (TencentCOSUploader) Upload(ctx context.Context, request COSUploadRequest) 
 	if response != nil {
 		etag = strings.Trim(response.Header.Get("ETag"), `"`)
 	}
+	if progress != nil {
+		progress(ctx, UploadProgress{CurrentBytes: info.Size(), TotalBytes: info.Size(), Message: "uploaded to cos"})
+	}
 	return COSUploadResult{ETag: etag, SizeBytes: info.Size()}, nil
+}
+
+type uploadProgressTransport struct {
+	base              http.RoundTripper
+	ctx               context.Context
+	totalBytes        int64
+	maxBytesPerSecond int64
+	progress          ProgressReporter
+}
+
+func (t *uploadProgressTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil && req.Method == http.MethodPut {
+		req.Body = &progressReadCloser{
+			ReadCloser:        req.Body,
+			ctx:               t.ctx,
+			totalBytes:        t.totalBytes,
+			maxBytesPerSecond: t.maxBytesPerSecond,
+			progress:          t.progress,
+		}
+	}
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
+}
+
+type progressReadCloser struct {
+	io.ReadCloser
+	ctx               context.Context
+	totalBytes        int64
+	maxBytesPerSecond int64
+	progress          ProgressReporter
+	mu                sync.Mutex
+	readBytes         int64
+	startedAt         time.Time
+	lastReportAt      time.Time
+}
+
+func (r *progressReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.observe(int64(n))
+	}
+	return n, err
+}
+
+func (r *progressReadCloser) observe(n int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	if r.startedAt.IsZero() {
+		r.startedAt = now
+	}
+	r.readBytes += n
+	if r.maxBytesPerSecond > 0 {
+		expected := time.Duration(float64(r.readBytes) / float64(r.maxBytesPerSecond) * float64(time.Second))
+		if sleep := r.startedAt.Add(expected).Sub(now); sleep > 0 {
+			timer := time.NewTimer(sleep)
+			select {
+			case <-r.ctx.Done():
+			case <-timer.C:
+			}
+			timer.Stop()
+		}
+	}
+	if r.progress == nil {
+		return
+	}
+	if now.Sub(r.lastReportAt) < time.Second && r.readBytes < r.totalBytes {
+		return
+	}
+	r.lastReportAt = now
+	r.progress(r.ctx, UploadProgress{CurrentBytes: r.readBytes, TotalBytes: r.totalBytes, Message: "uploading to cos"})
 }
 
 func (TencentCOSUploader) SignedDownloadURL(ctx context.Context, request COSDownloadURLRequest, expiresIn time.Duration) (COSDownloadURLResult, error) {
