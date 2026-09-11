@@ -54,7 +54,7 @@ jobs:
           git archive --format=tar --output=release/source.tar HEAD
           mkdir -p release/frontend
           cp -R frontend/dist release/frontend/dist
-          docker save "7grecorder:${GITHUB_SHA}" | gzip -1 > release/7grecorder-image.tar.gz
+          docker save "7grecorder:${GITHUB_SHA}" | gzip -6 > release/7grecorder-image.tar.gz
           echo "${GITHUB_SHA}" > release/RELEASE_SHA
           tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
           sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS
