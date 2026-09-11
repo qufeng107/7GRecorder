@@ -56,7 +56,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          git archive --format=tar --output=release/source.tar HEAD
+          mkdir -p release/source
+          cp Dockerfile.app Dockerfile.runtime release/source/
+          cp -R deploy release/source/deploy
+          mkdir -p release/source/scripts
+          cp -R scripts/deploy release/source/scripts/deploy
+          tar -cf release/source.tar -C release/source .
+          rm -rf release/source
           mkdir -p release/frontend
           cp -R frontend/dist release/frontend/dist
           mkdir -p release/bin

@@ -75,8 +75,8 @@ After `dev` CI is green:
 Normal deploy updates only the 7GRecorder app container and frontend release. It must not run `docker compose down` and must not restart BililiveRecorder.
 
 The production workflow builds the Linux `7grecorder` binary in GitHub Actions, stores it in the release as
-`bin/7grecorder`, and uploads that release to the server. The server keeps a cached runtime base image containing
-ffmpeg, Python, and biliup, then builds a small app image for the new SHA:
+`bin/7grecorder`, and uploads a minimal deploy source bundle plus frontend `dist` to the server. The server keeps a
+cached runtime base image containing ffmpeg, Python, and biliup, then builds a small app image for the new SHA:
 
 ```text
 docker build -f Dockerfile.app 7grecorder:<git-sha>
