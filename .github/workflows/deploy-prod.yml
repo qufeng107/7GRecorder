@@ -69,11 +69,13 @@ jobs:
       - name: Copy release to production
         run: |
           scp -P "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
             7grecorder-release-${GITHUB_SHA}.tar SHA256SUMS scripts/deploy/deploy-release.sh \
             "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/opt/7grecorder/deploy/"
 
       - name: Deploy production
         run: |
           ssh -p "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" \
             "cd /opt/7grecorder/deploy && RELEASE_SHA=${GITHUB_SHA} RELEASE_TAR=7grecorder-release-${GITHUB_SHA}.tar bash ./deploy-release.sh"
