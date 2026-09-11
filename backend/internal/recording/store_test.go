@@ -315,7 +315,8 @@ func TestApproveUploadSourceReviewResetsFrozenRemoteUploads(t *testing.T) {
 		Name:         "7G",
 		RoomID:       "1741048619",
 		StreamerName: "Streamer",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	if _, err := database.ExecContext(ctx, `
