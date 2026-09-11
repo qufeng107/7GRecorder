@@ -174,7 +174,7 @@ CI 在 GitHub-hosted Runner 完成，用于保证测试、类型检查和构建�
 最小部署用 `source.tar`、`frontend/dist` 一起上传到正式服务器。`source.tar` 只包含 Dockerfile、Compose
 和部署脚本，不包含完整仓库源码、测试或文档。正式服务器保留固定 tag 的 runtime base image
 `7grecorder-runtime:bookworm-20250811-biliup-1.2.4-v1`，正常发布时只用本次 binary 拼一个很小的
-`7grecorder:<sha>` 应用镜像。
+`7grecorder:<sha>` 应用镜像。外层 release 和内层 source bundle 都使用 gzip 压缩，SCP 启用 SSH 压缩。
 
 约束：
 
@@ -193,8 +193,8 @@ CI 在 GitHub-hosted Runner 完成，用于保证测试、类型检查和构建�
 Release 包建议包含：
 
 ```text
-7grecorder-release-<sha>.tar
-├── source.tar              # minimal deploy sources only
+7grecorder-release-<sha>.tar.gz
+├── source.tar.gz           # minimal deploy sources only
 ├── bin/7grecorder
 ├── frontend/dist/
 └── RELEASE_SHA

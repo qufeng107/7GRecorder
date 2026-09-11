@@ -61,22 +61,22 @@ jobs:
           cp -R deploy release/source/deploy
           mkdir -p release/source/scripts
           cp -R scripts/deploy release/source/scripts/deploy
-          tar -cf release/source.tar -C release/source .
+          tar -czf release/source.tar.gz -C release/source .
           rm -rf release/source
           mkdir -p release/frontend
           cp -R frontend/dist release/frontend/dist
           mkdir -p release/bin
           cp dist/7grecorder release/bin/7grecorder
           echo "${GITHUB_SHA}" > release/RELEASE_SHA
-          tar -cf 7grecorder-release-${GITHUB_SHA}.tar -C release .
-          sha256sum 7grecorder-release-${GITHUB_SHA}.tar > SHA256SUMS
+          tar -czf 7grecorder-release-${GITHUB_SHA}.tar.gz -C release .
+          sha256sum 7grecorder-release-${GITHUB_SHA}.tar.gz > SHA256SUMS
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: 7grecorder-release-${{ github.sha }}
           path: |
-            7grecorder-release-${{ github.sha }}.tar
+            7grecorder-release-${{ github.sha }}.tar.gz
             SHA256SUMS
           retention-days: 7
 
@@ -90,9 +90,9 @@ jobs:
 
       - name: Copy release to production
         run: |
-          scp -P "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+          scp -C -P "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            7grecorder-release-${GITHUB_SHA}.tar SHA256SUMS scripts/deploy/deploy-release.sh \
+            7grecorder-release-${GITHUB_SHA}.tar.gz SHA256SUMS scripts/deploy/deploy-release.sh \
             "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/opt/7grecorder/deploy/"
 
       - name: Deploy production
@@ -100,4 +100,4 @@ jobs:
           ssh -p "${{ secrets.PROD_SSH_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" \
-            "cd /opt/7grecorder/deploy && RELEASE_SHA=${GITHUB_SHA} RELEASE_TAR=7grecorder-release-${GITHUB_SHA}.tar bash ./deploy-release.sh"
+            "cd /opt/7grecorder/deploy && RELEASE_SHA=${GITHUB_SHA} RELEASE_TAR=7grecorder-release-${GITHUB_SHA}.tar.gz bash ./deploy-release.sh"

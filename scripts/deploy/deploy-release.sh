@@ -30,11 +30,13 @@ cleanup_old_deploy_artifacts() {
 
   local tar_count=0
   local tar_path=""
-  for tar_path in $(ls -1t /opt/7grecorder/deploy/7grecorder-release-*.tar 2>/dev/null || true); do
+  for tar_path in $(ls -1t /opt/7grecorder/deploy/7grecorder-release-*.tar /opt/7grecorder/deploy/7grecorder-release-*.tar.gz 2>/dev/null || true); do
     [ -f "${tar_path}" ] || continue
-    if [ "$(basename "${tar_path}")" = "7grecorder-release-${RELEASE_SHA}.tar" ]; then
-      continue
-    fi
+    case "$(basename "${tar_path}")" in
+      "7grecorder-release-${RELEASE_SHA}.tar"|"7grecorder-release-${RELEASE_SHA}.tar.gz")
+        continue
+        ;;
+    esac
     tar_count=$((tar_count + 1))
     if [ "${tar_count}" -gt "${keep_releases}" ]; then
       rm -f "${tar_path}"
@@ -61,7 +63,11 @@ cleanup_old_deploy_artifacts
 sha256sum -c SHA256SUMS
 tar -xf "${RELEASE_TAR}" -C "${release_root}"
 mkdir -p "${release_root}/source"
-tar -xf "${release_root}/source.tar" -C "${release_root}/source"
+if [ -f "${release_root}/source.tar.gz" ]; then
+  tar -xzf "${release_root}/source.tar.gz" -C "${release_root}/source"
+else
+  tar -xf "${release_root}/source.tar" -C "${release_root}/source"
+fi
 bash "${release_root}/source/scripts/deploy/preflight.sh"
 HOUSEKEEPING_DEPLOY_SHA="${RELEASE_SHA}" bash "${release_root}/source/scripts/deploy/housekeeping.sh"
 
