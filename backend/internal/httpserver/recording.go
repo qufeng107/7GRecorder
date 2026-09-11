@@ -173,11 +173,93 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/upload-sources/{id}/actions/require-review", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			var req recording.UploadReviewRequest
+			if len(r.GetBody()) > 0 {
+				if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+					writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+					return
+				}
+			}
+			item, err := store.RequireUploadSourceReview(r.Context(), actor, id, req)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
+		})
+	})
+
+	s.BindHandler("/api/v1/upload-sources/{id}/actions/approve-review", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			var req recording.UploadReviewRequest
+			if len(r.GetBody()) > 0 {
+				if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+					writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+					return
+				}
+			}
+			item, err := store.ApproveUploadSourceReview(r.Context(), actor, id, req)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
+		})
+	})
+
+	s.BindHandler("/api/v1/upload-sources/{id}/actions/apply-edit", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			var req recording.UploadSourceEditRequest
+			if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+				writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+				return
+			}
+			item, err := store.SaveUploadSourceEditDecision(r.Context(), actor, id, req)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
+		})
+	})
+
 	s.BindHandler("/api/v1/upload-sources/{id}/download", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return
 		}
 		writeAPIError(r, http.StatusGone, "LOCAL_UPLOAD_SOURCE_DOWNLOAD_DISABLED", "Upload source downloads must use COS signed URLs.", nil)
+	})
+
+	s.BindHandler("/api/v1/upload-sources/{id}/outputs/{output_id}/download", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		sourceID := r.Get("id").Int64()
+		outputID := r.Get("output_id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			file, err := store.UploadSourceOutputForReviewDownload(r.Context(), actor, sourceID, outputID)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.Header().Set("Content-Type", file.ContentType)
+			r.Response.Header().Set("Content-Disposition", contentDisposition(file.OriginalName))
+			r.Response.ServeFile(file.AbsolutePath)
+		})
 	})
 
 	s.BindHandler("/api/v1/recording-files/reconcile", func(r *ghttp.Request) {
@@ -216,6 +298,28 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		id := r.Get("id").Int64()
 		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
 			item, err := store.SetLocalProtected(r.Context(), actor, id, false)
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
+		})
+	})
+
+	s.BindHandler("/api/v1/recordings/{id}/actions/require-upload-review", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodPost) {
+			return
+		}
+		id := r.Get("id").Int64()
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			var req recording.UploadReviewRequest
+			if len(r.GetBody()) > 0 {
+				if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+					writeAPIError(r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON request body.", nil)
+					return
+				}
+			}
+			item, err := store.RequireRecordingUploadReview(r.Context(), actor, id, req)
 			if err != nil {
 				writeRecordingError(r, err)
 				return

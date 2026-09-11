@@ -337,3 +337,10 @@ System:
 `main` Production Deploy 只有在上述 CI gate 成功后执行；`dev` 永不部署正式服务器。
 
 不得通过放宽/跳过测试来完成 release。
+# 2026-09-11 review gate tests
+
+- Upload reconcile tests must cover `upload_sources.review_status = 'REQUIRED'` and assert that Bilibili publications/jobs and upload-source COS objects/jobs are not created.
+- Worker request loaders for Bilibili and upload-source COS must reject reviewed upload sources even if an older pending job exists.
+- Recording store tests must cover local packaged-output download being available only for reviewed upload sources and only when the local file still exists.
+- Worker tests must cover `APPLY_UPLOAD_SOURCE_EDIT` producing edited outputs, clearing `edit_decision_json`, and keeping the upload source blocked until review approval.
+- Frontend checks should cover active recordings merged into the recording list once UI tests are expanded.

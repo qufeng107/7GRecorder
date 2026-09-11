@@ -26,6 +26,7 @@ type Worker struct {
 	cfg        config.Config
 	merger     media.Merger
 	packager   media.Packager
+	editor     media.Editor
 	compressor media.Compressor
 	cos        upload.COSUploader
 	bilibili   upload.BilibiliUploader
@@ -60,6 +61,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		cfg:        cfg,
 		merger:     media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		packager:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		editor:     media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		compressor: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		cos:        upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
 		bilibili:   upload.NewBiliupCLIUploader(cfg),
@@ -76,6 +78,12 @@ func NewWithMerger(database *sql.DB, recorderClient recorder.SyncClient, cfg con
 func NewWithPackager(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, packager media.Packager) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.packager = packager
+	return worker
+}
+
+func NewWithEditor(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, editor media.Editor) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.editor = editor
 	return worker
 }
 
@@ -170,6 +178,8 @@ func (w Worker) runClaimedJob(ctx context.Context, job workerJob) error {
 		return w.runMergeJob(ctx, job)
 	case "PACKAGE_UPLOAD_SOURCE":
 		return w.runPackageJob(ctx, job)
+	case "APPLY_UPLOAD_SOURCE_EDIT":
+		return w.runApplyUploadSourceEditJob(ctx, job)
 	case "UPLOAD_COS_OBJECT":
 		return w.runCOSUploadJob(ctx, job)
 	case "UPLOAD_COS_RECORDING_FILE":
@@ -284,6 +294,50 @@ func (w Worker) runPackageJob(ctx context.Context, job workerJob) error {
 		return w.failJob(ctx, job, "TRANSIENT", err)
 	}
 	if err := store.MarkUploadSourcePackageSucceeded(ctx, source.ID, result.Outputs); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
+func (w Worker) runApplyUploadSourceEditJob(ctx context.Context, job workerJob) error {
+	var payload mergeJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode edit payload: %w", err))
+	}
+	store := recording.NewStore(w.db, w.cfg)
+	source, cuts, err := store.UploadSourceForEdit(ctx, payload.UploadSourceID)
+	if err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	outputs := make([]media.EditOutput, 0, len(source.Outputs))
+	for _, output := range source.Outputs {
+		outputs = append(outputs, media.EditOutput{
+			RelativePath:    output.RelativePath,
+			SizeBytes:       output.SizeBytes,
+			DurationMs:      output.DurationMs,
+			TimelineStartMs: output.TimelineStartMs,
+			TimelineEndMs:   output.TimelineEndMs,
+		})
+	}
+	outputBaseName, err := store.UploadSourcePackageBaseName(ctx, source)
+	if err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	result, err := w.editor.ApplyCuts(ctx, media.EditRequest{
+		UploadSourceID:        source.ID,
+		Outputs:               outputs,
+		Cuts:                  cuts,
+		OutputDirRelativePath: filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", source.RecordingProfileID), fmt.Sprintf("%d", source.ID), "edited")),
+		OutputBaseName:        outputBaseName + "-edited",
+	})
+	if err != nil {
+		message := truncateError(err)
+		if markErr := store.MarkUploadSourceEditFailed(ctx, source.ID, message); markErr != nil {
+			return markErr
+		}
+		return w.failJob(ctx, job, "TRANSIENT", err)
+	}
+	if err := store.MarkUploadSourceEditSucceeded(ctx, source.ID, result.Outputs); err != nil {
 		return w.failJob(ctx, job, "PERMANENT", err)
 	}
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
@@ -433,7 +487,7 @@ func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs 
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 			`+extraWhere+`

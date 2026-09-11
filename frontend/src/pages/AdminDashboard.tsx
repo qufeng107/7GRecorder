@@ -126,6 +126,7 @@ type RecordingFile = {
 
 type RecordingItem = {
   id: number;
+  is_active_recording?: boolean;
   upload_source_id?: number;
   upload_source_status?: string;
   bilibili_status?: string;
@@ -145,6 +146,15 @@ type RecordingItem = {
   recording_status: string;
   local_storage_status: string;
   local_protected: boolean;
+  upload_review_status?: string;
+  upload_review_requested_at?: string;
+  upload_review_completed_at?: string;
+  upload_review_notes?: string;
+  review_status?: string;
+  review_requested_at?: string;
+  review_completed_at?: string;
+  review_notes?: string;
+  edit_decision_json?: string;
   source_segments?: UploadSourceSegment[];
   source_outputs?: UploadSourceOutput[];
   danmaku_files?: RecordingFile[];
@@ -185,6 +195,11 @@ type UploadSourceOutput = {
   cos_compression_preset?: string;
 };
 
+type UploadSourceEditCut = {
+  start_ms: number;
+  end_ms: number;
+};
+
 type UploadSourceItem = {
   id: number;
   recording_profile_id: number;
@@ -209,6 +224,11 @@ type UploadSourceItem = {
   metadata_json?: string;
   ready_at?: string;
   last_error?: string;
+  review_status?: string;
+  review_requested_at?: string;
+  review_completed_at?: string;
+  review_notes?: string;
+  edit_decision_json?: string;
   segments: UploadSourceSegment[] | null;
   outputs: UploadSourceOutput[] | null;
   danmaku_files?: RecordingFile[] | null;
@@ -218,6 +238,11 @@ type UploadSourceListResponse = {
   items: UploadSourceItem[] | null;
   total: number;
   merge_gap_threshold_seconds: number;
+};
+
+type RecordingListResponse = {
+  items: RecordingItem[] | null;
+  total: number;
 };
 
 type UploadSourceDiscoverResult = {
@@ -676,6 +701,7 @@ const uiCopy = {
     jobSyncRecorderProfile: "同步录制配置",
     jobMergeUploadSource: "合并可上传视频",
     jobPackageUploadSource: "封装可上传视频",
+    jobApplyUploadSourceEdit: "应用剪辑",
     jobUploadBilibili: "上传到 Bilibili",
     jobUploadCOS: "上传到 COS",
     jobUploadCOSRecordingFile: "上传原始文件到 COS",
@@ -733,6 +759,7 @@ const uiCopy = {
     protect: "保护",
     download: "下载",
     downloadFromCos: "COS 下载",
+    downloadLocal: "本地下载",
     openBilibili: "打开 Bilibili",
     details: "详情",
     recordingDetails: "录像详情",
@@ -746,8 +773,19 @@ const uiCopy = {
     uploadSourcePackaging: "封装中",
     uploadSourcePackageCompleteRefreshing: "封装完成，刷新中",
     uploadSourceReady: "可上传",
+    uploadSourceActiveRecording: "录制中",
     uploadSourceMergeFailed: "合并失败",
     uploadSourcePackageFailed: "封装失败",
+    uploadSourceWaitingReview: "等待审核",
+    requireReview: "需要审核",
+    approveReview: "审核完成",
+    reviewRequired: "需审核",
+    reviewPending: "审核中",
+    editCuts: "删除区间",
+    editCutsPlaceholder: "00:10:00-00:12:30\n01:05:20-01:06:00",
+    applyEdit: "应用剪辑",
+    editQueued: "剪辑任务已排队",
+    editFailed: "剪辑提交失败，请查看服务器日志。",
     bilibiliStatus: "Bilibili",
     cosStatus: "COS",
     uploadStatusDisabled: "未启用",
@@ -980,6 +1018,7 @@ const uiCopy = {
     jobSyncRecorderProfile: "Sync recording profile",
     jobMergeUploadSource: "Merge upload source",
     jobPackageUploadSource: "Package upload source",
+    jobApplyUploadSourceEdit: "Apply edit",
     jobUploadBilibili: "Upload to Bilibili",
     jobUploadCOS: "Upload to COS",
     jobUploadCOSRecordingFile: "Upload raw file to COS",
@@ -1037,6 +1076,7 @@ const uiCopy = {
     protect: "Protect",
     download: "Download",
     downloadFromCos: "COS Download",
+    downloadLocal: "Local Download",
     openBilibili: "Open Bilibili",
     details: "Details",
     recordingDetails: "Recording Details",
@@ -1050,8 +1090,19 @@ const uiCopy = {
     uploadSourcePackaging: "Packaging",
     uploadSourcePackageCompleteRefreshing: "Package finished, refreshing",
     uploadSourceReady: "Ready to upload",
+    uploadSourceActiveRecording: "Recording",
     uploadSourceMergeFailed: "Merge failed",
     uploadSourcePackageFailed: "Package failed",
+    uploadSourceWaitingReview: "Waiting review",
+    requireReview: "Require review",
+    approveReview: "Approve",
+    reviewRequired: "Needs review",
+    reviewPending: "In review",
+    editCuts: "Cut ranges",
+    editCutsPlaceholder: "00:10:00-00:12:30\n01:05:20-01:06:00",
+    applyEdit: "Apply edit",
+    editQueued: "Edit job queued",
+    editFailed: "Failed to submit edit. Check server logs.",
     bilibiliStatus: "Bilibili",
     cosStatus: "COS",
     uploadStatusDisabled: "Disabled",
@@ -1292,6 +1343,11 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     output_recording_file_id: source.output_recording_file_id,
     output_relative_path: source.output_relative_path,
     last_error: source.last_error,
+    review_status: source.review_status ?? "NONE",
+    review_requested_at: source.review_requested_at,
+    review_completed_at: source.review_completed_at,
+    review_notes: source.review_notes,
+    edit_decision_json: source.edit_decision_json,
     recording_profile_id: source.recording_profile_id,
     profile_name: source.profile_name,
     room_id: source.room_id,
@@ -1318,6 +1374,22 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
       duration_ms: segment.duration_ms,
       closed_at: segment.source_completed_at
     }))
+  };
+}
+
+function recordingToActiveRecordingItem(recording: RecordingItem): RecordingItem {
+  return {
+    ...recording,
+    is_active_recording: true,
+    upload_source_status: recording.recording_status === "ACTIVE" ? "ACTIVE_RECORDING" : recording.recording_status,
+    review_status: recording.upload_review_status ?? "NONE",
+    review_requested_at: recording.upload_review_requested_at,
+    review_completed_at: recording.upload_review_completed_at,
+    review_notes: recording.upload_review_notes,
+    source_segments: [],
+    source_outputs: [],
+    danmaku_files: [],
+    files: recording.files ?? []
   };
 }
 
@@ -1421,6 +1493,7 @@ export function AdminDashboard() {
   const [profileSort, setProfileSort] = useState<ProfileSortKey>("name_asc");
   const [recordingSearch, setRecordingSearch] = useState("");
   const [recordingSort, setRecordingSort] = useState<RecordingSortKey>("started_desc");
+  const [editDrafts, setEditDrafts] = useState<Record<number, string>>({});
   const [accountSearch, setAccountSearch] = useState("");
   const [accountSort, setAccountSort] = useState<AccountSortKey>("username_asc");
   const [jobSearch, setJobSearch] = useState("");
@@ -1484,6 +1557,14 @@ export function AdminDashboard() {
     refetchInterval: 15000
   });
 
+  const rawRecordingsQuery = useQuery({
+    queryKey: ["recordings"],
+    queryFn: () => requestJson<RecordingListResponse>("/api/v1/recordings"),
+    enabled: Boolean(meQuery.data?.user),
+    retry: false,
+    refetchInterval: 5000
+  });
+
   const jobsQuery = useQuery({
     queryKey: ["jobs"],
     queryFn: () => requestJson<JobListResponse>("/api/v1/jobs?limit=100"),
@@ -1529,11 +1610,22 @@ export function AdminDashboard() {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const uploadProfileId = Number(uploadSettingsForm.profile_id);
   const uploadProfile = profiles.find((profile) => profile.id === uploadProfileId);
-  const recordings = useMemo(
-    () => (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem),
-    [recordingsQuery.data?.items]
-  );
-  const recordingTotal = recordingsQuery.data?.total ?? recordings.length;
+  const recordings = useMemo(() => {
+    const uploadSourceItems = (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem);
+    const representedRecordingIDs = new Set<number>();
+    for (const item of uploadSourceItems) {
+      for (const segment of item.source_segments ?? []) {
+        representedRecordingIDs.add(segment.recording_id);
+      }
+    }
+    const activeItems = (rawRecordingsQuery.data?.items ?? [])
+      .filter((recording) => recording.local_storage_status !== "DELETED" && !representedRecordingIDs.has(recording.id))
+      .map(recordingToActiveRecordingItem);
+    return [...activeItems, ...uploadSourceItems].sort((left, right) => {
+      return new Date(right.started_at).getTime() - new Date(left.started_at).getTime();
+    });
+  }, [rawRecordingsQuery.data?.items, recordingsQuery.data?.items]);
+  const recordingTotal = (recordingsQuery.data?.total ?? 0) + recordings.filter((item) => item.is_active_recording).length;
   const jobs = jobsQuery.data?.items ?? [];
   const jobTotal = jobsQuery.data?.total ?? jobs.length;
   const accounts = useMemo(() => accountsQuery.data?.items ?? [], [accountsQuery.data?.items]);
@@ -1789,6 +1881,60 @@ export function AdminDashboard() {
     }
   });
 
+  const requireRecordingReviewMutation = useMutation({
+    mutationFn: (recordingId: number) =>
+      requestJson<RecordingItem>(`/api/v1/recordings/${recordingId}/actions/require-upload-review`, {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["recordings"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const requireUploadSourceReviewMutation = useMutation({
+    mutationFn: (uploadSourceId: number) =>
+      requestJson<UploadSourceItem>(`/api/v1/upload-sources/${uploadSourceId}/actions/require-review`, {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const approveUploadSourceReviewMutation = useMutation({
+    mutationFn: (uploadSourceId: number) =>
+      requestJson<UploadSourceItem>(`/api/v1/upload-sources/${uploadSourceId}/actions/approve-review`, {
+        method: "POST",
+        body: "{}"
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const applyUploadSourceEditMutation = useMutation({
+    mutationFn: (request: { uploadSourceId: number; cuts: UploadSourceEditCut[] }) =>
+      requestJson<UploadSourceItem>(`/api/v1/upload-sources/${request.uploadSourceId}/actions/apply-edit`, {
+        method: "POST",
+        body: JSON.stringify({ cuts: request.cuts })
+      }),
+    onSuccess: (_result, request) => {
+      setEditDrafts((current) => {
+        const next = { ...current };
+        delete next[request.uploadSourceId];
+        return next;
+      });
+      void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
   const cosDownloadUrlMutation = useMutation({
     mutationFn: (request: { uploadSourceId: number; outputId: number }) =>
       requestJson<COSDownloadURLResponse>(
@@ -1813,6 +1959,10 @@ export function AdminDashboard() {
       window.location.assign(result.url);
     }
   });
+
+  const downloadLocalUploadSourceOutput = (uploadSourceId: number, outputId: number) => {
+    window.location.assign(`/api/v1/upload-sources/${uploadSourceId}/outputs/${outputId}/download`);
+  };
 
   const saveStorageSettingsMutation = useMutation({
     mutationFn: () =>
@@ -2258,7 +2408,7 @@ export function AdminDashboard() {
 
             {activePage === "recordings" ? (
               <RecordingsPanel
-                isLoading={recordingsQuery.isLoading}
+                isLoading={recordingsQuery.isLoading || rawRecordingsQuery.isLoading}
                 jobs={jobs}
                 labels={ui}
                 canManageLocalFiles={canManageLocalFiles}
@@ -2268,6 +2418,12 @@ export function AdminDashboard() {
                 cosFileDownloadPending={cosFileDownloadUrlMutation.isPending}
                 cosFileDownloadPendingFileId={cosFileDownloadUrlMutation.variables?.fileId ?? null}
                 protectPending={protectRecordingMutation.isPending}
+                reviewPending={
+                  requireRecordingReviewMutation.isPending ||
+                  requireUploadSourceReviewMutation.isPending ||
+                  approveUploadSourceReviewMutation.isPending ||
+                  applyUploadSourceEditMutation.isPending
+                }
                 regroupError={regroupTodayMutation.isError}
                 regroupPending={regroupTodayMutation.isPending}
                 regroupResult={regroupTodayMutation.data}
@@ -2294,7 +2450,33 @@ export function AdminDashboard() {
                   }
                 }}
                 onDownloadOutput={(uploadSourceId, outputId) => cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })}
+                onDownloadLocalOutput={downloadLocalUploadSourceOutput}
                 onDownloadFile={(fileId) => cosFileDownloadUrlMutation.mutate({ fileId })}
+                onApproveReview={(recording) => {
+                  if (recording.upload_source_id) {
+                    approveUploadSourceReviewMutation.mutate(recording.upload_source_id);
+                  }
+                }}
+                editDrafts={editDrafts}
+                editError={applyUploadSourceEditMutation.isError}
+                editPending={applyUploadSourceEditMutation.isPending}
+                onApplyEdit={(uploadSourceId, draft) => {
+                  const cuts = parseEditCutDraft(draft);
+                  if (cuts.length === 0) {
+                    return;
+                  }
+                  applyUploadSourceEditMutation.mutate({ uploadSourceId, cuts });
+                }}
+                onEditDraftChange={(uploadSourceId, value) =>
+                  setEditDrafts((current) => ({ ...current, [uploadSourceId]: value }))
+                }
+                onRequireReview={(recording) => {
+                  if (recording.upload_source_id) {
+                    requireUploadSourceReviewMutation.mutate(recording.upload_source_id);
+                    return;
+                  }
+                  requireRecordingReviewMutation.mutate(recording.id);
+                }}
                 onSearchChange={setRecordingSearch}
                 onSortChange={setRecordingSort}
                 onToggleProtect={(recording) =>
@@ -3789,6 +3971,10 @@ function RecordingsPanel(props: {
   jobs: JobItem[];
   labels: AdminCopy;
   protectPending: boolean;
+  reviewPending: boolean;
+  editDrafts: Record<number, string>;
+  editError: boolean;
+  editPending: boolean;
   repairError: boolean;
   repairPending: boolean;
   repairResult?: UploadSourceRepairResult;
@@ -3803,11 +3989,16 @@ function RecordingsPanel(props: {
   sort: RecordingSortKey;
   total: number;
   visibleTotal: number;
+  onApplyEdit: (uploadSourceId: number, draft: string) => void;
+  onApproveReview: (recording: RecordingItem) => void;
   onDownloadFile: (fileId: number) => void;
+  onDownloadLocalOutput: (uploadSourceId: number, outputId: number) => void;
   onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
+  onEditDraftChange: (uploadSourceId: number, value: string) => void;
   onReconcile: () => void;
   onRegroupToday: () => void;
   onRepairUploadSources: () => void;
+  onRequireReview: (recording: RecordingItem) => void;
   onSearchChange: (value: string) => void;
   onSortChange: (value: RecordingSortKey) => void;
   onToggleProtect: (recording: RecordingItem) => void;
@@ -3905,9 +4096,13 @@ function RecordingsPanel(props: {
         const file = recording.files?.[0];
         const mergeJob = currentUploadSourceMergeJob(recording, props.jobs);
         const packageJob = currentUploadSourcePackageJob(recording, props.jobs);
+        const reviewStatus = recording.review_status ?? recording.upload_review_status ?? "NONE";
+        const displayStatus = reviewStatus === "REQUIRED" || recording.edit_decision_json
+          ? "WAITING_REVIEW"
+          : recording.upload_source_status ?? recording.recording_status;
         return (
           <div className="text-muted">
-            <p>{formatUploadSourceStatus(recording.upload_source_status ?? recording.recording_status, props.labels, mergeJob, packageJob)}</p>
+            <p>{formatUploadSourceStatus(displayStatus, props.labels, mergeJob, packageJob)}</p>
             {recording.upload_source_id ? (
               <div className="mt-1 space-y-0.5 text-xs">
                 <p>{props.labels.bilibiliStatus}: {formatModuleUploadStatus(recording.bilibili_status, props.labels)}</p>
@@ -3915,6 +4110,7 @@ function RecordingsPanel(props: {
               </div>
             ) : null}
             {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
+            {reviewStatus === "REQUIRED" ? <p className="mt-1 text-xs font-medium text-amber-700">{props.labels.reviewPending}</p> : null}
             {recording.last_error ? <p className="mt-1 break-words text-xs text-red-700">{recording.last_error}</p> : null}
             {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
           </div>
@@ -3939,18 +4135,40 @@ function RecordingsPanel(props: {
         const canUseLocalFile = recording.local_storage_status !== "DELETED";
         const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
         const bilibiliURL = (recording.source_outputs ?? []).find((output) => output.bilibili_url)?.bilibili_url;
+        const reviewStatus = recording.review_status ?? recording.upload_review_status ?? "NONE";
         if (!props.canManageLocalFiles) {
           return <span className="text-xs text-muted">{props.labels.noAction}</span>;
         }
         return (
           <div className="flex flex-col items-start gap-2">
-            <button
-              className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-              type="button"
-              onClick={() => toggleSource(recording.upload_source_id)}
-            >
-              {props.labels.details}
-            </button>
+            {recording.upload_source_id ? (
+              <button
+                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                type="button"
+                onClick={() => toggleSource(recording.upload_source_id)}
+              >
+                {props.labels.details}
+              </button>
+            ) : null}
+            {reviewStatus === "REQUIRED" && recording.upload_source_id ? (
+              <button
+                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-amber-300 px-3 text-xs font-medium text-amber-800 hover:border-accent hover:text-accent disabled:opacity-60"
+                disabled={props.reviewPending}
+                type="button"
+                onClick={() => props.onApproveReview(recording)}
+              >
+                {props.labels.approveReview}
+              </button>
+            ) : (
+              <button
+                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                disabled={props.reviewPending || reviewStatus === "REQUIRED" || Boolean(bilibiliURL)}
+                type="button"
+                onClick={() => props.onRequireReview(recording)}
+              >
+                {props.labels.requireReview}
+              </button>
+            )}
             {canUseLocalFile && isSingleSegment ? (
               <button
                 className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
@@ -4159,13 +4377,26 @@ function RecordingsPanel(props: {
                             <span className="text-xs text-muted">{recording.profile_name} · {recording.room_id}</span>
                           </div>
                           <div className="space-y-3">
+                            {(recording.review_status ?? recording.upload_review_status) === "REQUIRED" && sourceId > 0 ? (
+                              <UploadSourceReviewEditPanel
+                                draft={props.editDrafts[sourceId] ?? ""}
+                                editError={props.editError}
+                                editPending={props.editPending}
+                                labels={props.labels}
+                                uploadSourceId={sourceId}
+                                onApplyEdit={props.onApplyEdit}
+                                onDraftChange={props.onEditDraftChange}
+                              />
+                            ) : null}
                             <UploadSourceOutputsTable
                               canDownload={props.canManageLocalFiles}
                               cosDownloadPending={props.cosDownloadPending}
                               cosDownloadPendingOutputId={props.cosDownloadPendingOutputId}
                               labels={props.labels}
                               outputs={recording.source_outputs ?? []}
+                              reviewRequired={(recording.review_status ?? recording.upload_review_status) === "REQUIRED"}
                               uploadSourceId={sourceId}
+                              onDownloadLocalOutput={props.onDownloadLocalOutput}
                               onDownloadOutput={props.onDownloadOutput}
                             />
                             <DanmakuFilesTable
@@ -4339,13 +4570,53 @@ function UploadSourceSegmentsTable(props: {
   );
 }
 
+function UploadSourceReviewEditPanel(props: {
+  draft: string;
+  editError: boolean;
+  editPending: boolean;
+  labels: AdminCopy;
+  uploadSourceId: number;
+  onApplyEdit: (uploadSourceId: number, draft: string) => void;
+  onDraftChange: (uploadSourceId: number, value: string) => void;
+}) {
+  const cuts = parseEditCutDraft(props.draft);
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-[280px] flex-1 text-sm font-medium">
+          {props.labels.editCuts}
+          <textarea
+            className="mt-1 min-h-20 w-full rounded-md border border-border bg-white px-3 py-2 text-sm font-normal outline-none focus:border-accent"
+            placeholder={props.labels.editCutsPlaceholder}
+            value={props.draft}
+            onChange={(event) => props.onDraftChange(props.uploadSourceId, event.target.value)}
+          />
+        </label>
+        <button
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-4 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-60"
+          disabled={props.editPending || cuts.length === 0}
+          type="button"
+          onClick={() => props.onApplyEdit(props.uploadSourceId, props.draft)}
+        >
+          <Save className="h-4 w-4" aria-hidden="true" />
+          {props.labels.applyEdit}
+        </button>
+      </div>
+      {props.editPending ? <p className="mt-2 text-xs text-muted">{props.labels.editQueued}</p> : null}
+      {props.editError ? <p className="mt-2 text-xs text-red-700">{props.labels.editFailed}</p> : null}
+    </div>
+  );
+}
+
 function UploadSourceOutputsTable(props: {
   canDownload: boolean;
   cosDownloadPending: boolean;
   cosDownloadPendingOutputId: number | null;
   labels: AdminCopy;
   outputs: UploadSourceOutput[];
+  reviewRequired: boolean;
   uploadSourceId: number;
+  onDownloadLocalOutput: (uploadSourceId: number, outputId: number) => void;
   onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
 }) {
   return (
@@ -4369,6 +4640,7 @@ function UploadSourceOutputsTable(props: {
           <tbody>
             {props.outputs.map((output) => {
               const cosAvailable = props.canDownload && output.cos_status === "AVAILABLE";
+              const localAvailable = props.canDownload && props.reviewRequired && output.status === "READY_TO_UPLOAD";
               const bilibiliURL = output.bilibili_status === "VERIFIED" ? output.bilibili_url : undefined;
               return (
                 <tr key={output.id} className="align-top">
@@ -4400,6 +4672,16 @@ function UploadSourceOutputsTable(props: {
                         >
                           <Download className="h-3.5 w-3.5" aria-hidden="true" />
                           {props.labels.downloadFromCos}
+                        </button>
+                      ) : null}
+                      {localAvailable ? (
+                        <button
+                          className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                          type="button"
+                          onClick={() => props.onDownloadLocalOutput(props.uploadSourceId, output.id)}
+                        >
+                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                          {props.labels.downloadLocal}
                         </button>
                       ) : null}
                       {bilibiliURL ? (
@@ -4689,6 +4971,43 @@ function currentUploadSourcePackageJob(recording: RecordingItem, jobs: JobItem[]
   return jobs.find((job) => job.type === "PACKAGE_UPLOAD_SOURCE" && job.business_key === businessKey);
 }
 
+function parseEditCutDraft(value: string): UploadSourceEditCut[] {
+  const cuts: UploadSourceEditCut[] = [];
+  for (const rawLine of value.split(/[\n,;]+/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const match = line.match(/^(.+?)\s*[-~]\s*(.+)$/);
+    if (!match) {
+      return [];
+    }
+    const start = parseTimelineInput(match[1]);
+    const end = parseTimelineInput(match[2]);
+    if (start === null || end === null || end <= start) {
+      return [];
+    }
+    cuts.push({ start_ms: start, end_ms: end });
+  }
+  return cuts.sort((left, right) => left.start_ms - right.start_ms || left.end_ms - right.end_ms);
+}
+
+function parseTimelineInput(value: string): number | null {
+  const parts = value.trim().split(":");
+  if (parts.length < 2 || parts.length > 3) {
+    return null;
+  }
+  const numbers = parts.map((part) => Number(part));
+  if (numbers.some((part) => !Number.isFinite(part) || part < 0)) {
+    return null;
+  }
+  const [hours, minutes, seconds] = parts.length === 3 ? numbers : [0, numbers[0], numbers[1]];
+  if (minutes >= 60 || seconds >= 60) {
+    return null;
+  }
+  return Math.round(((hours * 60 + minutes) * 60 + seconds) * 1000);
+}
+
 function formatJobType(value: string, labels: AdminCopy): string {
   if (value === "SYNC_RECORDER_PROFILE") {
     return labels.jobSyncRecorderProfile;
@@ -4698,6 +5017,9 @@ function formatJobType(value: string, labels: AdminCopy): string {
   }
   if (value === "PACKAGE_UPLOAD_SOURCE") {
     return labels.jobPackageUploadSource;
+  }
+  if (value === "APPLY_UPLOAD_SOURCE_EDIT") {
+    return labels.jobApplyUploadSourceEdit;
   }
   if (value === "UPLOAD_BILIBILI") {
     return labels.jobUploadBilibili;
@@ -4731,8 +5053,14 @@ function formatJobStatus(value: string, labels: AdminCopy): string {
 }
 
 function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: JobItem, packageJob?: JobItem): string {
+  if (value === "ACTIVE_RECORDING" || value === "ACTIVE") {
+    return labels.uploadSourceActiveRecording;
+  }
   if (value === "READY_TO_UPLOAD") {
     return labels.uploadSourceReady;
+  }
+  if (value === "WAITING_REVIEW") {
+    return labels.uploadSourceWaitingReview;
   }
   if (value === "MERGE_PENDING") {
     if (mergeJob?.status === "RUNNING") {
@@ -4762,6 +5090,9 @@ function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: J
 }
 
 function formatModuleUploadStatus(value: string | undefined, labels: AdminCopy): string {
+  if (value === "WAITING_REVIEW") {
+    return labels.uploadSourceWaitingReview;
+  }
   if (value === "DISABLED") {
     return labels.uploadStatusDisabled;
   }

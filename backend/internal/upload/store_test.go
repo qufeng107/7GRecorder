@@ -123,6 +123,74 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	}
 }
 
+func TestReconcileSkipsUploadSourceWaitingForReview(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create profile returned error: %v", err)
+	}
+	store := NewStore(database, cfg)
+	biliCredential, err := store.CreateCredential(ctx, actor, CredentialCreate{
+		Scope:        "USER",
+		Platform:     "bilibili",
+		Purpose:      "PUBLISHER",
+		AccountLabel: "bili account",
+		Secret:       []byte(`{"cookie":"cookie"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential bilibili returned error: %v", err)
+	}
+	cosCredential, err := store.CreateCredential(ctx, actor, CredentialCreate{
+		Scope:        "USER",
+		Platform:     "tencent_cos",
+		Purpose:      "STORAGE",
+		AccountLabel: "cos account",
+		Secret:       []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential cos returned error: %v", err)
+	}
+	if _, err := store.UpsertBilibiliConfig(ctx, actor, 1, PublishingConfigUpsert{
+		CredentialID: biliCredential.ID,
+		Enabled:      true,
+		Settings:     []byte(`{"copyright":2}`),
+	}); err != nil {
+		t.Fatalf("UpsertBilibiliConfig returned error: %v", err)
+	}
+	if _, err := store.UpsertCOSConfig(ctx, actor, 1, COSConfigUpsert{
+		CredentialID:    cosCredential.ID,
+		Enabled:         true,
+		Region:          "ap-shanghai",
+		Bucket:          "bucket-1250000000",
+		Prefix:          "7grecorder/test/",
+		MaxManagedBytes: 1000000000,
+	}); err != nil {
+		t.Fatalf("UpsertCOSConfig returned error: %v", err)
+	}
+	insertReadyUploadSource(t, ctx, database)
+	if _, err := database.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET review_status = 'REQUIRED',
+			review_requested_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`); err != nil {
+		t.Fatalf("mark upload source waiting for review returned error: %v", err)
+	}
+
+	result, err := store.Reconcile(ctx, actor)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.PublicationsCreated != 0 || result.BilibiliJobsCreated != 0 || result.COSObjectsCreated != 0 || result.COSJobsCreated != 0 {
+		t.Fatalf("expected review gate to block upload jobs, got %#v", result)
+	}
+}
+
 func TestBilibiliUploadRequestDefaultsRepostSourceToLiveRoom(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

@@ -63,6 +63,12 @@ type fakeCompressor struct {
 	err     error
 }
 
+type fakeEditor struct {
+	request media.EditRequest
+	result  media.PackageResult
+	err     error
+}
+
 func (f *fakePackager) Package(_ context.Context, request media.PackageRequest) (media.PackageResult, error) {
 	f.request = request
 	return f.result, f.err
@@ -74,6 +80,11 @@ func (f *fakePackager) PackageSegments(_ context.Context, request media.SegmentP
 }
 
 func (f *fakeCompressor) Compress(_ context.Context, request media.CompressionRequest) (media.CompressionResult, error) {
+	f.request = request
+	return f.result, f.err
+}
+
+func (f *fakeEditor) ApplyCuts(_ context.Context, request media.EditRequest) (media.PackageResult, error) {
 	f.request = request
 	return f.result, f.err
 }
@@ -298,6 +309,77 @@ func TestRunOncePackagesUploadSource(t *testing.T) {
 	}
 	if status != "READY_TO_UPLOAD" || outputCount != 2 {
 		t.Fatalf("unexpected package result status=%s outputs=%d", status, outputCount)
+	}
+}
+
+func TestRunOnceAppliesUploadSourceEdit(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE type = 'SYNC_RECORDER_PROFILE'`); err != nil {
+		t.Fatalf("complete initial sync job returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status,
+				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds,
+				ready_at, review_status, edit_decision_json)
+		VALUES (1, ?, 'profile:1:1:1', '1741048619', '7G',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000, 'READY_TO_UPLOAD',
+			50, 1, 1, 0, 600, CURRENT_TIMESTAMP, 'REQUIRED',
+			'{"cuts":[{"start_ms":60000,"end_ms":120000}]}');
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES
+			(1, 1, 0, 'upload-sources/1/1/parts/source-p01.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD');
+		INSERT INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		VALUES
+			(?, 1, 'APPLY_UPLOAD_SOURCE_EDIT', 'MEDIA', 'upload-source:1:edit', '{"upload_source_id":1}', 'PENDING', 70, 3)
+	`, created.ID, created.ID); err != nil {
+		t.Fatalf("seed edit source returned error: %v", err)
+	}
+
+	editor := &fakeEditor{result: media.PackageResult{Outputs: []media.PackageOutput{{
+		RelativePath:    "upload-sources/1/1/edited/7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad-edited-p01.flv",
+		SizeBytes:       45,
+		DurationMs:      1740000,
+		TimelineStartMs: 0,
+		TimelineEndMs:   1740000,
+	}}}}
+	if err := NewWithEditor(database, &fakeRecorder{}, cfg, editor).RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if len(editor.request.Cuts) != 1 || editor.request.Cuts[0].StartMs != 60000 || editor.request.Cuts[0].EndMs != 120000 {
+		t.Fatalf("unexpected edit cuts: %#v", editor.request.Cuts)
+	}
+	if len(editor.request.Outputs) != 1 || editor.request.Outputs[0].RelativePath != "upload-sources/1/1/parts/source-p01.flv" {
+		t.Fatalf("unexpected edit outputs: %#v", editor.request.Outputs)
+	}
+	var sourceStatus string
+	var editJSON string
+	var outputPath string
+	var jobStatus string
+	if err := database.QueryRowContext(ctx, `
+		SELECT us.review_status, COALESCE(us.edit_decision_json, ''), uso.relative_path, j.status
+		FROM upload_sources us
+		JOIN upload_source_outputs uso ON uso.upload_source_id = us.id
+		JOIN jobs j ON j.upload_source_id = us.id AND j.type = 'APPLY_UPLOAD_SOURCE_EDIT'
+		WHERE us.id = 1
+	`).Scan(&sourceStatus, &editJSON, &outputPath, &jobStatus); err != nil {
+		t.Fatalf("query edit result returned error: %v", err)
+	}
+	if sourceStatus != "REQUIRED" || editJSON != "" || outputPath != "upload-sources/1/1/edited/7G Live-20260905-\u7b2c01\u573a\u76f4\u64ad-edited-p01.flv" || jobStatus != "SUCCEEDED" {
+		t.Fatalf("unexpected edit result review=%s edit=%q output=%q job=%s", sourceStatus, editJSON, outputPath, jobStatus)
 	}
 }
 

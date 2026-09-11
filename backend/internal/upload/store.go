@@ -143,6 +143,9 @@ const uploadSourceStableCondition = `
 					)
 			)`
 
+const uploadSourceReviewReadyCondition = `COALESCE(us.review_status, 'NONE') != 'REQUIRED'
+			AND COALESCE(us.edit_decision_json, '') = ''`
+
 type COSRecordingFileJobPayload struct {
 	COSObjectID     int64 `json:"cos_object_id"`
 	RecordingFileID int64 `json:"recording_file_id"`
@@ -386,6 +389,7 @@ func (s Store) createBilibiliPublications(ctx context.Context) (int, error) {
 			AND pp.credential_id IS NOT NULL
 		WHERE us.status = 'READY_TO_UPLOAD'
 			AND ` + uploadSourceStableCondition + `
+			AND ` + uploadSourceReviewReadyCondition + `
 			AND EXISTS (
 				SELECT 1 FROM upload_source_outputs uso
 				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD'
@@ -422,6 +426,7 @@ func (s Store) createBilibiliJobs(ctx context.Context) (int, error) {
 			AND p.status = 'PENDING'
 			AND us.status = 'READY_TO_UPLOAD'
 			AND ` + uploadSourceStableCondition + `
+			AND ` + uploadSourceReviewReadyCondition + `
 			AND EXISTS (
 				SELECT 1 FROM upload_source_outputs uso
 				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD'
@@ -465,6 +470,7 @@ func (s Store) resetPendingBilibiliJobs(ctx context.Context) (int, error) {
 					AND p.status = 'PENDING'
 					AND us.status = 'READY_TO_UPLOAD'
 					AND `+uploadSourceStableCondition+`
+					AND `+uploadSourceReviewReadyCondition+`
 					AND EXISTS (
 						SELECT 1 FROM upload_source_outputs uso
 						WHERE uso.upload_source_id = us.id
@@ -510,6 +516,7 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 			AND csp.enabled = 1
 		WHERE us.status = 'READY_TO_UPLOAD'
 			AND ` + uploadSourceStableCondition + `
+			AND ` + uploadSourceReviewReadyCondition + `
 	`
 	result, err := s.db.ExecContext(ctx, query, compressionStatus, compressionPreset)
 	if err != nil {
@@ -541,6 +548,7 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 			AND co.upload_source_output_id IS NOT NULL
 			AND us.status = 'READY_TO_UPLOAD'
 			AND ` + uploadSourceStableCondition + `
+			AND ` + uploadSourceReviewReadyCondition + `
 	`
 	result, err := s.db.ExecContext(ctx, query)
 	if err != nil {
@@ -581,6 +589,7 @@ func (s Store) resetPendingCOSJobs(ctx context.Context) (int, error) {
 					AND co.status = 'PENDING'
 					AND us.status = 'READY_TO_UPLOAD'
 					AND `+uploadSourceStableCondition+`
+					AND `+uploadSourceReviewReadyCondition+`
 			)
 	`)
 	if err != nil {
@@ -686,6 +695,8 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 		WHERE co.id = ?
 			AND co.status IN ('PENDING', 'FAILED')
 			AND us.status = 'READY_TO_UPLOAD'
+			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
+			AND COALESCE(us.edit_decision_json, '') = ''
 			AND csp.enabled = 1
 	`, payload.COSObjectID).Scan(
 		&request.ObjectID,

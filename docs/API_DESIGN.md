@@ -626,3 +626,22 @@ Go Request/Response DTO
 - 第一版不引入通用 `Idempotency-Key` 基础设施。
 
 重复点击 retry/protect 等动作必须得到稳定结果，不产生重复 Publication/Job。
+# 2026-09-11 upload review actions
+
+- `POST /api/v1/recordings/{id}/actions/require-upload-review`
+  - Marks an active or completed recording as requiring upload review.
+  - If an upload source already contains the recording, the upload source is also marked `review_status=REQUIRED`.
+- `POST /api/v1/upload-sources/{id}/actions/require-review`
+  - Marks the parent upload source as requiring review and cancels pending remote upload jobs.
+  - Running remote upload jobs are not interrupted; the API returns not-ready when a remote upload is already running.
+- `POST /api/v1/upload-sources/{id}/actions/approve-review`
+  - Clears the review gate by setting `review_status=APPROVED`.
+  - Frozen or failed Bilibili/COS upload records and jobs for the source are reset to `PENDING`, but disabled publishing/COS profiles are not re-enabled implicitly.
+  - The normal upload reconciler is responsible for creating or running Bilibili and COS jobs after approval and after the relevant upload profile is enabled.
+- `POST /api/v1/upload-sources/{id}/actions/apply-edit`
+  - Accepts `{ "cuts": [{ "start_ms": 123000, "end_ms": 150000 }] }` in parent upload-source timeline coordinates.
+  - The source must be `READY_TO_UPLOAD`, must be waiting for review, and must not have running remote upload jobs.
+  - Stores the edit decision, queues an `APPLY_UPLOAD_SOURCE_EDIT` media job, and keeps Bilibili/COS upload blocked until the edited outputs are produced and the operator approves review.
+- `GET /api/v1/upload-sources/{id}/outputs/{output_id}/download`
+  - Streams one packaged output from local disk only while the parent upload source is waiting for review.
+  - General local upload-source downloads remain disabled; after approval and COS upload, clients should use COS signed download URLs.

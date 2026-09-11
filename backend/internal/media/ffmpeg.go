@@ -54,6 +54,27 @@ type SegmentPackageRequest struct {
 	OutputBaseName        string
 }
 
+type CutRange struct {
+	StartMs int64 `json:"start_ms"`
+	EndMs   int64 `json:"end_ms"`
+}
+
+type EditOutput struct {
+	RelativePath    string
+	SizeBytes       int64
+	DurationMs      int64
+	TimelineStartMs int64
+	TimelineEndMs   int64
+}
+
+type EditRequest struct {
+	UploadSourceID        int64
+	Outputs               []EditOutput
+	Cuts                  []CutRange
+	OutputDirRelativePath string
+	OutputBaseName        string
+}
+
 type CompressionRequest struct {
 	UploadSourceID     int64
 	InputRelativePath  string
@@ -86,6 +107,10 @@ type Merger interface {
 type Packager interface {
 	Package(ctx context.Context, req PackageRequest) (PackageResult, error)
 	PackageSegments(ctx context.Context, req SegmentPackageRequest) (PackageResult, error)
+}
+
+type Editor interface {
+	ApplyCuts(ctx context.Context, req EditRequest) (PackageResult, error)
 }
 
 type Compressor interface {
@@ -464,6 +489,131 @@ func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageReq
 	return PackageResult{Outputs: results}, nil
 }
 
+func (m FFmpegMerger) ApplyCuts(ctx context.Context, req EditRequest) (PackageResult, error) {
+	if req.UploadSourceID <= 0 || len(req.Outputs) == 0 || len(req.Cuts) == 0 {
+		return PackageResult{}, errors.New("invalid edit request")
+	}
+	cuts, err := normalizeCutRanges(req.Cuts)
+	if err != nil {
+		return PackageResult{}, err
+	}
+	outputDir := req.OutputDirRelativePath
+	if outputDir == "" {
+		outputDir = filepath.ToSlash(filepath.Join("upload-sources", fmt.Sprintf("%d", req.UploadSourceID), "edited"))
+	}
+	outputBaseName := sanitizePackageBaseName(req.OutputBaseName)
+	if outputBaseName == "" {
+		outputBaseName = fmt.Sprintf("upload-source-%d-edited", req.UploadSourceID)
+	}
+	outputDirPath, err := resolveWithinRoot(m.DataRoot, outputDir)
+	if err != nil {
+		return PackageResult{}, fmt.Errorf("resolve edit output dir: %w", err)
+	}
+	if err := os.MkdirAll(outputDirPath, 0o755); err != nil {
+		return PackageResult{}, fmt.Errorf("create edit output dir: %w", err)
+	}
+	if err := clearPackageOutputs(outputDirPath, outputBaseName); err != nil {
+		return PackageResult{}, fmt.Errorf("clear edit output dir: %w", err)
+	}
+	tempRoot := m.TempRoot
+	if tempRoot == "" {
+		tempRoot = filepath.Join(m.DataRoot, "temp")
+	}
+	workDir := filepath.Join(tempRoot, "upload-sources", fmt.Sprintf("%d", req.UploadSourceID), "edit-work")
+	if err := os.RemoveAll(workDir); err != nil {
+		return PackageResult{}, fmt.Errorf("clear edit temp dir: %w", err)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return PackageResult{}, fmt.Errorf("create edit temp dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	results := make([]PackageOutput, 0, len(req.Outputs))
+	var timeline int64
+	for index, output := range req.Outputs {
+		keeps := keepRangesForOutput(output, cuts)
+		if len(keeps) == 0 {
+			continue
+		}
+		inputPath, err := resolveWithinRoot(m.DataRoot, output.RelativePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("resolve edit input: %w", err)
+		}
+		info, err := os.Stat(inputPath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("stat edit input: %w", err)
+		}
+		if info.IsDir() {
+			return PackageResult{}, errors.New("edit input is a directory")
+		}
+		outputRelativePath := filepath.ToSlash(filepath.Join(outputDir, fmt.Sprintf("%s-p%02d.flv", outputBaseName, len(results)+1)))
+		outputPath, err := resolveWithinRoot(m.DataRoot, outputRelativePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("resolve edit output: %w", err)
+		}
+		duration, err := m.writeEditedOutput(ctx, workDir, inputPath, outputPath, index, output.DurationMs, keeps)
+		if err != nil {
+			return PackageResult{}, err
+		}
+		outputInfo, err := os.Stat(outputPath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("stat edit output: %w", err)
+		}
+		results = append(results, PackageOutput{
+			RelativePath:    outputRelativePath,
+			SizeBytes:       outputInfo.Size(),
+			DurationMs:      duration,
+			TimelineStartMs: timeline,
+			TimelineEndMs:   timeline + duration,
+		})
+		timeline += duration
+	}
+	if len(results) == 0 {
+		return PackageResult{}, errors.New("edit removed all output content")
+	}
+	return PackageResult{Outputs: results}, nil
+}
+
+func (m FFmpegMerger) writeEditedOutput(ctx context.Context, workDir string, inputPath string, outputPath string, index int, durationMs int64, keeps []CutRange) (int64, error) {
+	if len(keeps) == 1 && keeps[0].StartMs <= 0 && (durationMs <= 0 || keeps[0].EndMs >= durationMs) {
+		if err := os.Remove(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return 0, fmt.Errorf("clear edit copy output: %w", err)
+		}
+		if err := os.Link(inputPath, outputPath); err != nil {
+			if err := copyFile(inputPath, outputPath); err != nil {
+				return 0, fmt.Errorf("copy unedited output: %w", err)
+			}
+		}
+		return keeps[0].EndMs - keeps[0].StartMs, nil
+	}
+	clips := make([]string, 0, len(keeps))
+	var totalDuration int64
+	for clipIndex, keep := range keeps {
+		if keep.EndMs <= keep.StartMs {
+			continue
+		}
+		clipPath := filepath.Join(workDir, fmt.Sprintf("edit-%03d-%03d.tmp.flv", index, clipIndex))
+		if err := runFFmpegTrim(ctx, m.FFmpegPath, inputPath, clipPath, keep.StartMs, keep.EndMs); err != nil {
+			return 0, err
+		}
+		clips = append(clips, clipPath)
+		totalDuration += keep.EndMs - keep.StartMs
+	}
+	if len(clips) == 0 {
+		return 0, errors.New("edit output has no keep ranges")
+	}
+	if len(clips) == 1 {
+		if err := os.Rename(clips[0], outputPath); err != nil {
+			return 0, fmt.Errorf("move single edit output: %w", err)
+		}
+		return totalDuration, nil
+	}
+	if err := concatClipFiles(ctx, m.FFmpegPath, workDir, clips, outputPath); err != nil {
+		return 0, err
+	}
+	return totalDuration, nil
+}
+
 func (m FFmpegMerger) segmentConcat(ctx context.Context, workDir string, segments []Segment, segmentSeconds int64) error {
 	listPath := filepath.Join(workDir, "concat.txt")
 	listFile, err := os.Create(listPath)
@@ -501,6 +651,144 @@ func (m FFmpegMerger) segmentConcat(ctx context.Context, workDir string, segment
 		return fmt.Errorf("ffmpeg segment package failed: %s", message)
 	}
 	return nil
+}
+
+func runFFmpegTrim(ctx context.Context, ffmpegPath string, inputPath string, outputPath string, startMs int64, endMs int64) error {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	durationMs := endMs - startMs
+	if durationMs <= 0 {
+		return errors.New("invalid ffmpeg trim duration")
+	}
+	args := []string{
+		"-hide_banner", "-loglevel", "error",
+		"-ss", secondsArg(startMs),
+		"-i", inputPath,
+		"-t", secondsArg(durationMs),
+		"-c", "copy",
+		"-map", "0",
+		"-avoid_negative_ts", "make_zero",
+		"-y", outputPath,
+	}
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffmpeg edit trim failed: %s", message)
+	}
+	return nil
+}
+
+func concatClipFiles(ctx context.Context, ffmpegPath string, workDir string, clips []string, outputPath string) error {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	listPath := filepath.Join(workDir, "edit-concat.txt")
+	listFile, err := os.Create(listPath)
+	if err != nil {
+		return fmt.Errorf("create edit concat list: %w", err)
+	}
+	writer := bufio.NewWriter(listFile)
+	for _, clip := range clips {
+		if _, err := fmt.Fprintf(writer, "file '%s'\n", escapeConcatPath(clip)); err != nil {
+			_ = listFile.Close()
+			return fmt.Errorf("write edit concat list: %w", err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		_ = listFile.Close()
+		return fmt.Errorf("flush edit concat list: %w", err)
+	}
+	if err := listFile.Close(); err != nil {
+		return fmt.Errorf("close edit concat list: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", "-map", "0", "-y", outputPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffmpeg edit concat failed: %s", message)
+	}
+	return nil
+}
+
+func secondsArg(ms int64) string {
+	if ms <= 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%.3f", float64(ms)/1000)
+}
+
+func normalizeCutRanges(cuts []CutRange) ([]CutRange, error) {
+	normalized := make([]CutRange, 0, len(cuts))
+	for _, cut := range cuts {
+		if cut.StartMs < 0 || cut.EndMs <= cut.StartMs {
+			return nil, errors.New("invalid cut range")
+		}
+		normalized = append(normalized, cut)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		if normalized[i].StartMs == normalized[j].StartMs {
+			return normalized[i].EndMs < normalized[j].EndMs
+		}
+		return normalized[i].StartMs < normalized[j].StartMs
+	})
+	merged := make([]CutRange, 0, len(normalized))
+	for _, cut := range normalized {
+		if len(merged) == 0 || cut.StartMs > merged[len(merged)-1].EndMs {
+			merged = append(merged, cut)
+			continue
+		}
+		if cut.EndMs > merged[len(merged)-1].EndMs {
+			merged[len(merged)-1].EndMs = cut.EndMs
+		}
+	}
+	return merged, nil
+}
+
+func keepRangesForOutput(output EditOutput, cuts []CutRange) []CutRange {
+	duration := output.DurationMs
+	if duration <= 0 && output.TimelineEndMs > output.TimelineStartMs {
+		duration = output.TimelineEndMs - output.TimelineStartMs
+	}
+	if duration <= 0 {
+		return nil
+	}
+	keeps := []CutRange{{StartMs: 0, EndMs: duration}}
+	for _, cut := range cuts {
+		start := cut.StartMs - output.TimelineStartMs
+		end := cut.EndMs - output.TimelineStartMs
+		if end <= 0 || start >= duration {
+			continue
+		}
+		if start < 0 {
+			start = 0
+		}
+		if end > duration {
+			end = duration
+		}
+		next := make([]CutRange, 0, len(keeps)+1)
+		for _, keep := range keeps {
+			if end <= keep.StartMs || start >= keep.EndMs {
+				next = append(next, keep)
+				continue
+			}
+			if start > keep.StartMs {
+				next = append(next, CutRange{StartMs: keep.StartMs, EndMs: start})
+			}
+			if end < keep.EndMs {
+				next = append(next, CutRange{StartMs: end, EndMs: keep.EndMs})
+			}
+		}
+		keeps = next
+	}
+	return keeps
 }
 
 func segmentTotals(segments []Segment) (int64, int64) {

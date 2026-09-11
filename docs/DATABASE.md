@@ -842,3 +842,9 @@ upload status remains isolated in `upload_source_cos_objects`.
 使用 SQLite 安全备份方式；默认保留 7–30 份。
 
 数据库备份本身不包含媒体文件。
+# 2026-09-11 upload review gate
+
+- `recordings.upload_review_status` stores the early operator decision for an active or recently completed recording. Values: `NONE`, `REQUIRED`.
+- `upload_sources.review_status` stores the publish gate for the parent upload source. Values: `NONE`, `REQUIRED`, `APPROVED`.
+- `upload_sources.edit_decision_json` stores reviewed cut/delete decisions as parent upload-source timeline ranges. If it is non-empty, upload-source Bilibili/COS jobs must remain blocked until the `APPLY_UPLOAD_SOURCE_EDIT` media job has produced safe outputs and cleared the decision.
+- Reconcile may still merge/package an upload source while review is required, because operators need the publish parts for inspection. Bilibili publication jobs and upload-source COS video jobs must not be created or executed while `review_status = 'REQUIRED'` or `edit_decision_json` is non-empty.

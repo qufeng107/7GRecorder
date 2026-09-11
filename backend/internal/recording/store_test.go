@@ -251,6 +251,180 @@ func TestFileForDownloadRejectsWritingFile(t *testing.T) {
 	}
 }
 
+func TestUploadSourceOutputForReviewDownloadRequiresReviewGate(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	relativePath := "upload-sources/1/1/parts/review-p01.flv"
+	absolutePath := filepath.Join(cfg.DataRoot, relativePath)
+	if err := os.MkdirAll(filepath.Dir(absolutePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(absolutePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, total_bytes, recording_count,
+				file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES (1, 1, 'profile:1:1:1', 'review me', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000,
+			'READY_TO_UPLOAD', 5, 1, 1, 0, 600, CURRENT_TIMESTAMP);
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms,
+				timeline_start_ms, timeline_end_ms, status)
+		VALUES (1, 1, 0, 'upload-sources/1/1/parts/review-p01.flv', 5, 1800000,
+			0, 1800000, 'READY_TO_UPLOAD');
+	`); err != nil {
+		t.Fatalf("seed upload source returned error: %v", err)
+	}
+
+	store := NewStore(database, cfg)
+	if _, err := store.UploadSourceOutputForReviewDownload(ctx, actor, 1, 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound before review is required, got %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET review_status = 'REQUIRED', review_requested_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`); err != nil {
+		t.Fatalf("mark review required returned error: %v", err)
+	}
+	file, err := store.UploadSourceOutputForReviewDownload(ctx, actor, 1, 1)
+	if err != nil {
+		t.Fatalf("UploadSourceOutputForReviewDownload returned error: %v", err)
+	}
+	if file.AbsolutePath != absolutePath || file.OriginalName != "review-p01.flv" || file.ContentType != "video/x-flv" {
+		t.Fatalf("unexpected review download file: %#v", file)
+	}
+}
+
+func TestApproveUploadSourceReviewResetsFrozenRemoteUploads(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO credentials (id, owner_user_id, scope, platform, purpose, account_label, encrypted_secret, status)
+		VALUES
+			(1, 1, 'USER', 'bilibili', 'PUBLISHER', 'bili account', X'00', 'UNVERIFIED'),
+			(2, 1, 'USER', 'tencent_cos', 'STORAGE', 'cos account', X'00', 'UNVERIFIED');
+		INSERT INTO publishing_profiles
+			(id, recording_profile_id, platform, credential_id, enabled, settings_json)
+		VALUES (1, 1, 'bilibili', 1, 1, '{}');
+		INSERT INTO cos_storage_profiles
+			(id, recording_profile_id, credential_id, enabled, region, bucket, prefix, max_managed_bytes)
+		VALUES (1, 1, 2, 1, 'ap-shanghai', 'bucket-1250000000', '7grecorder/test/', 1000000000);
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, total_bytes, recording_count,
+				file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at, review_status)
+		VALUES (1, 1, 'profile:1:1:1', 'review me', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000,
+			'READY_TO_UPLOAD', 5, 1, 1, 0, 600, CURRENT_TIMESTAMP, 'REQUIRED');
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms,
+				timeline_start_ms, timeline_end_ms, status)
+		VALUES (1, 1, 0, 'upload-sources/1/1/parts/review-p01.flv', 5, 1800000,
+			0, 1800000, 'READY_TO_UPLOAD');
+		INSERT INTO publications
+			(id, recording_profile_id, upload_source_id, platform, credential_id, status, last_error)
+		VALUES (1, 1, 1, 'bilibili', 1, 'FAILED', 'cancelled manually: freeze for review');
+		INSERT INTO upload_source_cos_objects
+			(id, cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id,
+				object_key, size_bytes, source_size_bytes, status, last_error)
+		VALUES (1, 1, 1, 1, 1, '7grecorder/test/upload-sources/1/1/parts/review-p01.flv',
+			5, 5, 'FAILED', 'cancelled manually: freeze for review');
+		INSERT INTO jobs
+			(id, recording_profile_id, upload_source_id, publication_id, type, resource_class,
+				business_key, payload_json, status, priority, max_attempts, attempts, last_error)
+		VALUES
+			(1, 1, 1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'upload-source:1:bilibili:upload',
+				'{"publication_id":1,"upload_source_id":1}', 'CANCELLED', 80, 3, 1,
+				'cancelled manually: freeze for review'),
+			(2, 1, 1, NULL, 'UPLOAD_COS_OBJECT', 'NETWORK', 'upload-source:1:output:1:cos:1',
+				'{"cos_object_id":1,"upload_source_id":1,"output_id":1}', 'CANCELLED', 90, 5, 1,
+				'cancelled manually: freeze for review');
+	`); err != nil {
+		t.Fatalf("seed frozen upload source returned error: %v", err)
+	}
+
+	item, err := NewStore(database, cfg).ApproveUploadSourceReview(ctx, actor, 1, UploadReviewRequest{})
+	if err != nil {
+		t.Fatalf("ApproveUploadSourceReview returned error: %v", err)
+	}
+	if item.ReviewStatus != "APPROVED" {
+		t.Fatalf("expected review approved, got %#v", item)
+	}
+	var publicationStatus, cosStatus, bilibiliJobStatus, cosJobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM publications WHERE id = 1`).Scan(&publicationStatus); err != nil {
+		t.Fatalf("query publication returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM upload_source_cos_objects WHERE id = 1`).Scan(&cosStatus); err != nil {
+		t.Fatalf("query cos object returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = 1`).Scan(&bilibiliJobStatus); err != nil {
+		t.Fatalf("query bilibili job returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = 2`).Scan(&cosJobStatus); err != nil {
+		t.Fatalf("query cos job returned error: %v", err)
+	}
+	if publicationStatus != "PENDING" || cosStatus != "PENDING" || bilibiliJobStatus != "PENDING" || cosJobStatus != "PENDING" {
+		t.Fatalf("expected frozen remote uploads reset, publication=%s cos=%s bili_job=%s cos_job=%s", publicationStatus, cosStatus, bilibiliJobStatus, cosJobStatus)
+	}
+}
+
+func TestApproveUploadSourceReviewRejectsPendingEditDecision(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	_, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, total_bytes, recording_count,
+				file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at, review_status,
+				edit_decision_json)
+		VALUES (1, 1, 'profile:1:1:1', 'review me', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000,
+			'READY_TO_UPLOAD', 5, 1, 1, 0, 600, CURRENT_TIMESTAMP, 'REQUIRED',
+			'{"cuts":[{"start_ms":60000,"end_ms":120000}]}');
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms,
+				timeline_start_ms, timeline_end_ms, status)
+		VALUES (1, 1, 0, 'upload-sources/1/1/parts/review-p01.flv', 5, 1800000,
+			0, 1800000, 'READY_TO_UPLOAD');
+	`); err != nil {
+		t.Fatalf("seed upload source returned error: %v", err)
+	}
+
+	_, err = NewStore(database, cfg).ApproveUploadSourceReview(ctx, actor, 1, UploadReviewRequest{})
+	if !errors.Is(err, ErrNotReady) {
+		t.Fatalf("expected ErrNotReady, got %v", err)
+	}
+}
+
 func TestLocalStorageStatusSummarizesIndexedVideos(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

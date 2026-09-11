@@ -30,19 +30,23 @@ var (
 const gibibyte int64 = 1024 * 1024 * 1024
 
 type Recording struct {
-	ID                 int64  `json:"id"`
-	RecordingProfileID int64  `json:"recording_profile_id"`
-	ProfileName        string `json:"profile_name"`
-	RoomID             string `json:"room_id"`
-	StreamerName       string `json:"streamer_name"`
-	Title              string `json:"title,omitempty"`
-	StartedAt          string `json:"started_at"`
-	CompletedAt        string `json:"completed_at,omitempty"`
-	DurationMs         int64  `json:"duration_ms"`
-	RecordingStatus    string `json:"recording_status"`
-	LocalStorageStatus string `json:"local_storage_status"`
-	LocalProtected     bool   `json:"local_protected"`
-	Files              []File `json:"files"`
+	ID                       int64  `json:"id"`
+	RecordingProfileID       int64  `json:"recording_profile_id"`
+	ProfileName              string `json:"profile_name"`
+	RoomID                   string `json:"room_id"`
+	StreamerName             string `json:"streamer_name"`
+	Title                    string `json:"title,omitempty"`
+	StartedAt                string `json:"started_at"`
+	CompletedAt              string `json:"completed_at,omitempty"`
+	DurationMs               int64  `json:"duration_ms"`
+	RecordingStatus          string `json:"recording_status"`
+	LocalStorageStatus       string `json:"local_storage_status"`
+	LocalProtected           bool   `json:"local_protected"`
+	UploadReviewStatus       string `json:"upload_review_status"`
+	UploadReviewRequestedAt  string `json:"upload_review_requested_at,omitempty"`
+	UploadReviewCompletedAt  string `json:"upload_review_completed_at,omitempty"`
+	UploadReviewNotes        string `json:"upload_review_notes,omitempty"`
+	Files                    []File `json:"files"`
 }
 
 type RecordingGroup struct {
@@ -99,6 +103,11 @@ type UploadSource struct {
 	MetadataJSON             string                `json:"metadata_json,omitempty"`
 	ReadyAt                  string                `json:"ready_at,omitempty"`
 	LastError                string                `json:"last_error,omitempty"`
+	ReviewStatus             string                `json:"review_status"`
+	ReviewRequestedAt        string                `json:"review_requested_at,omitempty"`
+	ReviewCompletedAt        string                `json:"review_completed_at,omitempty"`
+	ReviewNotes              string                `json:"review_notes,omitempty"`
+	EditDecisionJSON         string                `json:"edit_decision_json,omitempty"`
 	BilibiliStatus           string                `json:"bilibili_status"`
 	COSStatus                string                `json:"cos_status"`
 	Segments                 []UploadSourceSegment `json:"segments"`
@@ -138,6 +147,14 @@ type UploadSourceOutput struct {
 	COSUploadedSizeBytes int64  `json:"cos_uploaded_size_bytes,omitempty"`
 	COSCompressionStatus string `json:"cos_compression_status,omitempty"`
 	COSCompressionPreset string `json:"cos_compression_preset,omitempty"`
+}
+
+type UploadSourceOutputDownload struct {
+	RelativePath  string
+	AbsolutePath  string
+	OriginalName  string
+	ContentType   string
+	ContentLength int64
 }
 
 type UploadSourceList struct {
@@ -184,6 +201,20 @@ type UploadSourceRepairResult struct {
 	PackageJobsReset          int `json:"package_jobs_reset"`
 	SourceMissingBlocks       int `json:"source_missing_blocks"`
 	BilibiliPublicationsReset int `json:"bilibili_publications_reset"`
+}
+
+type UploadReviewRequest struct {
+	Notes            string `json:"notes"`
+	EditDecisionJSON string `json:"edit_decision_json"`
+}
+
+type UploadSourceEditRequest struct {
+	Notes string           `json:"notes"`
+	Cuts  []media.CutRange `json:"cuts"`
+}
+
+type uploadSourceEditDecision struct {
+	Cuts []media.CutRange `json:"cuts"`
 }
 
 type File struct {
@@ -283,7 +314,9 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 	query := `
 		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
-			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected,
+			COALESCE(rec.upload_review_status, 'NONE'), COALESCE(rec.upload_review_requested_at, ''),
+			COALESCE(rec.upload_review_completed_at, ''), COALESCE(rec.upload_review_notes, '')
 		FROM recordings rec
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
 	`
@@ -317,6 +350,10 @@ func (s Store) List(ctx context.Context, actor account.User) ([]Recording, error
 			&item.RecordingStatus,
 			&item.LocalStorageStatus,
 			&localProtected,
+			&item.UploadReviewStatus,
+			&item.UploadReviewRequestedAt,
+			&item.UploadReviewCompletedAt,
+			&item.UploadReviewNotes,
 		); err != nil {
 			return nil, fmt.Errorf("scan recording: %w", err)
 		}
@@ -530,7 +567,11 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 			) THEN 1 ELSE 0 END,
 			us.recording_count, us.file_count, us.max_gap_seconds, us.merge_gap_threshold_seconds,
 			COALESCE(us.metadata_json, ''), COALESCE(us.ready_at, ''), COALESCE(us.last_error, ''),
+			COALESCE(us.review_status, 'NONE'), COALESCE(us.review_requested_at, ''),
+			COALESCE(us.review_completed_at, ''), COALESCE(us.review_notes, ''),
+			COALESCE(us.edit_decision_json, ''),
 			CASE
+				WHEN COALESCE(us.review_status, 'NONE') = 'REQUIRED' OR COALESCE(us.edit_decision_json, '') != '' THEN 'WAITING_REVIEW'
 				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status = 'FAILED') THEN 'FAILED'
 				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status IN ('UPLOADING', 'VERIFYING')) THEN 'UPLOADING'
 				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status = 'VERIFIED') THEN 'VERIFIED'
@@ -539,6 +580,7 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 				ELSE 'DISABLED'
 			END,
 			CASE
+				WHEN COALESCE(us.review_status, 'NONE') = 'REQUIRED' OR COALESCE(us.edit_decision_json, '') != '' THEN 'WAITING_REVIEW'
 				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD')
 					AND NOT EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
 						SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'AVAILABLE'
@@ -608,6 +650,11 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 			&item.MetadataJSON,
 			&item.ReadyAt,
 			&item.LastError,
+			&item.ReviewStatus,
+			&item.ReviewRequestedAt,
+			&item.ReviewCompletedAt,
+			&item.ReviewNotes,
+			&item.EditDecisionJSON,
 			&item.BilibiliStatus,
 			&item.COSStatus,
 		); err != nil {
@@ -1006,6 +1053,19 @@ func recordingsFromUploadSourceGroup(sources []UploadSource) []Recording {
 	return recordings
 }
 
+func uploadReviewStateForRecordings(recordings []Recording) (string, string, string) {
+	for _, item := range recordings {
+		if item.UploadReviewStatus == "REQUIRED" {
+			requestedAt := item.UploadReviewRequestedAt
+			if strings.TrimSpace(requestedAt) == "" {
+				requestedAt = time.Now().UTC().Format(time.RFC3339)
+			}
+			return "REQUIRED", requestedAt, item.UploadReviewNotes
+		}
+	}
+	return "NONE", "", ""
+}
+
 func (s Store) hasRunningUploadSourceJobs(ctx context.Context, sourceIDs []int64) (bool, error) {
 	for _, id := range sourceIDs {
 		var count int
@@ -1022,6 +1082,20 @@ func (s Store) hasRunningUploadSourceJobs(ctx context.Context, sourceIDs []int64
 		}
 	}
 	return false, nil
+}
+
+func (s Store) hasRunningRemoteUploadJobs(ctx context.Context, uploadSourceID int64) (bool, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM jobs
+		WHERE upload_source_id = ?
+			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
+			AND status = 'RUNNING'
+	`, uploadSourceID).Scan(&count); err != nil {
+		return false, fmt.Errorf("check running remote upload jobs: %w", err)
+	}
+	return count > 0, nil
 }
 
 func (s Store) hasBilibiliPublications(ctx context.Context, sourceIDs []int64) (bool, error) {
@@ -1482,6 +1556,63 @@ func cancelPendingUploadJobsTx(ctx context.Context, tx *sql.Tx, uploadSourceID i
 	return int(changed), nil
 }
 
+func cancelPendingUploadJobsForReviewTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) (int, error) {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'CANCELLED',
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error = 'upload source is waiting for review',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
+			AND status IN ('PENDING', 'FAILED')
+	`, uploadSourceID)
+	if err != nil {
+		return 0, fmt.Errorf("cancel pending upload jobs for review: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read review-cancelled upload job count: %w", err)
+	}
+	return int(changed), nil
+}
+
+func enqueueUploadSourceEditJobTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) error {
+	payload, err := json.Marshal(map[string]int64{"upload_source_id": uploadSourceID})
+	if err != nil {
+		return fmt.Errorf("encode upload source edit payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO jobs
+			(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT recording_profile_id, id, 'APPLY_UPLOAD_SOURCE_EDIT', 'MEDIA', ?, ?, 'PENDING', 70, 3
+		FROM upload_sources
+		WHERE id = ?
+	`, fmt.Sprintf("upload-source:%d:edit", uploadSourceID), string(payload), uploadSourceID); err != nil {
+		return fmt.Errorf("enqueue upload source edit job: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING',
+			attempts = 0,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND type = 'APPLY_UPLOAD_SOURCE_EDIT'
+			AND status != 'RUNNING'
+	`, uploadSourceID); err != nil {
+		return fmt.Errorf("reset upload source edit job: %w", err)
+	}
+	return nil
+}
+
 func resetSourceMissingPublicationsTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) (int, error) {
 	result, err := tx.ExecContext(ctx, `
 		UPDATE publications
@@ -1506,7 +1637,9 @@ func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
-			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected,
+			COALESCE(rec.upload_review_status, 'NONE'), COALESCE(rec.upload_review_requested_at, ''),
+			COALESCE(rec.upload_review_completed_at, ''), COALESCE(rec.upload_review_notes, '')
 		FROM recordings rec
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
 		JOIN recording_profile_runtime rt ON rt.recording_profile_id = rec.recording_profile_id
@@ -1550,6 +1683,10 @@ func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) 
 			&item.RecordingStatus,
 			&item.LocalStorageStatus,
 			&localProtected,
+			&item.UploadReviewStatus,
+			&item.UploadReviewRequestedAt,
+			&item.UploadReviewCompletedAt,
+			&item.UploadReviewNotes,
 		); err != nil {
 			return nil, fmt.Errorf("scan upload source candidate: %w", err)
 		}
@@ -1699,17 +1836,19 @@ func insertUploadSourceTx(ctx context.Context, tx *sql.Tx, recordings []Recordin
 	if err != nil {
 		return false, fmt.Errorf("encode upload source metadata: %w", err)
 	}
+	reviewStatus, reviewRequestedAt, reviewNotes := uploadReviewStateForRecordings(recordings)
 
 	result, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO upload_sources
 			(recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
 				started_at, completed_at, duration_ms, status, output_relative_path, output_recording_file_id,
 				total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds,
-				metadata_json, ready_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+				metadata_json, ready_at, review_status, review_requested_at, review_notes)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''))
 	`, first.RecordingProfileID, sourceKey, first.Title, first.RoomID, first.StreamerName,
 		summary.StartedAt, summary.CompletedAt, summary.DurationMs, status, outputRelativePath, outputRecordingFileID,
-		summary.TotalBytes, len(recordings), summary.FileCount, summary.MaxGapSeconds, thresholdSeconds, string(metadata), readyAt)
+		summary.TotalBytes, len(recordings), summary.FileCount, summary.MaxGapSeconds, thresholdSeconds, string(metadata), readyAt,
+		reviewStatus, reviewRequestedAt, reviewNotes)
 	if err != nil {
 		return false, fmt.Errorf("insert upload source: %w", err)
 	}
@@ -1791,6 +1930,44 @@ func (s Store) UploadSourceForPackage(ctx context.Context, id int64) (UploadSour
 		return UploadSource{}, ErrNotFound
 	}
 	return items[0], nil
+}
+
+func (s Store) UploadSourceForEdit(ctx context.Context, id int64) (UploadSource, []media.CutRange, error) {
+	if id <= 0 {
+		return UploadSource{}, nil, ErrValidation
+	}
+	items, err := s.uploadSourcesByID(ctx, id, nil)
+	if err != nil {
+		return UploadSource{}, nil, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, nil, ErrNotFound
+	}
+	source := items[0]
+	if source.Status != "READY_TO_UPLOAD" {
+		return UploadSource{}, nil, ErrNotReady
+	}
+	if source.ReviewStatus != "REQUIRED" {
+		return UploadSource{}, nil, ErrNotReady
+	}
+	decision, err := parseUploadSourceEditDecision(source.EditDecisionJSON)
+	if err != nil {
+		return UploadSource{}, nil, err
+	}
+	if len(decision.Cuts) == 0 {
+		return UploadSource{}, nil, ErrNotReady
+	}
+	readyOutputs := make([]UploadSourceOutput, 0, len(source.Outputs))
+	for _, output := range source.Outputs {
+		if output.Status == "READY_TO_UPLOAD" {
+			readyOutputs = append(readyOutputs, output)
+		}
+	}
+	if len(readyOutputs) == 0 {
+		return UploadSource{}, nil, ErrNotReady
+	}
+	source.Outputs = readyOutputs
+	return source, decision.Cuts, nil
 }
 
 func (s Store) UploadSourcePackageBaseName(ctx context.Context, source UploadSource) (string, error) {
@@ -2028,6 +2205,276 @@ func (s Store) MarkUploadSourcePackageFailed(ctx context.Context, id int64, term
 	return nil
 }
 
+func (s Store) SaveUploadSourceEditDecision(ctx context.Context, actor account.User, uploadSourceID int64, req UploadSourceEditRequest) (UploadSource, error) {
+	if uploadSourceID <= 0 {
+		return UploadSource{}, ErrValidation
+	}
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return UploadSource{}, err
+	}
+	decision, err := buildUploadSourceEditDecision(req.Cuts)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	encoded, err := json.Marshal(decision)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("encode upload source edit decision: %w", err)
+	}
+	if running, err := s.hasRunningRemoteUploadJobs(ctx, uploadSourceID); err != nil {
+		return UploadSource{}, err
+	} else if running {
+		return UploadSource{}, ErrNotReady
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("begin upload source edit decision: %w", err)
+	}
+	defer tx.Rollback()
+	query := `
+		UPDATE upload_sources
+		SET review_status = 'REQUIRED',
+			review_requested_at = COALESCE(review_requested_at, CURRENT_TIMESTAMP),
+			review_completed_at = NULL,
+			review_notes = COALESCE(NULLIF(?, ''), review_notes),
+			edit_decision_json = ?,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+			AND status = 'READY_TO_UPLOAD'
+	`
+	args := []interface{}{strings.TrimSpace(req.Notes), string(encoded), uploadSourceID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += `
+			AND recording_profile_id IN (
+				SELECT id FROM recording_profiles WHERE owner_user_id = ?
+			)
+		`
+		args = append(args, actor.ID)
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("save upload source edit decision: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("read upload source edit decision update count: %w", err)
+	}
+	if affected == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	if _, err := cancelPendingUploadJobsForReviewTx(ctx, tx, uploadSourceID); err != nil {
+		return UploadSource{}, err
+	}
+	if err := enqueueUploadSourceEditJobTx(ctx, tx, uploadSourceID); err != nil {
+		return UploadSource{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UploadSource{}, fmt.Errorf("commit upload source edit decision: %w", err)
+	}
+	items, err := s.uploadSourcesByID(ctx, uploadSourceID, &actor)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	return items[0], nil
+}
+
+func (s Store) MarkUploadSourceEditSucceeded(ctx context.Context, id int64, outputs []media.PackageOutput) error {
+	if id <= 0 || len(outputs) == 0 {
+		return ErrValidation
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin upload source edit success: %w", err)
+	}
+	defer tx.Rollback()
+	var totalBytes int64
+	var totalDurationMs int64
+	for index, output := range outputs {
+		if output.RelativePath == "" || output.SizeBytes < 0 || output.DurationMs < 0 {
+			return ErrValidation
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO upload_source_outputs
+				(upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'READY_TO_UPLOAD')
+			ON CONFLICT(upload_source_id, sort_order) DO UPDATE SET
+				relative_path = excluded.relative_path,
+				size_bytes = excluded.size_bytes,
+				duration_ms = excluded.duration_ms,
+				timeline_start_ms = excluded.timeline_start_ms,
+				timeline_end_ms = excluded.timeline_end_ms,
+				status = 'READY_TO_UPLOAD',
+				updated_at = CURRENT_TIMESTAMP
+		`, id, index, output.RelativePath, output.SizeBytes, output.DurationMs, output.TimelineStartMs, output.TimelineEndMs); err != nil {
+			return fmt.Errorf("upsert edited upload source output: %w", err)
+		}
+		totalBytes += output.SizeBytes
+		totalDurationMs += output.DurationMs
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_source_outputs
+		SET status = 'SOURCE_MISSING',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND sort_order >= ?
+			AND status = 'READY_TO_UPLOAD'
+	`, id, len(outputs)); err != nil {
+		return fmt.Errorf("mark stale edited upload source outputs missing: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET total_bytes = ?,
+			duration_ms = CASE WHEN ? > 0 THEN ? ELSE duration_ms END,
+			edit_decision_json = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+			AND review_status = 'REQUIRED'
+			AND status = 'READY_TO_UPLOAD'
+	`, totalBytes, totalDurationMs, totalDurationMs, id); err != nil {
+		return fmt.Errorf("mark upload source edit succeeded: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE publications
+		SET status = 'PENDING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND platform = 'bilibili'
+			AND status IN ('PENDING', 'FAILED', 'UPLOADING', 'VERIFYING', 'SOURCE_MISSING')
+	`, id); err != nil {
+		return fmt.Errorf("reset bilibili publication after edit: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET object_key = (
+				SELECT csp.prefix || uso.relative_path
+				FROM upload_source_outputs uso
+				JOIN cos_storage_profiles csp ON csp.id = upload_source_cos_objects.cos_storage_profile_id
+				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
+			),
+			size_bytes = (
+				SELECT uso.size_bytes
+				FROM upload_source_outputs uso
+				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
+			),
+			source_size_bytes = (
+				SELECT uso.size_bytes
+				FROM upload_source_outputs uso
+				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
+			),
+			compression_status = ?,
+			compression_preset = NULLIF(?, ''),
+			compressed_from_relative_path = NULL,
+			checksum = NULL,
+			etag = NULL,
+			uploaded_at = NULL,
+			status = 'PENDING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND upload_source_output_id IS NOT NULL
+			AND upload_source_output_id IN (
+				SELECT id FROM upload_source_outputs WHERE upload_source_id = ? AND status = 'READY_TO_UPLOAD'
+			)
+	`, cosCompressionInitialStatus(s.cfg), cosCompressionInitialPreset(s.cfg), id, id); err != nil {
+		return fmt.Errorf("reset cos objects after edit: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'CANCELLED',
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error = 'waiting for review approval after edit',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
+			AND status IN ('PENDING', 'FAILED', 'CANCELLED')
+	`, id); err != nil {
+		return fmt.Errorf("hold upload jobs after edit: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit upload source edit success: %w", err)
+	}
+	return nil
+}
+
+func (s Store) MarkUploadSourceEditFailed(ctx context.Context, id int64, message string) error {
+	if id <= 0 {
+		return ErrValidation
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET last_error = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+			AND review_status = 'REQUIRED'
+	`, message, id)
+	if err != nil {
+		return fmt.Errorf("mark upload source edit failed: %w", err)
+	}
+	return nil
+}
+
+func buildUploadSourceEditDecision(cuts []media.CutRange) (uploadSourceEditDecision, error) {
+	if len(cuts) == 0 {
+		return uploadSourceEditDecision{}, ErrValidation
+	}
+	normalized := make([]media.CutRange, 0, len(cuts))
+	for _, cut := range cuts {
+		if cut.StartMs < 0 || cut.EndMs <= cut.StartMs {
+			return uploadSourceEditDecision{}, ErrValidation
+		}
+		normalized = append(normalized, cut)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		if normalized[i].StartMs == normalized[j].StartMs {
+			return normalized[i].EndMs < normalized[j].EndMs
+		}
+		return normalized[i].StartMs < normalized[j].StartMs
+	})
+	merged := make([]media.CutRange, 0, len(normalized))
+	for _, cut := range normalized {
+		if len(merged) == 0 || cut.StartMs > merged[len(merged)-1].EndMs {
+			merged = append(merged, cut)
+			continue
+		}
+		if cut.EndMs > merged[len(merged)-1].EndMs {
+			merged[len(merged)-1].EndMs = cut.EndMs
+		}
+	}
+	return uploadSourceEditDecision{Cuts: merged}, nil
+}
+
+func parseUploadSourceEditDecision(value string) (uploadSourceEditDecision, error) {
+	if strings.TrimSpace(value) == "" {
+		return uploadSourceEditDecision{}, nil
+	}
+	var decision uploadSourceEditDecision
+	if err := json.Unmarshal([]byte(value), &decision); err != nil {
+		return uploadSourceEditDecision{}, fmt.Errorf("decode upload source edit decision: %w", err)
+	}
+	return buildUploadSourceEditDecision(decision.Cuts)
+}
+
+func cosCompressionInitialStatus(cfg config.Config) string {
+	if cfg.COSCompressionEnabled {
+		return "PENDING"
+	}
+	return "DISABLED"
+}
+
+func cosCompressionInitialPreset(cfg config.Config) string {
+	if cfg.COSCompressionEnabled {
+		return strings.TrimSpace(cfg.COSCompressionPreset)
+	}
+	return ""
+}
+
 type uploadSourceMetadata struct {
 	RecordingProfileID       int64                         `json:"recording_profile_id"`
 	ProfileName              string                        `json:"profile_name"`
@@ -2198,6 +2645,7 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 			uso.timeline_end_ms,
 			uso.status,
 			CASE
+				WHEN EXISTS (SELECT 1 FROM upload_sources us WHERE us.id = uso.upload_source_id AND (COALESCE(us.review_status, 'NONE') = 'REQUIRED' OR COALESCE(us.edit_decision_json, '') != '')) THEN 'WAITING_REVIEW'
 				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED') THEN 'VERIFIED'
 				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status IN ('UPLOADING', 'VERIFYING')) THEN 'UPLOADING'
 				WHEN EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'FAILED') THEN 'FAILED'
@@ -2207,6 +2655,7 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 			END,
 			COALESCE((SELECT pub.external_url FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED' ORDER BY pub.updated_at DESC, pub.id DESC LIMIT 1), ''),
 			CASE
+				WHEN EXISTS (SELECT 1 FROM upload_sources us WHERE us.id = uso.upload_source_id AND (COALESCE(us.review_status, 'NONE') = 'REQUIRED' OR COALESCE(us.edit_decision_json, '') != '')) THEN 'WAITING_REVIEW'
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'AVAILABLE') THEN 'AVAILABLE'
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'UPLOADING') THEN 'UPLOADING'
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'PENDING') THEN 'PENDING'
@@ -2789,11 +3238,256 @@ func (s Store) SetLocalProtected(ctx context.Context, actor account.User, record
 	return s.get(ctx, actor, recordingID)
 }
 
+func (s Store) RequireRecordingUploadReview(ctx context.Context, actor account.User, recordingID int64, req UploadReviewRequest) (Recording, error) {
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return Recording{}, err
+	}
+	query := `
+		UPDATE recordings
+		SET upload_review_status = 'REQUIRED',
+			upload_review_requested_at = CURRENT_TIMESTAMP,
+			upload_review_completed_at = NULL,
+			upload_review_notes = NULLIF(?, ''),
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+			AND local_deleted_at IS NULL
+	`
+	args := []interface{}{strings.TrimSpace(req.Notes), recordingID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += `
+			AND recording_profile_id IN (
+				SELECT id FROM recording_profiles WHERE owner_user_id = ?
+			)
+		`
+		args = append(args, actor.ID)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return Recording{}, fmt.Errorf("require recording upload review: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Recording{}, fmt.Errorf("read recording upload review update count: %w", err)
+	}
+	if affected == 0 {
+		return Recording{}, ErrNotFound
+	}
+	if err := s.requireReviewForRecordingUploadSources(ctx, actor, recordingID, req); err != nil {
+		return Recording{}, err
+	}
+	return s.get(ctx, actor, recordingID)
+}
+
+func (s Store) RequireUploadSourceReview(ctx context.Context, actor account.User, uploadSourceID int64, req UploadReviewRequest) (UploadSource, error) {
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return UploadSource{}, err
+	}
+	if running, err := s.hasRunningRemoteUploadJobs(ctx, uploadSourceID); err != nil {
+		return UploadSource{}, err
+	} else if running {
+		return UploadSource{}, ErrNotReady
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("begin upload source review: %w", err)
+	}
+	defer tx.Rollback()
+	query := `
+		UPDATE upload_sources
+		SET review_status = 'REQUIRED',
+			review_requested_at = CURRENT_TIMESTAMP,
+			review_completed_at = NULL,
+			review_notes = NULLIF(?, ''),
+			edit_decision_json = NULLIF(?, ''),
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+	args := []interface{}{strings.TrimSpace(req.Notes), strings.TrimSpace(req.EditDecisionJSON), uploadSourceID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += `
+			AND recording_profile_id IN (
+				SELECT id FROM recording_profiles WHERE owner_user_id = ?
+			)
+		`
+		args = append(args, actor.ID)
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("require upload source review: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("read upload source review update count: %w", err)
+	}
+	if affected == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	if _, err := cancelPendingUploadJobsForReviewTx(ctx, tx, uploadSourceID); err != nil {
+		return UploadSource{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UploadSource{}, fmt.Errorf("commit upload source review: %w", err)
+	}
+	items, err := s.uploadSourcesByID(ctx, uploadSourceID, &actor)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	return items[0], nil
+}
+
+func (s Store) ApproveUploadSourceReview(ctx context.Context, actor account.User, uploadSourceID int64, req UploadReviewRequest) (UploadSource, error) {
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return UploadSource{}, err
+	}
+	if strings.TrimSpace(req.EditDecisionJSON) != "" {
+		return UploadSource{}, ErrValidation
+	}
+	existing, err := s.uploadSourcesByID(ctx, uploadSourceID, &actor)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(existing) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	if strings.TrimSpace(existing[0].EditDecisionJSON) != "" {
+		return UploadSource{}, ErrNotReady
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("begin upload source review approval: %w", err)
+	}
+	defer tx.Rollback()
+	query := `
+		UPDATE upload_sources
+		SET review_status = 'APPROVED',
+			review_completed_at = CURRENT_TIMESTAMP,
+			review_notes = COALESCE(NULLIF(?, ''), review_notes),
+			edit_decision_json = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+	args := []interface{}{strings.TrimSpace(req.Notes), uploadSourceID}
+	if actor.Role != account.RoleSuperAdmin {
+		query += `
+			AND recording_profile_id IN (
+				SELECT id FROM recording_profiles WHERE owner_user_id = ?
+			)
+		`
+		args = append(args, actor.ID)
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("approve upload source review: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return UploadSource{}, fmt.Errorf("read upload source review approval count: %w", err)
+	}
+	if affected == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	if err := resetRemoteUploadsForReviewApprovalTx(ctx, tx, uploadSourceID); err != nil {
+		return UploadSource{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UploadSource{}, fmt.Errorf("commit upload source review approval: %w", err)
+	}
+	items, err := s.uploadSourcesByID(ctx, uploadSourceID, &actor)
+	if err != nil {
+		return UploadSource{}, err
+	}
+	if len(items) == 0 {
+		return UploadSource{}, ErrNotFound
+	}
+	return items[0], nil
+}
+
+func resetRemoteUploadsForReviewApprovalTx(ctx context.Context, tx *sql.Tx, uploadSourceID int64) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE publications
+		SET status = 'PENDING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND platform = 'bilibili'
+			AND status IN ('PENDING', 'FAILED', 'UPLOADING', 'VERIFYING')
+	`, uploadSourceID); err != nil {
+		return fmt.Errorf("reset bilibili publication after review approval: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET status = 'PENDING',
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND upload_source_output_id IS NOT NULL
+			AND status IN ('PENDING', 'FAILED', 'SOURCE_MISSING', 'UPLOADING')
+	`, uploadSourceID); err != nil {
+		return fmt.Errorf("reset cos objects after review approval: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING',
+			attempts = 0,
+			run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL,
+			heartbeat_at = NULL,
+			locked_by = NULL,
+			last_error_class = NULL,
+			last_error = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE upload_source_id = ?
+			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
+			AND status IN ('FAILED', 'CANCELLED')
+	`, uploadSourceID); err != nil {
+		return fmt.Errorf("reset upload jobs after review approval: %w", err)
+	}
+	return nil
+}
+
+func (s Store) requireReviewForRecordingUploadSources(ctx context.Context, actor account.User, recordingID int64, req UploadReviewRequest) error {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT us.id
+		FROM upload_sources us
+		JOIN upload_source_segments uss ON uss.upload_source_id = us.id
+		JOIN recording_profiles p ON p.id = us.recording_profile_id
+		WHERE uss.recording_id = ?
+			AND us.status != 'REPLACED'
+			AND (? = 1 OR p.owner_user_id = ?)
+	`, recordingID, boolInt(actor.Role == account.RoleSuperAdmin), actor.ID)
+	if err != nil {
+		return fmt.Errorf("list upload sources for recording review: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan upload source for recording review: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate upload sources for recording review: %w", err)
+	}
+	for _, id := range ids {
+		if _, err := s.RequireUploadSourceReview(ctx, actor, id, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s Store) get(ctx context.Context, actor account.User, recordingID int64) (Recording, error) {
 	query := `
 		SELECT rec.id, rec.recording_profile_id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			COALESCE(rec.title, ''), rec.started_at, COALESCE(rec.completed_at, ''),
-			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected
+			COALESCE(rec.duration_ms, 0), rec.recording_status, rec.local_storage_status, rec.local_protected,
+			COALESCE(rec.upload_review_status, 'NONE'), COALESCE(rec.upload_review_requested_at, ''),
+			COALESCE(rec.upload_review_completed_at, ''), COALESCE(rec.upload_review_notes, '')
 		FROM recordings rec
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
 		WHERE rec.id = ?
@@ -2819,6 +3513,10 @@ func (s Store) get(ctx context.Context, actor account.User, recordingID int64) (
 		&item.RecordingStatus,
 		&item.LocalStorageStatus,
 		&localProtected,
+		&item.UploadReviewStatus,
+		&item.UploadReviewRequestedAt,
+		&item.UploadReviewCompletedAt,
+		&item.UploadReviewNotes,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Recording{}, ErrNotFound
@@ -2940,6 +3638,65 @@ func (s Store) FileForDownload(ctx context.Context, actor account.User, fileID i
 	return item, nil
 }
 
+func (s Store) UploadSourceOutputForReviewDownload(ctx context.Context, actor account.User, uploadSourceID int64, outputID int64) (UploadSourceOutputDownload, error) {
+	if uploadSourceID <= 0 || outputID <= 0 {
+		return UploadSourceOutputDownload{}, ErrValidation
+	}
+	if err := s.ensureCanManageLocalFiles(ctx, actor); err != nil {
+		return UploadSourceOutputDownload{}, err
+	}
+	query := `
+		SELECT uso.relative_path,
+			COALESCE(uso.size_bytes, 0),
+			p.owner_user_id
+		FROM upload_source_outputs uso
+		JOIN upload_sources us ON us.id = uso.upload_source_id
+		JOIN recording_profiles p ON p.id = us.recording_profile_id
+		WHERE us.id = ?
+			AND uso.id = ?
+			AND us.review_status = 'REQUIRED'
+			AND uso.status = 'READY_TO_UPLOAD'
+	`
+	var relativePath string
+	var sizeBytes int64
+	var ownerUserID int64
+	err := s.db.QueryRowContext(ctx, query, uploadSourceID, outputID).Scan(&relativePath, &sizeBytes, &ownerUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UploadSourceOutputDownload{}, ErrNotFound
+	}
+	if err != nil {
+		return UploadSourceOutputDownload{}, fmt.Errorf("lookup upload source output for review download: %w", err)
+	}
+	if actor.Role != account.RoleSuperAdmin && ownerUserID != actor.ID {
+		return UploadSourceOutputDownload{}, ErrForbidden
+	}
+	absolutePath, err := resolveWithinRoot(s.cfg.DataRoot, relativePath)
+	if err != nil {
+		return UploadSourceOutputDownload{}, err
+	}
+	info, err := os.Stat(absolutePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return UploadSourceOutputDownload{}, ErrNotReady
+	}
+	if err != nil {
+		return UploadSourceOutputDownload{}, fmt.Errorf("stat upload source output: %w", err)
+	}
+	if info.IsDir() {
+		return UploadSourceOutputDownload{}, ErrNotReady
+	}
+	if sizeBytes <= 0 {
+		sizeBytes = info.Size()
+	}
+	originalName := filepath.Base(relativePath)
+	return UploadSourceOutputDownload{
+		RelativePath:  relativePath,
+		AbsolutePath:  absolutePath,
+		OriginalName:  originalName,
+		ContentType:   recordingContentTypeName(originalName),
+		ContentLength: sizeBytes,
+	}, nil
+}
+
 func (s Store) ensureCanManageLocalFiles(ctx context.Context, actor account.User) error {
 	if actor.Role != account.RoleManager {
 		return nil
@@ -2952,6 +3709,19 @@ func (s Store) ensureCanManageLocalFiles(ctx context.Context, actor account.User
 		return ErrForbidden
 	}
 	return nil
+}
+
+func recordingContentTypeName(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".flv":
+		return "video/x-flv"
+	case ".mp4":
+		return "video/mp4"
+	case ".mkv":
+		return "video/x-matroska"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func (s Store) files(ctx context.Context, recordingID int64) ([]File, error) {
