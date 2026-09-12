@@ -343,12 +343,18 @@ AND credential/bucket/region configured
 
 COS 优先对 `READY_TO_UPLOAD` Upload Source 自动上传，和 Bilibili 共享同一份可上传视频边界。
 
-COS 可以在上传前对每个发布分片生成压缩派生文件。默认压缩应使用受控、稳定、兼容性高的 FFmpeg preset
-（例如 H.264/AAC MP4 + CRF 23），并在上传前用 ffprobe 校验。压缩不得覆盖原始录播或发布分片；压缩失败只影响
-COS 对象，不影响 Bilibili 投稿和本地录制状态。
+COS 直接上传每个发布分片的原始文件，不做视频转码，也不生成 ZIP 或其他压缩包。COS 上传失败只影响 COS 对象，
+不影响 Bilibili 投稿和本地录制状态。
 
-COS 压缩必须限制 FFmpeg 视频编码线程，默认最多使用 2 个线程，为管理后台和正在运行的录制预留 CPU。该限制只
-作用于 COS 派生压缩，不改变 BililiveRecorder、发布分片封装或审核剪辑行为。
+新建发布视频对象使用便于人工浏览的目录：
+
+```text
+<configured-prefix>/videos/<YYYY-MM-DD>/session-<NN>/p<NN>.<source-format>
+```
+
+日期和场次按 Upload Source 的中国时区开始时间计算，分片序号按当前 output manifest 的稳定顺序计算。COS key
+不得继续镜像本地 `upload-sources/<profile-id>/<source-id>/...` 内部路径。已经登记的历史 FLV/MP4 对象保持原 key
+和原格式，不自动复制、移动、重命名或删除。Bilibili 和 COS 可以读取同一个原始发布分片，但各自维护独立状态。
 
 Bilibili 多 P 投稿使用简短、稳定的分 P 名 `p01`、`p02`、`p03`……。该展示名只属于 Bilibili Adapter，
 不得重命名本地发布分片、改变数据库相对路径或改变 COS object key。

@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -76,20 +75,6 @@ type EditRequest struct {
 	OutputBaseName        string
 }
 
-type CompressionRequest struct {
-	UploadSourceID     int64
-	InputRelativePath  string
-	OutputRelativePath string
-	Preset             string
-	Threads            int64
-}
-
-type CompressionResult struct {
-	RelativePath string
-	SizeBytes    int64
-	Preset       string
-}
-
 type PackageOutput struct {
 	RelativePath    string
 	SizeBytes       int64
@@ -113,10 +98,6 @@ type Packager interface {
 
 type Editor interface {
 	ApplyCuts(ctx context.Context, req EditRequest) (PackageResult, error)
-}
-
-type Compressor interface {
-	Compress(ctx context.Context, req CompressionRequest) (CompressionResult, error)
 }
 
 type FFmpegMerger struct {
@@ -838,102 +819,6 @@ func estimatedPartBytes(sizeBytes int64, durationMs int64, segmentSeconds int64)
 		return 0
 	}
 	return int64(float64(sizeBytes) * float64(segmentSeconds*1000) / float64(durationMs))
-}
-
-func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (CompressionResult, error) {
-	if req.UploadSourceID <= 0 || req.InputRelativePath == "" || req.OutputRelativePath == "" {
-		return CompressionResult{}, errors.New("invalid compression request")
-	}
-	preset := strings.TrimSpace(req.Preset)
-	if preset == "" {
-		preset = "h264_crf23_medium_mp4"
-	}
-	if preset != "h264_crf23_medium_mp4" {
-		return CompressionResult{}, fmt.Errorf("unsupported compression preset: %s", preset)
-	}
-	inputPath, err := resolveWithinRoot(m.DataRoot, req.InputRelativePath)
-	if err != nil {
-		return CompressionResult{}, fmt.Errorf("resolve compression input: %w", err)
-	}
-	info, err := os.Stat(inputPath)
-	if err != nil {
-		return CompressionResult{}, fmt.Errorf("stat compression input: %w", err)
-	}
-	if info.IsDir() {
-		return CompressionResult{}, errors.New("compression input is a directory")
-	}
-	outputPath, err := resolveWithinRoot(m.DataRoot, req.OutputRelativePath)
-	if err != nil {
-		return CompressionResult{}, fmt.Errorf("resolve compression output: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return CompressionResult{}, fmt.Errorf("create compression output dir: %w", err)
-	}
-
-	tempRoot := m.TempRoot
-	if tempRoot == "" {
-		tempRoot = filepath.Join(m.DataRoot, "temp")
-	}
-	workDir := filepath.Join(tempRoot, "cos-compression", fmt.Sprintf("%d", req.UploadSourceID))
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return CompressionResult{}, fmt.Errorf("create compression temp dir: %w", err)
-	}
-	defer os.RemoveAll(workDir)
-
-	tempOutput := compressionTempOutputPath(workDir, outputPath)
-	cmd := exec.CommandContext(ctx, m.FFmpegPath, compressionArgs(inputPath, tempOutput, req.Threads)...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return CompressionResult{}, fmt.Errorf("ffmpeg compression failed: %s", message)
-	}
-	if err := os.Rename(tempOutput, outputPath); err != nil {
-		return CompressionResult{}, fmt.Errorf("move compression output: %w", err)
-	}
-	outputInfo, err := os.Stat(outputPath)
-	if err != nil {
-		return CompressionResult{}, fmt.Errorf("stat compression output: %w", err)
-	}
-	if outputInfo.IsDir() || outputInfo.Size() <= 0 {
-		return CompressionResult{}, errors.New("compression output is invalid")
-	}
-	if err := m.probe(ctx, outputPath); err != nil {
-		return CompressionResult{}, err
-	}
-	return CompressionResult{RelativePath: req.OutputRelativePath, SizeBytes: outputInfo.Size(), Preset: preset}, nil
-}
-
-func compressionArgs(inputPath string, outputPath string, threads int64) []string {
-	if threads <= 0 {
-		threads = 2
-	}
-	return []string{
-		"-hide_banner", "-loglevel", "error",
-		"-i", inputPath,
-		"-map", "0:v:0", "-map", "0:a?",
-		"-c:v", "libx264",
-		"-preset", "medium",
-		"-crf", "23",
-		"-threads", strconv.FormatInt(threads, 10),
-		"-pix_fmt", "yuv420p",
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-movflags", "+faststart",
-		"-y", outputPath,
-	}
-}
-
-func compressionTempOutputPath(workDir string, outputPath string) string {
-	base := filepath.Base(outputPath)
-	ext := filepath.Ext(base)
-	if ext == "" {
-		return filepath.Join(workDir, base+".tmp")
-	}
-	stem := strings.TrimSuffix(base, ext)
-	return filepath.Join(workDir, stem+".tmp"+ext)
 }
 
 func (m FFmpegMerger) probe(ctx context.Context, path string) error {

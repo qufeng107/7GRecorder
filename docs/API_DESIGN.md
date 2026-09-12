@@ -330,8 +330,6 @@ packaged output parts whose COS object status is `AVAILABLE`. The API validates 
 download policy, then returns a short-lived Tencent COS signed URL. It must not expose local filesystem paths or use
 `X-Accel-Redirect` for upload-source downloads.
 
-COS upload settings may later expose a controlled compression preset:
-
 `POST /api/v1/upload-sources/actions/regroup` is SUPER_ADMIN-only and fixes historical upload sources that were
 finalized too early. The request accepts `recording_profile_id`, `china_date` (`YYYY-MM-DD`), and optional
 `merge_gap_seconds`. It groups current non-`REPLACED` sources for that China date by the same merge gap, replaces only
@@ -347,16 +345,10 @@ with a visible error instead of creating partial uploads.
 Existing COS objects and local files are never deleted by regroup; old source rows are hidden from normal lists with
 status `REPLACED`.
 
-```json
-{
-  "compression_enabled": true,
-  "compression_preset": "h264_crf23_medium_mp4"
-}
-```
-
-Only predefined presets are accepted. The API must not accept arbitrary FFmpeg flags. Recording/upload-source list DTOs
-should show COS status per publish part, including original size, uploaded object size, compression status, and signed
-download availability. Download remains available only after the COS object reaches `AVAILABLE`.
+COS upload uses the current publish part directly. It does not transcode video and does not create ZIP or other archive
+files. Recording/upload-source list DTOs show COS status per publish part, including source size, uploaded object size,
+the retained historical compression metadata, and signed download availability. New objects use
+`compression_status=DISABLED`; download remains available only after the COS object reaches `AVAILABLE`.
 
 ### Files / Download
 

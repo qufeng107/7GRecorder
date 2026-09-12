@@ -69,8 +69,12 @@ The fake biliup test must also assert that multipart command paths use temporary
 alias resolves to the original source, and that canonical local/COS-facing filenames are not renamed.
 
 Progress regression tests include carriage-return progress lines and ANSI control sequences from the pinned biliup
-renderer, and assert non-zero aggregate byte progress. FFmpeg compression tests assert the configured COS thread cap is
-passed as a structured `-threads` argument rather than shell text.
+renderer, and assert non-zero aggregate byte progress.
+
+COS tests must verify that each object uploads the original publish-part path and bytes without invoking FFmpeg or
+creating a derived file. Object-key tests must assert `videos/YYYY-MM-DD/session-NN/pNN.<source-format>`, China-date
+daily ordinals, stable output ordering, and unchanged historical object rows. Bilibili must continue to read the same
+original source part independently.
 
 ---
 
@@ -229,9 +233,8 @@ song processing FAILED
 - COS download tests must verify that only `AVAILABLE` upload source output objects can produce signed download
   requests, that profile visibility and manager policy are enforced before signing, and that old failed COS jobs do not
   make the current output summary look failed after a later successful upload.
-- COS compression tests must verify that compression writes only to controlled temp/derived paths, never overwrites
-  source output parts, validates the compressed file with ffprobe before upload, records source/uploaded sizes, and
-  marks only the COS object failed when compression fails.
+- COS direct-upload tests must verify that no FFmpeg/archive derivative is created, the current output path and bytes are
+  passed directly to the COS adapter, and historical terminal object rows are not rewritten by reconciliation.
 - Raw danmaku archive tests must verify scan attachment to the matching recording, idempotent `cos_objects` and
   `UPLOAD_COS_RECORDING_FILE` job creation, worker upload status transitions, and signed URL generation only after the
   raw COS object is `AVAILABLE`.
@@ -362,7 +365,7 @@ System:
 - Successful edit tests must assert `parts/...` changes to `edited/...`, total duration equals original duration minus
   deleted duration, output timelines are contiguous, and `review_status` stays `REQUIRED`.
 - Bilibili request tests must assert that only the current edited output paths are passed to biliup after approval.
-- COS request tests must assert that compression input and regenerated object keys use the current edited output rows.
+- COS request tests must assert that direct-upload input and regenerated object keys use the current edited output rows.
 - Invariant tests must attempt late publication/COS success after a review freeze and assert the database trigger rejects
   it.
 - Frontend tests must distinguish `editing`, `waiting for review`, and `approved/uploading`, and must not treat a

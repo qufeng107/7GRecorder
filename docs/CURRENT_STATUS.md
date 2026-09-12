@@ -18,7 +18,7 @@ Recommended first-read order:
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
 - Production includes safe delivered-source cleanup, review/module resume guards, Bilibili/COS progress reporting,
-  and the default two-thread limit for COS FFmpeg compression.
+  and the older COS FFmpeg compression behavior that the current uncommitted work replaces.
 - Normal backend deployment recreates only `7grecorder`. It must not use `docker compose down` or restart the
   independently recording `bililiverecorder` container.
 
@@ -109,5 +109,12 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
   exact bandwidth.
 - Bilibili verification/listing should later fill a missing BV URL when successful CLI output lacks an identifier.
 - Danmaku timeline transformation and a richer browser media editor are still pending.
+
+## Current Uncommitted Work
+
+- Stop creating COS-only MP4 or archive derivatives; upload each original publish part directly.
+- New COS video keys target `videos/YYYY-MM-DD/session-NN/pNN.<source-format>` below the configured profile prefix.
+- Bilibili and COS continue reading the same original publish part through independent jobs.
+- Existing FLV/MP4 COS object rows and keys remain unchanged. No automatic remote move or deletion is planned.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.

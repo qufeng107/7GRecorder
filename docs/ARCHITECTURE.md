@@ -269,9 +269,8 @@ Local Storage **不以 Bilibili/COS/Songs 成功作为删除前置条件**。
 当前 Upload Source 可以是单段原始文件，也可以是合并后的多段文件；COS 与 Bilibili 都只消费
 `READY_TO_UPLOAD`，并保存原始子视频时间轴 metadata。
 
-COS 可以配置“上传前压缩”作为 COS Storage Module 自己的派生处理。压缩只生成 COS 上传用文件，不覆盖原始
-RecordingFile，不改变 Bilibili 投稿输入，也不改变 Upload Source 的来源时间轴 metadata。压缩失败只影响 COS
-对象状态；原始/封装后分片仍可供其他模块继续使用。
+COS 直接上传当前 Upload Source 的发布分片，不执行视频转码，也不创建 ZIP、7z 等压缩包。COS 与 Bilibili
+可以并行读取同一原始发布分片，彼此不建立成功依赖。
 
 COS 删除只删除：
 
@@ -706,18 +705,9 @@ Raw danmaku files are separate recording-file attachments. COS may archive close
 prefix `raw/` path using `UPLOAD_COS_RECORDING_FILE`, but this does not make them upload-source segments and does not
 feed Bilibili publishing. Timeline alignment is a later design step after real raw files are inspected.
 
-COS 可在该边界之后、实际 PutObject 之前对每个 output part 生成压缩派生文件。推荐默认策略是保守稳定压缩：
-
-```text
-input output part
-→ ffmpeg transcode to temp MP4
-→ ffprobe verify duration/readability
-→ atomic finalize compressed temp file
-→ COS upload compressed object
-→ remove temp after successful upload or after safe failure retention
-```
-
-压缩策略不得覆盖原文件；不得把压缩结果作为 Bilibili 的默认投稿源；不得因为压缩失败删除源分片。
+COS 对每个 output part 直接执行 PutObject。新视频对象使用
+`videos/YYYY-MM-DD/session-NN/pNN.<source-format>`，日期按中国时区、场次按同一 Profile 当日 Upload Source
+顺序计算。历史对象的 key、格式和压缩 metadata 保持不变，不在普通 reconcile 中移动或删除。
 
 ### 12.3 COS 配额
 

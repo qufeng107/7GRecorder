@@ -236,9 +236,9 @@ Current implementation note:
 - 已实现：Upload Source 发现会在合并窗口内存在同配置相邻 `ACTIVE`/`WRITING` 录像时暂缓生成父视频，避免直播文件轮转被过早固化成多个父视频；
 - 已实现：将 `UPLOAD_MAX_PART_BYTES` 默认值从早期 4 GiB 调整到更保守的 3.8GB 级别，避免超过 Bilibili
   单文件上传边界；
-- 已实现：COS 上传前按受控 preset 压缩每个 output part，默认 `h264_crf23_medium_mp4`；
-- 已实现：COS 派生压缩通过 `COS_COMPRESSION_THREADS` 限制 FFmpeg 编码线程（默认 2）；
-- 已实现：COS 对象记录原始大小、上传对象大小、压缩状态和压缩 preset；
+- 当前修正：COS 直接上传每个 output part，不再生成 MP4 转码或 ZIP 派生文件；
+- 当前修正：新 COS 视频对象使用 `videos/YYYY-MM-DD/session-NN/pNN.<source-format>`，历史对象不迁移；
+- 已实现：COS 对象保留原始大小、上传对象大小及兼容历史对象所需的压缩 metadata；
 - 当前开发：原始弹幕文件按 `recording_files.kind = 'danmaku'` 扫描入库，使用 `UPLOAD_COS_RECORDING_FILE`
   任务上传到 COS `raw/` 前缀；先归档原文，不解析、不对齐时间轴；
 - object metadata；

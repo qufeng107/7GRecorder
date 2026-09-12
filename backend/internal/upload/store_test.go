@@ -112,14 +112,43 @@ func TestReconcileCreatesUploadModuleJobsForReadySources(t *testing.T) {
 	}
 	assertJobExists(t, ctx, database, "upload-source:1:bilibili:upload")
 	assertJobExists(t, ctx, database, "upload-source:1:output:1:cos:1")
-	var objectKey string
+	var objectKey, compressionStatus string
+	var sourceSizeBytes, objectSizeBytes int64
 	if err := database.QueryRowContext(ctx, `
-		SELECT object_key FROM upload_source_cos_objects WHERE upload_source_output_id = 1
-	`).Scan(&objectKey); err != nil {
+		SELECT object_key, compression_status, source_size_bytes, size_bytes
+		FROM upload_source_cos_objects
+		WHERE upload_source_output_id = 1
+	`).Scan(&objectKey, &compressionStatus, &sourceSizeBytes, &objectSizeBytes); err != nil {
 		t.Fatalf("query cos object key returned error: %v", err)
 	}
-	if objectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv" {
+	if objectKey != "7grecorder/test/videos/2026-09-05/session-01/p01.flv" {
 		t.Fatalf("unexpected cos object key: %q", objectKey)
+	}
+	if compressionStatus != "DISABLED" || sourceSizeBytes != 50 || objectSizeBytes != 50 {
+		t.Fatalf("expected direct COS object metadata, compression=%q source=%d object=%d", compressionStatus, sourceSizeBytes, objectSizeBytes)
+	}
+	const historicalObjectKey = "7grecorder/test/upload-sources/1/1/parts/legacy-p01.flv"
+	if _, err := database.ExecContext(ctx, `
+		UPDATE upload_source_cos_objects
+		SET object_key = ?, status = 'AVAILABLE', compression_status = 'COMPRESSED',
+			compression_preset = 'h264_crf23_medium_mp4'
+		WHERE upload_source_output_id = 1
+	`, historicalObjectKey); err != nil {
+		t.Fatalf("mark historical cos object returned error: %v", err)
+	}
+	if _, err := store.Reconcile(ctx, actor); err != nil {
+		t.Fatalf("historical Reconcile returned error: %v", err)
+	}
+	var historicalStatus, historicalPreset string
+	if err := database.QueryRowContext(ctx, `
+		SELECT object_key, compression_status, COALESCE(compression_preset, '')
+		FROM upload_source_cos_objects
+		WHERE upload_source_output_id = 1
+	`).Scan(&objectKey, &historicalStatus, &historicalPreset); err != nil {
+		t.Fatalf("query historical cos object returned error: %v", err)
+	}
+	if objectKey != historicalObjectKey || historicalStatus != "COMPRESSED" || historicalPreset != "h264_crf23_medium_mp4" {
+		t.Fatalf("historical cos object was rewritten: key=%q status=%q preset=%q", objectKey, historicalStatus, historicalPreset)
 	}
 }
 
@@ -364,7 +393,7 @@ func TestCOSDownloadURLRequestRequiresAvailableOutputObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("COSDownloadURLRequest returned error: %v", err)
 	}
-	if request.ObjectKey != "7grecorder/test/upload-sources/1/1/parts/7G-20260905-\u7b2c01\u573a\u76f4\u64ad-p01.flv" {
+	if request.ObjectKey != "7grecorder/test/videos/2026-09-05/session-01/p01.flv" {
 		t.Fatalf("unexpected object key: %q", request.ObjectKey)
 	}
 	if request.Secret.SecretID != "id" || request.Secret.SecretKey != "key" {
@@ -449,6 +478,50 @@ func TestReconcileCreatesCOSJobsForClosedDanmakuFiles(t *testing.T) {
 	}
 	if request.ObjectKey != "7grecorder/test/raw/recordings/1741048619-Streamer/danmaku.xml" {
 		t.Fatalf("unexpected raw download object key: %q", request.ObjectKey)
+	}
+}
+
+func TestCOSVideoObjectKeyUsesChinaDateAndStableOrdinals(t *testing.T) {
+	tests := []struct {
+		name       string
+		prefix     string
+		startedAt  string
+		session    int
+		part       int
+		sourcePath string
+		expected   string
+	}{
+		{
+			name:       "trimmed prefix",
+			prefix:     "/7grecorder/7g/",
+			startedAt:  "2026-09-05T10:00:00Z",
+			session:    2,
+			part:       3,
+			sourcePath: "upload-sources/1/2/parts/source.FLV",
+			expected:   "7grecorder/7g/videos/2026-09-05/session-02/p03.flv",
+		},
+		{
+			name:       "china date rollover",
+			startedAt:  "2026-09-05T18:00:00Z",
+			session:    1,
+			part:       1,
+			sourcePath: "upload-sources/1/3/edited/source.mp4",
+			expected:   "videos/2026-09-06/session-01/p01.mp4",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := cosVideoObjectKey(test.prefix, test.startedAt, test.session, test.part, test.sourcePath)
+			if err != nil {
+				t.Fatalf("cosVideoObjectKey returned error: %v", err)
+			}
+			if actual != test.expected {
+				t.Fatalf("expected %q, got %q", test.expected, actual)
+			}
+		})
+	}
+	if _, err := cosVideoObjectKey("prefix", "2026-09-05T10:00:00Z", 1, 1, "source.zip"); err == nil {
+		t.Fatal("expected archive source format to be rejected")
 	}
 }
 

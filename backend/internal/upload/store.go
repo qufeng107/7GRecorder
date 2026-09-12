@@ -89,8 +89,6 @@ type COSConfig struct {
 	UpdatedAt          string `json:"updated_at,omitempty"`
 }
 
-const COSCompressionPresetH264CRF23MediumMP4 = "h264_crf23_medium_mp4"
-
 type COSConfigUpsert struct {
 	CredentialID    int64  `json:"credential_id"`
 	Enabled         bool   `json:"enabled"`
@@ -490,44 +488,111 @@ func (s Store) resetPendingBilibiliJobs(ctx context.Context) (int, error) {
 }
 
 func (s Store) createCOSObjects(ctx context.Context) (int, error) {
-	compressionStatus := "DISABLED"
-	compressionPreset := ""
-	if s.cfg.COSCompressionEnabled {
-		compressionStatus = "PENDING"
-		compressionPreset = configuredCOSCompressionPreset(s.cfg.COSCompressionPreset)
+	type candidate struct {
+		cosProfileID       int64
+		recordingProfileID int64
+		uploadSourceID     int64
+		outputID           int64
+		prefix             string
+		startedAt          string
+		sortOrder          int
+		relativePath       string
+		sizeBytes          int64
+		objectKey          string
 	}
-	query := `
-		INSERT OR IGNORE INTO upload_source_cos_objects
-			(cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key,
-				size_bytes, source_size_bytes, compression_status, compression_preset, status)
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT csp.id,
 			us.recording_profile_id,
 			us.id,
 			uso.id,
-			csp.prefix || uso.relative_path,
-			uso.size_bytes,
-			uso.size_bytes,
-			?,
-			NULLIF(?, ''),
-			'PENDING'
+			csp.prefix,
+			us.started_at,
+			uso.sort_order,
+			uso.relative_path,
+			uso.size_bytes
 		FROM upload_sources us
 		JOIN upload_source_outputs uso ON uso.upload_source_id = us.id
 			AND uso.status = 'READY_TO_UPLOAD'
 		JOIN cos_storage_profiles csp ON csp.recording_profile_id = us.recording_profile_id
 			AND csp.enabled = 1
+		LEFT JOIN upload_source_cos_objects co ON co.cos_storage_profile_id = csp.id
+			AND co.upload_source_output_id = uso.id
 		WHERE us.status = 'READY_TO_UPLOAD'
-			AND ` + uploadSourceStableCondition + `
-			AND ` + uploadSourceReviewReadyCondition + `
-	`
-	result, err := s.db.ExecContext(ctx, query, compressionStatus, compressionPreset)
+			AND `+uploadSourceStableCondition+`
+			AND `+uploadSourceReviewReadyCondition+`
+			AND (co.id IS NULL OR co.status IN ('PENDING', 'FAILED', 'SOURCE_MISSING'))
+		ORDER BY us.started_at ASC, us.id ASC, uso.sort_order ASC, uso.id ASC
+	`)
 	if err != nil {
-		return 0, fmt.Errorf("create cos objects: %w", err)
+		return 0, fmt.Errorf("list cos object candidates: %w", err)
 	}
-	changed, err := result.RowsAffected()
+	items := make([]candidate, 0)
+	for rows.Next() {
+		var item candidate
+		if err := rows.Scan(&item.cosProfileID, &item.recordingProfileID, &item.uploadSourceID, &item.outputID, &item.prefix, &item.startedAt, &item.sortOrder, &item.relativePath, &item.sizeBytes); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan cos object candidate: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate cos object candidates: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("close cos object candidates: %w", err)
+	}
+	for index := range items {
+		ordinal := s.uploadSourceChinaOrdinal(ctx, items[index].recordingProfileID, items[index].uploadSourceID, items[index].startedAt)
+		objectKey, err := cosVideoObjectKey(items[index].prefix, items[index].startedAt, ordinal, items[index].sortOrder+1, items[index].relativePath)
+		if err != nil {
+			return 0, err
+		}
+		items[index].objectKey = objectKey
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("read cos object count: %w", err)
+		return 0, fmt.Errorf("begin cos object reconcile: %w", err)
 	}
-	return int(changed), nil
+	defer tx.Rollback()
+
+	created := 0
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE upload_source_cos_objects
+			SET object_key = ?,
+				size_bytes = ?,
+				source_size_bytes = ?,
+				compression_status = 'DISABLED',
+				compression_preset = NULL,
+				compressed_from_relative_path = NULL,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE cos_storage_profile_id = ?
+				AND upload_source_output_id = ?
+				AND status IN ('PENDING', 'FAILED', 'SOURCE_MISSING')
+		`, item.objectKey, item.sizeBytes, item.sizeBytes, item.cosProfileID, item.outputID); err != nil {
+			return 0, fmt.Errorf("refresh pending cos object: %w", err)
+		}
+		result, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO upload_source_cos_objects
+				(cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key,
+					size_bytes, source_size_bytes, compression_status, compression_preset, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'DISABLED', NULL, 'PENDING')
+		`, item.cosProfileID, item.recordingProfileID, item.uploadSourceID, item.outputID, item.objectKey, item.sizeBytes, item.sizeBytes)
+		if err != nil {
+			return 0, fmt.Errorf("create cos object: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("read cos object count: %w", err)
+		}
+		created += int(changed)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit cos object reconcile: %w", err)
+	}
+	return created, nil
 }
 
 func (s Store) createCOSJobs(ctx context.Context) (int, error) {
@@ -546,6 +611,7 @@ func (s Store) createCOSJobs(ctx context.Context) (int, error) {
 		FROM upload_source_cos_objects co
 		JOIN upload_sources us ON us.id = co.upload_source_id
 		WHERE co.status = 'PENDING'
+			AND co.compression_status = 'DISABLED'
 			AND co.upload_source_output_id IS NOT NULL
 			AND us.status = 'READY_TO_UPLOAD'
 			AND ` + uploadSourceStableCondition + `
@@ -588,6 +654,7 @@ func (s Store) resetPendingCOSJobs(ctx context.Context) (int, error) {
 					AND uso.status = 'READY_TO_UPLOAD'
 				WHERE co.id = json_extract(jobs.payload_json, '$.cos_object_id')
 					AND co.status = 'PENDING'
+					AND co.compression_status = 'DISABLED'
 					AND us.status = 'READY_TO_UPLOAD'
 					AND `+uploadSourceStableCondition+`
 					AND `+uploadSourceReviewReadyCondition+`
@@ -695,6 +762,7 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 		JOIN credentials c ON c.id = csp.credential_id
 		WHERE co.id = ?
 			AND co.status IN ('PENDING', 'FAILED')
+			AND co.compression_status = 'DISABLED'
 			AND us.status = 'READY_TO_UPLOAD'
 			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
 			AND COALESCE(us.edit_decision_json, '') = ''
@@ -838,62 +906,6 @@ func (s Store) MarkCOSObjectUploading(ctx context.Context, objectID int64) error
 	`, objectID)
 	if err != nil {
 		return fmt.Errorf("mark cos object uploading: %w", err)
-	}
-	return nil
-}
-
-func (s Store) MarkCOSObjectCompressing(ctx context.Context, objectID int64) error {
-	if objectID <= 0 {
-		return ErrValidation
-	}
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE upload_source_cos_objects
-		SET compression_status = 'COMPRESSING',
-			last_error = NULL,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, objectID)
-	if err != nil {
-		return fmt.Errorf("mark cos object compressing: %w", err)
-	}
-	return nil
-}
-
-func (s Store) MarkCOSObjectCompressed(ctx context.Context, objectID int64, compressedRelativePath string, compressedSizeBytes int64, preset string, objectKey string) error {
-	if objectID <= 0 || compressedRelativePath == "" || compressedSizeBytes <= 0 || objectKey == "" {
-		return ErrValidation
-	}
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE upload_source_cos_objects
-		SET compression_status = 'COMPRESSED',
-			compression_preset = NULLIF(?, ''),
-			compressed_from_relative_path = ?,
-			object_key = ?,
-			size_bytes = ?,
-			last_error = NULL,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, preset, compressedRelativePath, objectKey, compressedSizeBytes, objectID)
-	if err != nil {
-		return fmt.Errorf("mark cos object compressed: %w", err)
-	}
-	return nil
-}
-
-func (s Store) MarkCOSObjectCompressionFailed(ctx context.Context, objectID int64, message string) error {
-	if objectID <= 0 {
-		return ErrValidation
-	}
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE upload_source_cos_objects
-		SET compression_status = 'FAILED',
-			status = 'FAILED',
-			last_error = ?,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, message, objectID)
-	if err != nil {
-		return fmt.Errorf("mark cos object compression failed: %w", err)
 	}
 	return nil
 }
@@ -1412,12 +1424,28 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func configuredCOSCompressionPreset(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return COSCompressionPresetH264CRF23MediumMP4
+func cosVideoObjectKey(prefix string, startedAt string, sessionOrdinal int, partOrdinal int, sourceRelativePath string) (string, error) {
+	started := parseTime(startedAt)
+	if started.IsZero() || sessionOrdinal <= 0 || partOrdinal <= 0 {
+		return "", fmt.Errorf("build cos object key: %w", ErrValidation)
 	}
-	return value
+	extension := strings.ToLower(filepath.Ext(filepath.Base(sourceRelativePath)))
+	switch extension {
+	case ".flv", ".mp4", ".mkv":
+	default:
+		return "", fmt.Errorf("build cos object key: unsupported source format %q", extension)
+	}
+	relativeKey := filepath.ToSlash(filepath.Join(
+		"videos",
+		started.In(chinaLocation()).Format("2006-01-02"),
+		fmt.Sprintf("session-%02d", sessionOrdinal),
+		fmt.Sprintf("p%02d%s", partOrdinal, extension),
+	))
+	cleanPrefix := strings.Trim(strings.TrimSpace(prefix), "/")
+	if cleanPrefix == "" {
+		return relativeKey, nil
+	}
+	return cleanPrefix + "/" + relativeKey, nil
 }
 
 func boolInt(value bool) int {

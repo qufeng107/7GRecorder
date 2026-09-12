@@ -2469,13 +2469,7 @@ func (s Store) MarkUploadSourceEditSucceeded(ctx context.Context, id int64, outp
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE upload_source_cos_objects
-		SET object_key = (
-				SELECT csp.prefix || uso.relative_path
-				FROM upload_source_outputs uso
-				JOIN cos_storage_profiles csp ON csp.id = upload_source_cos_objects.cos_storage_profile_id
-				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
-			),
-			size_bytes = (
+		SET size_bytes = (
 				SELECT uso.size_bytes
 				FROM upload_source_outputs uso
 				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
@@ -2485,8 +2479,8 @@ func (s Store) MarkUploadSourceEditSucceeded(ctx context.Context, id int64, outp
 				FROM upload_source_outputs uso
 				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
 			),
-			compression_status = ?,
-			compression_preset = NULLIF(?, ''),
+			compression_status = 'DISABLED',
+			compression_preset = NULL,
 			compressed_from_relative_path = NULL,
 			checksum = NULL,
 			etag = NULL,
@@ -2499,7 +2493,7 @@ func (s Store) MarkUploadSourceEditSucceeded(ctx context.Context, id int64, outp
 			AND upload_source_output_id IN (
 				SELECT id FROM upload_source_outputs WHERE upload_source_id = ? AND status = 'READY_TO_UPLOAD'
 			)
-	`, cosCompressionInitialStatus(s.cfg), cosCompressionInitialPreset(s.cfg), id, id); err != nil {
+	`, id, id); err != nil {
 		return fmt.Errorf("reset cos objects after edit: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -2578,20 +2572,6 @@ func parseUploadSourceEditDecision(value string) (uploadSourceEditDecision, erro
 		return uploadSourceEditDecision{}, fmt.Errorf("decode upload source edit decision: %w", err)
 	}
 	return buildUploadSourceEditDecision(decision.Cuts)
-}
-
-func cosCompressionInitialStatus(cfg config.Config) string {
-	if cfg.COSCompressionEnabled {
-		return "PENDING"
-	}
-	return "DISABLED"
-}
-
-func cosCompressionInitialPreset(cfg config.Config) string {
-	if cfg.COSCompressionEnabled {
-		return strings.TrimSpace(cfg.COSCompressionPreset)
-	}
-	return ""
 }
 
 type uploadSourceMetadata struct {

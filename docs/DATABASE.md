@@ -481,10 +481,18 @@ updated_at
 对象不能覆盖已经上传成功的分片状态。下载入口只基于 `upload_source_cos_objects.status = AVAILABLE` 发放短时 COS
 签名 URL；本地 Upload Source 文件路径属于服务端实现细节，不作为下载契约。
 
-COS 压缩上传在 `upload_source_cos_objects` 上记录压缩派生对象 metadata。`source_size_bytes` 是
-`upload_source_outputs.size_bytes` 的快照；`size_bytes` 是实际上传到 COS 的对象大小。压缩只改变 COS 对象输入，
-不修改 `upload_source_outputs.relative_path`，也不覆盖本地源分片。`compressed_from_relative_path` 只保存受控相对
-路径，用于审计和清理；压缩临时/派生文件仍必须由 filesystem adapter 做 root escape 校验后才能读取或删除。
+COS 对新发布分片不再生成压缩派生文件。`source_size_bytes` 是 `upload_source_outputs.size_bytes` 的快照，
+`size_bytes` 是实际上传对象大小；直接上传时两者应一致，`compression_status = DISABLED`，且
+`compression_preset`、`compressed_from_relative_path` 均为空。历史压缩对象继续保留原 metadata。
+
+新建发布视频对象的 `object_key` 使用：
+
+```text
+<cos_storage_profiles.prefix>/videos/<China YYYY-MM-DD>/session-<daily ordinal>/p<output ordinal>.<source extension>
+```
+
+`object_key` 在对象记录创建时确定。现有行的历史 FLV/MP4 key 和 preset 是持久化身份，不通过 migration 重写，
+确保已上传对象的签名下载和受控删除仍指向原对象。
 
 ---
 

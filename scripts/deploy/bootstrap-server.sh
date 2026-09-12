@@ -35,9 +35,6 @@ FFMPEG_PATH=ffmpeg
 MASTER_KEY_PATH=/etc/7grecorder/master.key
 UPLOAD_MAX_PART_BYTES=3800000000
 UPLOAD_MAX_PART_DURATION_SECONDS=7200
-COS_COMPRESSION_ENABLED=true
-COS_COMPRESSION_PRESET=h264_crf23_medium_mp4
-COS_COMPRESSION_THREADS=2
 LOG_LEVEL=info
 
 APP_PORT=8080
@@ -62,18 +59,6 @@ fi
 
 if ! grep -q '^UPLOAD_MAX_PART_DURATION_SECONDS=' /etc/7grecorder/app.env; then
   printf 'UPLOAD_MAX_PART_DURATION_SECONDS=7200\n' >> /etc/7grecorder/app.env
-fi
-
-if ! grep -q '^COS_COMPRESSION_ENABLED=' /etc/7grecorder/app.env; then
-  printf 'COS_COMPRESSION_ENABLED=true\n' >> /etc/7grecorder/app.env
-fi
-
-if ! grep -q '^COS_COMPRESSION_PRESET=' /etc/7grecorder/app.env; then
-  printf 'COS_COMPRESSION_PRESET=h264_crf23_medium_mp4\n' >> /etc/7grecorder/app.env
-fi
-
-if ! grep -q '^COS_COMPRESSION_THREADS=' /etc/7grecorder/app.env; then
-  printf 'COS_COMPRESSION_THREADS=2\n' >> /etc/7grecorder/app.env
 fi
 
 if [ ! -f /etc/7grecorder/recorder.env ]; then

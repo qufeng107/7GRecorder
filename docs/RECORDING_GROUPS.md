@@ -62,12 +62,12 @@ Rules:
 - workers run reconciliation on a fixed interval, so local recording indexing, discovery, merge job backfill, package
   job backfill, and upload module job creation do not depend on manually pressing Scan.
 
-COS compression happens after packaging and before `UPLOAD_COS_OBJECT`. It should use a predefined FFmpeg preset such
-as `h264_crf23_medium_mp4`, write to a job temp/derived path, verify the result with ffprobe, and upload only the
-verified derivative. Compression failure marks the COS object failed and leaves the upload source output part intact.
+COS directly uploads each packaged output part without transcoding or archive wrapping. Bilibili may read the same
+media file concurrently; each destination keeps independent job and delivery state. COS failure leaves the
+upload-source output part intact.
 
 ## Non-Goals
 
 - Do not switch recorder software until diagnostics show BililiveRecorder is the actual source of loss.
-- Do not create ZIP downloads for multi-segment recordings.
+- Do not create ZIP/7z archives or lossy COS-only video derivatives.
 - Do not let Bilibili/COS/Songs depend on Recording Core success beyond their own source availability checks.
