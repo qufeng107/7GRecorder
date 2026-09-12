@@ -144,7 +144,8 @@ const uploadSourceStableCondition = `
 			)`
 
 const uploadSourceReviewReadyCondition = `COALESCE(us.review_status, 'NONE') != 'REQUIRED'
-			AND COALESCE(us.edit_decision_json, '') = ''`
+			AND COALESCE(us.edit_decision_json, '') = ''
+			AND COALESCE(us.local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'`
 
 type COSRecordingFileJobPayload struct {
 	COSObjectID     int64 `json:"cos_object_id"`
@@ -697,6 +698,7 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 			AND us.status = 'READY_TO_UPLOAD'
 			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
 			AND COALESCE(us.edit_decision_json, '') = ''
+			AND COALESCE(us.local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 			AND csp.enabled = 1
 	`, payload.COSObjectID).Scan(
 		&request.ObjectID,

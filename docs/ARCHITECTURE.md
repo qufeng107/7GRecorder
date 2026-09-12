@@ -991,3 +991,36 @@ WebSocket realtime infrastructure
 实时 Whisper
 跨模块“全部成功才继续”的 Pipeline
 ```
+
+---
+
+## 22. Upload Review Gate
+
+Upload review is a parent `UploadSource` concern. It is not a global pipeline state and it does not make Recording,
+Bilibili, or COS depend on one another.
+
+```text
+active Recording --require review--> recordings.upload_review_status = REQUIRED
+        | local reconcile / grouping
+        v
+UploadSource review_status = REQUIRED
+        | merge/package may continue locally
+        | remote Bilibili/COS work is blocked
+        v
+optional APPLY_UPLOAD_SOURCE_EDIT
+        | current upload_source_outputs are replaced with edited/... outputs
+        | review_status remains REQUIRED
+        v
+operator approval
+        | review_status = APPROVED
+        v
+Bilibili and COS reconcile independently from the current output rows
+```
+
+The database review gate is authoritative. Application checks prevent new remote work, worker request loaders reject
+stale jobs, running commands are cancelled cooperatively, and SQLite triggers reject late remote-success transitions.
+Local merge/package and edit jobs remain MEDIA work; Bilibili and COS remain independent NETWORK work after approval.
+
+`upload_source_outputs` is the only current publish-part manifest. Editing may change its paths from `parts/...` to
+`edited/...`; downstream adapters must resolve the rows again when a job starts and must never retain an older path
+snapshot as the source of truth.

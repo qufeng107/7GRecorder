@@ -514,7 +514,13 @@ func (w Worker) discoverUploadSources(ctx context.Context) error {
 	if _, err := recordingStore.DiscoverUploadSources(ctx, recording.DefaultMergeGapThresholdSeconds); err != nil {
 		return err
 	}
-	_, err := upload.NewStore(w.db, w.cfg).Reconcile(ctx, accountSuperAdmin())
+	if _, err := upload.NewStore(w.db, w.cfg).Reconcile(ctx, accountSuperAdmin()); err != nil {
+		return err
+	}
+	cleanup, err := recordingStore.RunAutomaticUploadSourceCleanup(ctx, 10)
+	if err == nil && cleanup.DeletedRecordings > 0 {
+		log.Printf("automatic local cleanup deleted %d recordings and %d files, estimated reclaimed bytes %d", cleanup.DeletedRecordings, cleanup.DeletedFiles, cleanup.ReclaimedBytes)
+	}
 	return err
 }
 

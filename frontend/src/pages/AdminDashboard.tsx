@@ -129,8 +129,12 @@ type RecordingItem = {
   is_active_recording?: boolean;
   upload_source_id?: number;
   upload_source_status?: string;
+  local_cleanup_status?: string;
+  local_deleted_at?: string;
   bilibili_status?: string;
+  bilibili_last_error?: string;
   cos_status?: string;
+  cos_last_error?: string;
   output_recording_file_id?: number;
   output_relative_path?: string;
   last_error?: string;
@@ -188,7 +192,9 @@ type UploadSourceOutput = {
   status: string;
   bilibili_status?: string;
   bilibili_url?: string;
+  bilibili_last_error?: string;
   cos_status?: string;
+  cos_last_error?: string;
   cos_source_size_bytes?: number;
   cos_uploaded_size_bytes?: number;
   cos_compression_status?: string;
@@ -211,8 +217,12 @@ type UploadSourceItem = {
   completed_at: string;
   duration_ms: number;
   status: string;
+  local_cleanup_status?: string;
+  local_deleted_at?: string;
   bilibili_status?: string;
+  bilibili_last_error?: string;
   cos_status?: string;
+  cos_last_error?: string;
   output_relative_path?: string;
   output_recording_file_id?: number;
   total_bytes: number;
@@ -773,11 +783,16 @@ const uiCopy = {
     uploadSourcePackaging: "封装中",
     uploadSourcePackageCompleteRefreshing: "封装完成，刷新中",
     uploadSourceReady: "可上传",
+    uploadSourceUploading: "上传中",
+    uploadSourceUploadFailed: "上传失败",
+    uploadSourceComplete: "上传完成",
+    uploadSourceLocalCleaned: "本地文件已自动清理",
     uploadSourceActiveRecording: "录制中",
     uploadSourceMergeFailed: "合并失败",
     uploadSourcePackageFailed: "封装失败",
     uploadSourceWaitingReview: "等待审核",
     requireReview: "需要审核",
+    rerequireReview: "重新审核",
     approveReview: "审核完成",
     reviewRequired: "需审核",
     reviewPending: "审核中",
@@ -1090,11 +1105,16 @@ const uiCopy = {
     uploadSourcePackaging: "Packaging",
     uploadSourcePackageCompleteRefreshing: "Package finished, refreshing",
     uploadSourceReady: "Ready to upload",
+    uploadSourceUploading: "Uploading",
+    uploadSourceUploadFailed: "Upload failed",
+    uploadSourceComplete: "Upload complete",
+    uploadSourceLocalCleaned: "Local files automatically cleaned",
     uploadSourceActiveRecording: "Recording",
     uploadSourceMergeFailed: "Merge failed",
     uploadSourcePackageFailed: "Package failed",
     uploadSourceWaitingReview: "Waiting review",
     requireReview: "Require review",
+    rerequireReview: "Re-review",
     approveReview: "Approve",
     reviewRequired: "Needs review",
     reviewPending: "In review",
@@ -1338,8 +1358,12 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     id: segments[0]?.recording_id ?? source.id,
     upload_source_id: source.id,
     upload_source_status: source.status,
+    local_cleanup_status: source.local_cleanup_status,
+    local_deleted_at: source.local_deleted_at,
     bilibili_status: source.bilibili_status,
+    bilibili_last_error: source.bilibili_last_error,
     cos_status: source.cos_status,
+    cos_last_error: source.cos_last_error,
     output_recording_file_id: source.output_recording_file_id,
     output_relative_path: source.output_relative_path,
     last_error: source.last_error,
@@ -1356,7 +1380,7 @@ function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
     started_at: source.started_at,
     completed_at: source.completed_at,
     duration_ms: source.duration_ms,
-    total_bytes: source.total_bytes,
+    total_bytes: source.local_cleanup_status === "DELETED" ? 0 : source.total_bytes,
     recording_status: source.status,
     local_storage_status: source.output_relative_path ? "AVAILABLE" : source.status,
     local_protected: Boolean(source.local_protected),
@@ -4099,7 +4123,7 @@ function RecordingsPanel(props: {
         const reviewStatus = recording.review_status ?? recording.upload_review_status ?? "NONE";
         const displayStatus = reviewStatus === "REQUIRED" || recording.edit_decision_json
           ? "WAITING_REVIEW"
-          : recording.upload_source_status ?? recording.recording_status;
+          : deriveUploadSourceDisplayStatus(recording);
         return (
           <div className="text-muted">
             <p>{formatUploadSourceStatus(displayStatus, props.labels, mergeJob, packageJob)}</p>
@@ -4107,6 +4131,15 @@ function RecordingsPanel(props: {
               <div className="mt-1 space-y-0.5 text-xs">
                 <p>{props.labels.bilibiliStatus}: {formatModuleUploadStatus(recording.bilibili_status, props.labels)}</p>
                 <p>{props.labels.cosStatus}: {formatModuleUploadStatus(recording.cos_status, props.labels)}</p>
+                {recording.bilibili_status === "FAILED" && recording.bilibili_last_error ? (
+                  <p className="break-words text-red-700">{recording.bilibili_last_error}</p>
+                ) : null}
+                {recording.cos_status === "FAILED" && recording.cos_last_error ? (
+                  <p className="break-words text-red-700">{recording.cos_last_error}</p>
+                ) : null}
+                {recording.local_cleanup_status === "DELETED" ? (
+                  <p>{props.labels.uploadSourceLocalCleaned}</p>
+                ) : null}
               </div>
             ) : null}
             {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
@@ -4136,6 +4169,7 @@ function RecordingsPanel(props: {
         const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
         const bilibiliURL = (recording.source_outputs ?? []).find((output) => output.bilibili_url)?.bilibili_url;
         const reviewStatus = recording.review_status ?? recording.upload_review_status ?? "NONE";
+        const deliveryComplete = deriveUploadSourceDisplayStatus(recording) === "UPLOAD_COMPLETE";
         if (!props.canManageLocalFiles) {
           return <span className="text-xs text-muted">{props.labels.noAction}</span>;
         }
@@ -4159,14 +4193,14 @@ function RecordingsPanel(props: {
               >
                 {props.labels.approveReview}
               </button>
-            ) : (
+            ) : deliveryComplete || Boolean(bilibiliURL) ? null : (
               <button
                 className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
                 disabled={props.reviewPending || reviewStatus === "REQUIRED" || Boolean(bilibiliURL)}
                 type="button"
                 onClick={() => props.onRequireReview(recording)}
               >
-                {props.labels.requireReview}
+                {reviewStatus === "APPROVED" ? props.labels.rerequireReview : props.labels.requireReview}
               </button>
             )}
             {canUseLocalFile && isSingleSegment ? (
@@ -4659,8 +4693,18 @@ function UploadSourceOutputsTable(props: {
                   <td className="px-3 py-3 text-muted">
                     {formatCompressionStatus(output.cos_compression_status, props.labels)}
                   </td>
-                  <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(output.cos_status, props.labels)}</td>
-                  <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(output.bilibili_status, props.labels)}</td>
+                  <td className="px-3 py-3 text-muted">
+                    <p>{formatModuleUploadStatus(output.cos_status, props.labels)}</p>
+                    {output.cos_status === "FAILED" && output.cos_last_error ? (
+                      <p className="mt-1 max-w-56 break-words text-red-700">{output.cos_last_error}</p>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-3 text-muted">
+                    <p>{formatModuleUploadStatus(output.bilibili_status, props.labels)}</p>
+                    {output.bilibili_status === "FAILED" && output.bilibili_last_error ? (
+                      <p className="mt-1 max-w-56 break-words text-red-700">{output.bilibili_last_error}</p>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3">
                     <div className="flex flex-col items-start gap-2">
                       {cosAvailable ? (
@@ -5059,6 +5103,15 @@ function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: J
   if (value === "READY_TO_UPLOAD") {
     return labels.uploadSourceReady;
   }
+  if (value === "UPLOAD_COMPLETE") {
+    return labels.uploadSourceComplete;
+  }
+  if (value === "UPLOAD_FAILED") {
+    return labels.uploadSourceUploadFailed;
+  }
+  if (value === "UPLOADING") {
+    return labels.uploadSourceUploading;
+  }
   if (value === "WAITING_REVIEW") {
     return labels.uploadSourceWaitingReview;
   }
@@ -5087,6 +5140,29 @@ function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: J
     return labels.uploadSourcePackageFailed;
   }
   return value || labels.unknown;
+}
+
+function deriveUploadSourceDisplayStatus(recording: RecordingItem): string {
+  const sourceStatus = recording.upload_source_status ?? recording.recording_status;
+  if (sourceStatus !== "READY_TO_UPLOAD") {
+    return sourceStatus;
+  }
+  const destinationStatuses = [recording.bilibili_status, recording.cos_status].filter(
+    (status): status is string => Boolean(status) && status !== "DISABLED"
+  );
+  if (destinationStatuses.some((status) => status === "FAILED")) {
+    return "UPLOAD_FAILED";
+  }
+  if (destinationStatuses.some((status) => status === "UPLOADING" || status === "VERIFYING")) {
+    return "UPLOADING";
+  }
+  if (
+    destinationStatuses.length > 0 &&
+    destinationStatuses.every((status) => status === "VERIFIED" || status === "AVAILABLE")
+  ) {
+    return "UPLOAD_COMPLETE";
+  }
+  return sourceStatus;
 }
 
 function formatModuleUploadStatus(value: string | undefined, labels: AdminCopy): string {

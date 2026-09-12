@@ -333,6 +333,75 @@ describe("AdminDashboard", () => {
     expect((await screen.findAllByText(/China Time/)).length).toBeGreaterThan(0);
   });
 
+  it("derives completed and failed delivery states from enabled destinations", async () => {
+    mockSuperAdminFetch((path) => {
+      if (path.includes("/api/v1/upload-sources")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 2,
+                recording_profile_id: 1,
+                profile_name: "7G",
+                room_id: "1741048619",
+                streamer_name: "streamer",
+                title: "failed delivery",
+                started_at: "2026-09-11T10:00:00Z",
+                completed_at: "2026-09-11T11:00:00Z",
+                duration_ms: 3600000,
+                status: "READY_TO_UPLOAD",
+                bilibili_status: "FAILED",
+                bilibili_last_error: "bilibili test failure",
+                cos_status: "FAILED",
+                cos_last_error: "cos test failure",
+                total_bytes: 2048,
+                recording_count: 1,
+                file_count: 1,
+                max_gap_seconds: 0,
+                merge_gap_threshold_seconds: 600,
+                segments: []
+              },
+              {
+                id: 1,
+                recording_profile_id: 1,
+                profile_name: "7G",
+                room_id: "1741048619",
+                streamer_name: "streamer",
+                title: "delivered recording",
+                started_at: "2026-09-10T10:00:00Z",
+                completed_at: "2026-09-10T11:00:00Z",
+                duration_ms: 3600000,
+                status: "READY_TO_UPLOAD",
+                local_cleanup_status: "DELETED",
+                bilibili_status: "VERIFIED",
+                cos_status: "AVAILABLE",
+                total_bytes: 1024,
+                recording_count: 1,
+                file_count: 1,
+                max_gap_seconds: 0,
+                merge_gap_threshold_seconds: 600,
+                segments: []
+              }
+            ],
+            total: 2
+          })
+        } as Response;
+      }
+      return undefined;
+    });
+
+    renderWithClient();
+    await switchToEnglish();
+    fireEvent.click(await screen.findByRole("button", { name: /recordings/i }));
+
+    expect(await screen.findByText("Upload complete")).toBeInTheDocument();
+    expect(await screen.findByText("Local files automatically cleaned")).toBeInTheDocument();
+    expect(await screen.findByText("Upload failed")).toBeInTheDocument();
+    expect(await screen.findByText("bilibili test failure")).toBeInTheDocument();
+    expect(await screen.findByText("cos test failure")).toBeInTheDocument();
+  });
+
   it("opens recording details and marks short segments", async () => {
     mockSuperAdminFetch((path) => {
       if (path.includes("/api/v1/upload-sources")) {

@@ -641,8 +641,45 @@ Go Request/Response DTO
   - The normal upload reconciler is responsible for creating or running Bilibili and COS jobs after approval and after the relevant upload profile is enabled.
 - `POST /api/v1/upload-sources/{id}/actions/apply-edit`
   - Accepts `{ "cuts": [{ "start_ms": 123000, "end_ms": 150000 }] }` in parent upload-source timeline coordinates.
-  - The source must be `READY_TO_UPLOAD`, must be waiting for review, and must not have running remote upload jobs.
+  - The source must be `READY_TO_UPLOAD` and must not have running remote upload jobs. The action atomically places it
+    in `REQUIRED`; the admin UI exposes editing from the reviewed state.
   - Stores the edit decision, queues an `APPLY_UPLOAD_SOURCE_EDIT` media job, and keeps Bilibili/COS upload blocked until the edited outputs are produced and the operator approves review.
 - `GET /api/v1/upload-sources/{id}/outputs/{output_id}/download`
   - Streams one packaged output from local disk only while the parent upload source is waiting for review.
   - General local upload-source downloads remain disabled; after approval and COS upload, clients should use COS signed download URLs.
+
+## Review action contract details
+
+All review actions require authenticated local-file management permission and apply profile ownership checks for
+non-super-admin users.
+
+`require-upload-review`, `require-review`, and `approve-review` accept an optional notes payload:
+
+```json
+{"notes":"remove the opening section before publishing"}
+```
+
+`apply-edit` accepts deletion ranges in the parent upload-source timeline and atomically requires review:
+
+```json
+{"cuts":[{"start_ms":0,"end_ms":1193000}]}
+```
+
+The API validates and queues the edit; it does not claim that FFmpeg work has completed. Clients must poll the returned
+upload source/job state. Success is represented by a succeeded `APPLY_UPLOAD_SOURCE_EDIT` job, an empty
+`edit_decision_json`, and current outputs under `edited/...`. The source still returns `review_status = REQUIRED` until
+the operator explicitly approves it.
+
+`approve-review` returns a not-ready conflict when `edit_decision_json` remains non-empty. On success it resets only
+eligible failed/cancelled remote jobs and pending remote records; it does not enable disabled module profiles. Reconcile
+then schedules Bilibili and COS independently.
+
+The local output download endpoint must re-resolve the requested output row, enforce `review_status = REQUIRED`, verify
+that the resolved path stays under `DATA_ROOT`, and fail when the local file is missing.
+
+Upload-source list/detail DTOs include the latest Bilibili publication error and the latest output-linked COS error.
+These are diagnostic display fields only; clients still use the module status enums as the state contract.
+
+They also expose `local_cleanup_status` and `local_deleted_at`. `DELETED` means local source videos and the
+source-owned derived directory were intentionally reclaimed after all enabled destinations succeeded; it is not an
+upload failure and must not offer local review/download actions.

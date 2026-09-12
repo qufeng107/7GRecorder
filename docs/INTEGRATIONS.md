@@ -239,6 +239,26 @@ ffmpeg -i input.flv -map 0:v:0 -map 0:a? -c:v libx264 -preset medium -crf 23 -pi
 如果输入已经很小或压缩收益低，以后可以仍然上传原封装分片，或把压缩结果标记为 `SKIPPED_LOW_GAIN`。当前实现优先
 采用稳定保守的“压缩成功才上传压缩件，压缩失败不损坏源文件”。
 
+### Reviewed media edits
+
+Review cuts are deletion ranges on the complete upload-source timeline. The media adapter normalizes the ranges,
+derives the complementary keep ranges, reads the current `upload_source_outputs`, and uses FFmpeg under
+`exec.CommandContext` to create replacement publish parts. Output files are written below:
+
+```text
+upload-sources/<profile-id>/<upload-source-id>/edited/
+```
+
+The adapter must not build a shell command from user input. It uses structured arguments, validates all controlled
+paths, and verifies generated media before returning metadata to the store. The current implementation uses stream
+copy, so boundaries may align to nearby keyframes; frame-accurate re-encoding is intentionally not promised.
+
+Bilibili resolves the current ready output rows when its job starts. Therefore a reviewed source whose manifest points
+to `edited/...` uploads only edited parts. The pre-edit `parts/...` files are not fallback upload inputs.
+
+COS likewise resolves the current output rows. After an edit, output-linked COS object state/key/compression metadata
+is reset so compression and upload are regenerated from the edited file rather than reusing a pre-edit object.
+
 ---
 
 ## 5. Tencent COS

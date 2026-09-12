@@ -152,6 +152,7 @@ func (s Store) BilibiliUploadRequest(ctx context.Context, payload BilibiliJobPay
 			AND us.status = 'READY_TO_UPLOAD'
 			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
 			AND COALESCE(us.edit_decision_json, '') = ''
+			AND COALESCE(us.local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 	`, payload.PublicationID, payload.UploadSourceID).Scan(
 		&request.PublicationID,
 		&request.UploadSourceID,

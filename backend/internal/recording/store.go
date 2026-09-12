@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -108,8 +109,12 @@ type UploadSource struct {
 	ReviewCompletedAt        string                `json:"review_completed_at,omitempty"`
 	ReviewNotes              string                `json:"review_notes,omitempty"`
 	EditDecisionJSON         string                `json:"edit_decision_json,omitempty"`
+	LocalCleanupStatus       string                `json:"local_cleanup_status"`
+	LocalDeletedAt           string                `json:"local_deleted_at,omitempty"`
 	BilibiliStatus           string                `json:"bilibili_status"`
+	BilibiliLastError        string                `json:"bilibili_last_error,omitempty"`
 	COSStatus                string                `json:"cos_status"`
+	COSLastError             string                `json:"cos_last_error,omitempty"`
 	Segments                 []UploadSourceSegment `json:"segments"`
 	Outputs                  []UploadSourceOutput  `json:"outputs"`
 	DanmakuFiles             []File                `json:"danmaku_files"`
@@ -142,7 +147,9 @@ type UploadSourceOutput struct {
 	Status               string `json:"status"`
 	BilibiliStatus       string `json:"bilibili_status"`
 	BilibiliURL          string `json:"bilibili_url,omitempty"`
+	BilibiliLastError    string `json:"bilibili_last_error,omitempty"`
 	COSStatus            string `json:"cos_status"`
+	COSLastError         string `json:"cos_last_error,omitempty"`
 	COSSourceSizeBytes   int64  `json:"cos_source_size_bytes,omitempty"`
 	COSUploadedSizeBytes int64  `json:"cos_uploaded_size_bytes,omitempty"`
 	COSCompressionStatus string `json:"cos_compression_status,omitempty"`
@@ -300,6 +307,77 @@ type CleanupRunResult struct {
 	ReclaimedBytes    int64 `json:"reclaimed_bytes"`
 	SkippedRecordings int   `json:"skipped_recordings"`
 }
+
+type uploadSourceCleanupCandidate struct {
+	UploadSourceID     int64
+	RecordingProfileID int64
+}
+
+const uploadSourceCleanupEligibleCondition = `
+			us.status = 'READY_TO_UPLOAD'
+			AND COALESCE(us.local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
+			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
+			AND COALESCE(us.edit_decision_json, '') = ''
+			AND EXISTS (SELECT 1 FROM upload_source_segments own_segment WHERE own_segment.upload_source_id = us.id)
+			AND EXISTS (
+				SELECT 1
+				FROM upload_sources newer
+				WHERE newer.recording_profile_id = us.recording_profile_id
+					AND newer.status != 'REPLACED'
+					AND newer.id != us.id
+					AND (newer.started_at > us.started_at OR (newer.started_at = us.started_at AND newer.id > us.id))
+				UNION ALL
+				SELECT 1
+				FROM recordings newer_recording
+				WHERE newer_recording.recording_profile_id = us.recording_profile_id
+					AND newer_recording.local_deleted_at IS NULL
+					AND newer_recording.started_at > us.completed_at
+				LIMIT 1
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM upload_source_segments uss
+				JOIN recordings rec ON rec.id = uss.recording_id
+				WHERE uss.upload_source_id = us.id
+					AND (rec.recording_status != 'COMPLETED' OR rec.local_protected = 1 OR rec.local_deleted_at IS NOT NULL)
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM upload_source_segments uss
+				JOIN recording_files rf ON rf.recording_id = uss.recording_id
+				WHERE uss.upload_source_id = us.id
+					AND rf.deleted_at IS NULL AND rf.file_status = 'WRITING'
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM jobs j
+				WHERE j.status = 'RUNNING'
+					AND (j.upload_source_id = us.id OR j.business_key LIKE 'upload-source:' || us.id || ':%')
+			)
+			AND (
+				EXISTS (SELECT 1 FROM publishing_profiles pp WHERE pp.recording_profile_id = us.recording_profile_id AND pp.platform = 'bilibili' AND pp.enabled = 1 AND pp.credential_id IS NOT NULL)
+				OR EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1)
+			)
+			AND (
+				NOT EXISTS (SELECT 1 FROM publishing_profiles pp WHERE pp.recording_profile_id = us.recording_profile_id AND pp.platform = 'bilibili' AND pp.enabled = 1 AND pp.credential_id IS NOT NULL)
+				OR EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = us.id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED')
+			)
+			AND (
+				NOT EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1)
+				OR (
+					EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD')
+					AND NOT EXISTS (
+						SELECT 1
+						FROM upload_source_outputs uso
+						JOIN cos_storage_profiles csp ON csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1
+						WHERE uso.upload_source_id = us.id
+							AND uso.status = 'READY_TO_UPLOAD'
+							AND NOT EXISTS (
+								SELECT 1 FROM upload_source_cos_objects co
+								WHERE co.upload_source_output_id = uso.id
+									AND co.cos_storage_profile_id = csp.id
+									AND co.status = 'AVAILABLE'
+							)
+					)
+				)
+			)`
 
 type Store struct {
 	db  *sql.DB
@@ -570,6 +648,7 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 			COALESCE(us.review_status, 'NONE'), COALESCE(us.review_requested_at, ''),
 			COALESCE(us.review_completed_at, ''), COALESCE(us.review_notes, ''),
 			COALESCE(us.edit_decision_json, ''),
+			COALESCE(us.local_cleanup_status, 'AVAILABLE'), COALESCE(us.local_deleted_at, ''),
 			CASE
 				WHEN COALESCE(us.review_status, 'NONE') = 'REQUIRED' OR COALESCE(us.edit_decision_json, '') != '' THEN 'WAITING_REVIEW'
 				WHEN EXISTS (SELECT 1 FROM publications p2 WHERE p2.upload_source_id = us.id AND p2.platform = 'bilibili' AND p2.status = 'FAILED') THEN 'FAILED'
@@ -585,15 +664,27 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 					AND NOT EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
 						SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'AVAILABLE'
 					)) THEN 'AVAILABLE'
+				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status IN ('FAILED', 'SOURCE_MISSING')) THEN 'FAILED'
 				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status = 'UPLOADING') THEN 'UPLOADING'
 				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status = 'PENDING') THEN 'PENDING'
 				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
 						SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id
 					)) THEN 'PENDING'
-				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND co.status IN ('FAILED', 'SOURCE_MISSING')) THEN 'FAILED'
 				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
 				ELSE 'DISABLED'
-			END
+			END,
+			COALESCE((
+				SELECT p3.last_error FROM publications p3
+				WHERE p3.upload_source_id = us.id AND p3.platform = 'bilibili' AND COALESCE(p3.last_error, '') != ''
+				ORDER BY p3.updated_at DESC, p3.id DESC LIMIT 1
+			), ''),
+			COALESCE((
+				SELECT co.last_error
+				FROM upload_source_outputs uso
+				JOIN upload_source_cos_objects co ON co.upload_source_output_id = uso.id
+				WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND COALESCE(co.last_error, '') != ''
+				ORDER BY co.updated_at DESC, co.id DESC LIMIT 1
+			), '')
 		FROM upload_sources us
 		JOIN recording_profiles p ON p.id = us.recording_profile_id
 	`
@@ -655,8 +746,12 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 			&item.ReviewCompletedAt,
 			&item.ReviewNotes,
 			&item.EditDecisionJSON,
+			&item.LocalCleanupStatus,
+			&item.LocalDeletedAt,
 			&item.BilibiliStatus,
 			&item.COSStatus,
+			&item.BilibiliLastError,
+			&item.COSLastError,
 		); err != nil {
 			return nil, fmt.Errorf("scan upload source: %w", err)
 		}
@@ -844,6 +939,7 @@ func (s Store) RepairUploadSources(ctx context.Context, actor account.User) (Upl
 		SELECT id, status, COALESCE(output_relative_path, ''), recording_count
 		FROM upload_sources
 		WHERE status IN ('MERGE_PENDING', 'MERGE_FAILED', 'PACKAGE_PENDING', 'PACKAGE_FAILED', 'READY_TO_UPLOAD')
+			AND COALESCE(local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 		ORDER BY id ASC
 	`)
 	if err != nil {
@@ -2263,6 +2359,7 @@ func (s Store) SaveUploadSourceEditDecision(ctx context.Context, actor account.U
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 			AND status = 'READY_TO_UPLOAD'
+			AND COALESCE(local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 	`
 	args := []interface{}{strings.TrimSpace(req.Notes), string(encoded), uploadSourceID}
 	if actor.Role != account.RoleSuperAdmin {
@@ -2676,6 +2773,7 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 				ELSE 'DISABLED'
 			END,
 			COALESCE((SELECT pub.external_url FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED' ORDER BY pub.updated_at DESC, pub.id DESC LIMIT 1), ''),
+			COALESCE((SELECT pub.last_error FROM publications pub WHERE pub.upload_source_id = uso.upload_source_id AND pub.platform = 'bilibili' AND COALESCE(pub.last_error, '') != '' ORDER BY pub.updated_at DESC, pub.id DESC LIMIT 1), ''),
 			CASE
 				WHEN EXISTS (SELECT 1 FROM upload_sources us WHERE us.id = uso.upload_source_id AND (COALESCE(us.review_status, 'NONE') = 'REQUIRED' OR COALESCE(us.edit_decision_json, '') != '')) THEN 'WAITING_REVIEW'
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'AVAILABLE') THEN 'AVAILABLE'
@@ -2685,6 +2783,7 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp JOIN upload_sources us ON us.recording_profile_id = csp.recording_profile_id WHERE us.id = uso.upload_source_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
 				ELSE 'DISABLED'
 			END,
+			COALESCE((SELECT co.last_error FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND COALESCE(co.last_error, '') != '' ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), ''),
 			COALESCE((SELECT co.source_size_bytes FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), 0),
 			COALESCE((SELECT co.size_bytes FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), 0),
 			COALESCE((SELECT co.compression_status FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id ORDER BY co.updated_at DESC, co.id DESC LIMIT 1), ''),
@@ -2713,7 +2812,9 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 			&item.Status,
 			&item.BilibiliStatus,
 			&item.BilibiliURL,
+			&item.BilibiliLastError,
 			&item.COSStatus,
+			&item.COSLastError,
 			&item.COSSourceSizeBytes,
 			&item.COSUploadedSizeBytes,
 			&item.COSCompressionStatus,
@@ -2894,6 +2995,13 @@ func (s Store) CleanupCandidates(ctx context.Context, actor account.User, limit 
 						)
 					)
 			)
+			AND EXISTS (
+				SELECT 1
+				FROM upload_source_segments cleanup_segment
+				JOIN upload_sources us ON us.id = cleanup_segment.upload_source_id
+				WHERE cleanup_segment.recording_id = rec.id
+					AND `+uploadSourceCleanupEligibleCondition+`
+			)
 		GROUP BY rec.id, p.name, rec.source_room_id, rec.streamer_name_snapshot,
 			rec.title, rec.started_at, rec.completed_at, rec.duration_ms
 		HAVING SUM(CASE
@@ -2952,17 +3060,34 @@ func (s Store) RunLocalCleanup(ctx context.Context, actor account.User, req Clea
 		return CleanupRunResult{}, nil
 	}
 
-	candidates, err := s.CleanupCandidates(ctx, actor, limit)
+	return s.runDeliveredUploadSourceCleanup(ctx, limit)
+}
+
+// RunAutomaticUploadSourceCleanup reclaims complete, remotely delivered sources only while
+// the configured storage policy reports pressure. The newest source for every profile is
+// deliberately retained so cleanup cannot race the current recording/discovery boundary.
+func (s Store) RunAutomaticUploadSourceCleanup(ctx context.Context, limit int) (CleanupRunResult, error) {
+	actor := account.User{Role: account.RoleSuperAdmin}
+	status, err := s.LocalStorageStatus(ctx, actor)
 	if err != nil {
 		return CleanupRunResult{}, err
 	}
+	if status.NeedReclaimBytes <= 0 {
+		return CleanupRunResult{}, nil
+	}
 
+	return s.runDeliveredUploadSourceCleanup(ctx, normalizeCleanupLimit(limit))
+}
+
+func (s Store) runDeliveredUploadSourceCleanup(ctx context.Context, limit int) (CleanupRunResult, error) {
+	actor := account.User{Role: account.RoleSuperAdmin}
+	candidates, err := s.uploadSourceCleanupCandidates(ctx, limit)
+	if err != nil {
+		return CleanupRunResult{}, err
+	}
 	result := CleanupRunResult{}
-	for _, candidate := range candidates.Items {
-		if result.ReclaimedBytes >= status.NeedReclaimBytes {
-			break
-		}
-		deletedFiles, reclaimedBytes, deleted, err := s.deleteLocalRecordingFiles(ctx, candidate.RecordingID)
+	for _, candidate := range candidates {
+		deletedRecordings, deletedFiles, reclaimedBytes, deleted, err := s.deleteDeliveredUploadSource(ctx, candidate)
 		if err != nil {
 			return CleanupRunResult{}, err
 		}
@@ -2970,11 +3095,202 @@ func (s Store) RunLocalCleanup(ctx context.Context, actor account.User, req Clea
 			result.SkippedRecordings++
 			continue
 		}
-		result.DeletedRecordings++
+		result.DeletedRecordings += deletedRecordings
 		result.DeletedFiles += deletedFiles
 		result.ReclaimedBytes += reclaimedBytes
+
+		refreshed, err := s.LocalStorageStatus(ctx, actor)
+		if err != nil {
+			return CleanupRunResult{}, err
+		}
+		if refreshed.NeedReclaimBytes <= 0 {
+			break
+		}
 	}
 	return result, nil
+}
+
+func (s Store) uploadSourceCleanupCandidates(ctx context.Context, limit int) ([]uploadSourceCleanupCandidate, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT us.id, us.recording_profile_id
+		FROM upload_sources us
+		WHERE `+uploadSourceCleanupEligibleCondition+`
+		ORDER BY us.completed_at ASC, us.started_at ASC, us.id ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list delivered upload sources for cleanup: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]uploadSourceCleanupCandidate, 0)
+	for rows.Next() {
+		var item uploadSourceCleanupCandidate
+		if err := rows.Scan(&item.UploadSourceID, &item.RecordingProfileID); err != nil {
+			return nil, fmt.Errorf("scan delivered upload source cleanup candidate: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate delivered upload source cleanup candidates: %w", err)
+	}
+	return items, nil
+}
+
+func (s Store) deleteDeliveredUploadSource(ctx context.Context, candidate uploadSourceCleanupCandidate) (int, int, int64, bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE upload_sources AS us
+		SET local_cleanup_status = 'DELETING', updated_at = CURRENT_TIMESTAMP
+		WHERE us.id = ?
+			AND `+uploadSourceCleanupEligibleCondition+`
+	`, candidate.UploadSourceID)
+	if err != nil {
+		return 0, 0, 0, false, fmt.Errorf("claim upload source cleanup: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, 0, 0, false, fmt.Errorf("read upload source cleanup claim count: %w", err)
+	}
+	if affected == 0 {
+		return 0, 0, 0, false, nil
+	}
+
+	files, recordingIDs, err := s.uploadSourceCleanupFiles(ctx, candidate.UploadSourceID)
+	if err != nil {
+		s.failUploadSourceCleanup(ctx, candidate.UploadSourceID, err)
+		return 0, 0, 0, false, err
+	}
+	derivedRelativePath := filepath.Join("upload-sources", strconv.FormatInt(candidate.RecordingProfileID, 10), strconv.FormatInt(candidate.UploadSourceID, 10))
+	derivedPath, err := resolveWithinRoot(s.cfg.DataRoot, derivedRelativePath)
+	if err != nil {
+		s.failUploadSourceCleanup(ctx, candidate.UploadSourceID, err)
+		return 0, 0, 0, false, fmt.Errorf("resolve upload source cleanup directory: %w", err)
+	}
+
+	var reclaimedBytes int64
+	for _, file := range files {
+		absolutePath, resolveErr := resolveWithinRoot(s.cfg.DataRoot, file.RelativePath)
+		if resolveErr != nil {
+			s.failUploadSourceCleanup(ctx, candidate.UploadSourceID, resolveErr)
+			return 0, 0, 0, false, fmt.Errorf("resolve delivered source cleanup file: %w", resolveErr)
+		}
+		if removeErr := os.Remove(absolutePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			s.failUploadSourceCleanup(ctx, candidate.UploadSourceID, removeErr)
+			return 0, 0, 0, false, fmt.Errorf("delete delivered source file: %w", removeErr)
+		}
+		reclaimedBytes += file.SizeBytes
+	}
+	derivedBytes, err := directoryRegularFileBytes(derivedPath)
+	if err != nil {
+		s.failUploadSourceCleanup(ctx, candidate.UploadSourceID, err)
+		return 0, 0, 0, false, fmt.Errorf("measure upload source cleanup directory: %w", err)
+	}
+	if err := os.RemoveAll(derivedPath); err != nil {
+		s.failUploadSourceCleanup(ctx, candidate.UploadSourceID, err)
+		return 0, 0, 0, false, fmt.Errorf("delete upload source cleanup directory: %w", err)
+	}
+	reclaimedBytes += derivedBytes
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, 0, false, fmt.Errorf("begin delivered source cleanup metadata update: %w", err)
+	}
+	defer tx.Rollback()
+	for _, file := range files {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE recording_files
+			SET file_status = 'DELETED', deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND kind = 'video' AND deleted_at IS NULL
+		`, file.ID); err != nil {
+			return 0, 0, 0, false, fmt.Errorf("mark delivered source file deleted: %w", err)
+		}
+	}
+	for _, recordingID := range recordingIDs {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE recordings
+			SET local_storage_status = 'DELETED', local_deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, recordingID); err != nil {
+			return 0, 0, 0, false, fmt.Errorf("mark delivered source recording deleted: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET local_cleanup_status = 'DELETED', local_deleted_at = CURRENT_TIMESTAMP,
+			last_error = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND local_cleanup_status = 'DELETING'
+	`, candidate.UploadSourceID); err != nil {
+		return 0, 0, 0, false, fmt.Errorf("mark delivered upload source deleted: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, 0, false, fmt.Errorf("commit delivered upload source cleanup: %w", err)
+	}
+	return len(recordingIDs), len(files), reclaimedBytes, true, nil
+}
+
+func (s Store) uploadSourceCleanupFiles(ctx context.Context, uploadSourceID int64) ([]cleanupFileRef, []int64, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT rf.id, rf.relative_path, COALESCE(rf.size_bytes, 0), rec.id
+		FROM upload_source_segments uss
+		JOIN recordings rec ON rec.id = uss.recording_id
+		JOIN recording_files rf ON rf.recording_id = rec.id
+		WHERE uss.upload_source_id = ?
+			AND rf.kind = 'video'
+			AND rf.file_status = 'CLOSED'
+			AND rf.deleted_at IS NULL
+		ORDER BY rec.id ASC, rf.id ASC
+	`, uploadSourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list delivered upload source files: %w", err)
+	}
+	defer rows.Close()
+	files := make([]cleanupFileRef, 0)
+	recordingIDs := make([]int64, 0)
+	seenRecordings := make(map[int64]struct{})
+	for rows.Next() {
+		var file cleanupFileRef
+		var recordingID int64
+		if err := rows.Scan(&file.ID, &file.RelativePath, &file.SizeBytes, &recordingID); err != nil {
+			return nil, nil, fmt.Errorf("scan delivered upload source file: %w", err)
+		}
+		files = append(files, file)
+		if _, exists := seenRecordings[recordingID]; !exists {
+			seenRecordings[recordingID] = struct{}{}
+			recordingIDs = append(recordingIDs, recordingID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate delivered upload source files: %w", err)
+	}
+	return files, recordingIDs, nil
+}
+
+func (s Store) failUploadSourceCleanup(ctx context.Context, uploadSourceID int64, cause error) {
+	_, _ = s.db.ExecContext(ctx, `
+		UPDATE upload_sources
+		SET local_cleanup_status = 'FAILED', last_error = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND local_cleanup_status = 'DELETING'
+	`, "local cleanup failed: "+cause.Error(), uploadSourceID)
+}
+
+func directoryRegularFileBytes(root string) (int64, error) {
+	var total int64
+	err := filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	return total, err
 }
 
 func (s Store) localStorageSettings(ctx context.Context, diskTotalBytes int64) (LocalStorageSettings, bool, error) {
@@ -3167,6 +3483,13 @@ func (s Store) recordingCleanupEligible(ctx context.Context, recordingID int64) 
 						)
 					)
 			)
+			AND EXISTS (
+				SELECT 1
+				FROM upload_source_segments cleanup_segment
+				JOIN upload_sources us ON us.id = cleanup_segment.upload_source_id
+				WHERE cleanup_segment.recording_id = rec.id
+					AND `+uploadSourceCleanupEligibleCondition+`
+			)
 	`, recordingID).Scan(&count)
 	return err == nil && count == 1
 }
@@ -3318,6 +3641,7 @@ func (s Store) RequireUploadSourceReview(ctx context.Context, actor account.User
 			edit_decision_json = NULLIF(?, ''),
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
+			AND COALESCE(local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 	`
 	args := []interface{}{strings.TrimSpace(req.Notes), strings.TrimSpace(req.EditDecisionJSON), uploadSourceID}
 	if actor.Role != account.RoleSuperAdmin {
@@ -3385,6 +3709,7 @@ func (s Store) ApproveUploadSourceReview(ctx context.Context, actor account.User
 			edit_decision_json = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
+			AND COALESCE(local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 	`
 	args := []interface{}{strings.TrimSpace(req.Notes), uploadSourceID}
 	if actor.Role != account.RoleSuperAdmin {

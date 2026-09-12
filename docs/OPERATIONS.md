@@ -360,9 +360,9 @@ Disk housekeeping 是独立的运维清理，不替代 Local Storage Guard，也
 - 不删除 SQLite WAL/SHM 文件来“清理空间”；
 - 不扫描 COS Bucket 删除数据库未登记对象。
 
-后续可增加 `UPLOAD_SOURCE_LOCAL_CLEANUP` / `MAINTENANCE_CLEANUP` Job：当某个 Upload Source 的 enabled
-远端模块都已经完成或进入明确终态，并且本地派生文件不再需要 retry 时，才删除 merge/package 产生的本地派生文件。
-该 Job 只删除 `DATA_ROOT/upload-sources` 下经数据库登记的派生文件，保留 source/part metadata 和远端下载链接。
+Worker 已实现磁盘压力自动回收：只有 Upload Source 的全部 enabled 远端模块确认成功、审核已结束、没有运行中任务，
+并且该来源不是对应录制配置最新一场时，才删除其已关闭原始视频和 `DATA_ROOT/upload-sources/<profile>/<source>`
+受控派生目录。数据库历史、弹幕、Publication/COS 元数据和远端下载信息继续保留。
 
 ---
 
@@ -720,3 +720,68 @@ github.com/tencentyun/cos-go-sdk-v5
 [ ] 当前 Recorder/biliup/FFmpeg 版本已固定
 [ ] backend deploy 不重启 recorder
 ```
+
+---
+
+## 21. Upload Review Runbook
+
+Use the admin recording page for normal review operations. Do not edit SQLite directly and do not retry Bilibili/COS
+jobs while the source is waiting for review.
+
+1. Click `Require review` as early as possible. The source should show `REQUIRED`; Bilibili and COS should show waiting
+   for review. Local merge/package may continue.
+2. Expand details and download the current publish parts for inspection.
+3. Enter deletion ranges on the complete parent timeline, one `HH:MM:SS-HH:MM:SS` range per line, then click
+   `Apply edit` once.
+4. Wait for `APPLY_UPLOAD_SOURCE_EDIT` to succeed. Confirm paths are `edited/...` and verify the displayed duration and
+   size. Remaining in `REQUIRED`/waiting-for-review state is expected.
+5. Download edited parts when content verification is needed. Only then click `Approve review`.
+6. Confirm Bilibili and COS move independently through pending/uploading/verified or available states.
+
+Read-only diagnosis:
+
+```sql
+SELECT id, status, review_status, edit_decision_json, duration_ms, total_bytes, last_error
+FROM upload_sources ORDER BY id DESC;
+
+SELECT id, type, status, attempts, upload_source_id, locked_at, heartbeat_at, last_error
+FROM jobs WHERE upload_source_id = ? ORDER BY id;
+
+SELECT id, sort_order, relative_path, duration_ms, size_bytes, status
+FROM upload_source_outputs WHERE upload_source_id = ? ORDER BY sort_order;
+```
+
+Interpretation:
+
+- `review_status=REQUIRED` plus empty `edit_decision_json` plus `edited/...` outputs means editing completed and is
+  waiting for human approval.
+- Non-empty `edit_decision_json` means edit work is still pending/running or failed; do not approve.
+- A failed edit job leaves the review gate in place. Inspect `jobs.last_error`, fix the cause, then use the supported
+  retry action; do not point output rows at partial files.
+- If review was requested near the end of a Bilibili submission, cancellation is externally ambiguous. Check the
+  Bilibili creator center before retrying to avoid duplicate投稿.
+- Missing edited/local output means do not approve. Repair/retry media work while retaining the review gate.
+
+Only 7GRecorder needs to be stopped for an emergency upload freeze; BililiveRecorder should remain running. Stopping
+the service is not the normal review mechanism and does not replace the persisted review state.
+
+## 22. Automatic Disk-pressure Cleanup
+
+The worker checks local storage pressure during its periodic reconciliation loop. It reclaims oldest eligible upload
+sources until the configured target is met, while retaining the newest source for every recording profile.
+
+Eligibility requires all enabled remote modules to be confirmed successful. Consequently, a source with Bilibili or
+COS `FAILED`, `PENDING`, or `UPLOADING`, a source waiting for review, and the current active recording are never deleted.
+The cleanup keeps SQLite history and remote metadata; only local closed source videos and the source-owned derived
+directory are removed.
+
+Read-only verification:
+
+```sql
+SELECT id, started_at, status, review_status, local_cleanup_status, local_deleted_at
+FROM upload_sources ORDER BY started_at DESC;
+```
+
+`DELETING` means the source was durably claimed before filesystem work. `FAILED` means cleanup itself needs inspection;
+it must not be repaired or uploaded as if local disappearance were accidental. `DELETED` is the expected terminal
+local state for an older remotely archived source.

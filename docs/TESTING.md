@@ -345,3 +345,31 @@ System:
 - Worker tests must cover `APPLY_UPLOAD_SOURCE_EDIT` producing edited outputs, clearing `edit_decision_json`, and keeping the upload source blocked until review approval.
 - Review tests must cover freezing running Bilibili/COS jobs, resetting their remote state, cancelling the worker context, and ignoring late worker completion after the persisted job is no longer `RUNNING`.
 - Frontend checks should cover active recordings merged into the recording list once UI tests are expanded.
+
+## Review/edit release gate
+
+- Store tests must reject approval while `edit_decision_json` is non-empty.
+- Media tests must cover deletion at the beginning, middle, and end; multiple normalized ranges; ranges crossing a
+  two-hour part boundary; all-content deletion rejection; cancellation; and missing input files.
+- Successful edit tests must assert `parts/...` changes to `edited/...`, total duration equals original duration minus
+  deleted duration, output timelines are contiguous, and `review_status` stays `REQUIRED`.
+- Bilibili request tests must assert that only the current edited output paths are passed to biliup after approval.
+- COS request tests must assert that compression input and regenerated object keys use the current edited output rows.
+- Invariant tests must attempt late publication/COS success after a review freeze and assert the database trigger rejects
+  it.
+- Frontend tests must distinguish `editing`, `waiting for review`, and `approved/uploading`, and must not treat a
+  successful apply-edit HTTP response as completed media work.
+- Manual acceptance: enter `00:00:00-00:19:53` against a `05:42:30` source and verify the displayed result is
+  `05:22:37`, paths are `edited/...`, remote states still say waiting for review, and upload begins only after approval.
+
+## Automatic upload-source cleanup tests
+
+- No disk pressure means no files or metadata change.
+- The oldest fully delivered source is reclaimed under pressure; its raw videos and controlled derived directory are
+  deleted while publication/COS rows remain.
+- The newest source per profile is retained even when fully delivered.
+- Active/writing, protected, reviewed, editing, pending, uploading, failed, and running-job sources are excluded.
+- Every enabled destination must succeed, while disabled destinations do not block cleanup; at least one successful
+  destination is required.
+- Cleanup persists `DELETING` before file removal and ends in `DELETED` or `FAILED`; repair skips all non-`AVAILABLE`
+  cleanup states.

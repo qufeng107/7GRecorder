@@ -49,6 +49,30 @@
 - Retry is shown only for failed or cancelled jobs. Cancel is shown only for non-running, non-terminal jobs.
 - Jobs reuse the shared search and sort toolbar so later server-side filtering can replace client-side filtering cleanly.
 
+## Upload Review And Editing
+
+- Active recordings appear in the recording list before grouping/package completion so review can be requested early.
+- A parent row exposes `Require review` when it is eligible and `Approve review` while its upload source is
+  `REQUIRED`. Approval is a separate deliberate action; applying an edit never approves automatically.
+- Expanded reviewed rows show local publish-part download actions, a deletion-range editor, edit job state, and the
+  independent Bilibili/COS states.
+- The range editor accepts one deletion interval per line in `HH:MM:SS-HH:MM:SS` form. Values refer to the complete
+  parent timeline, not to the currently displayed part.
+- `Apply edit` queues background media work. The UI must keep showing the review block and must not imply success merely
+  because the textarea was accepted or cleared.
+- The reliable edit-success indicators are: output paths change to `edited/...`, total/output durations and sizes are
+  refreshed, the edit job succeeds, and no pending edit decision remains.
+- `Approve review` remains blocked by the backend while edit work is pending. After approval, local review downloads
+  disappear and Bilibili/COS progress resumes independently.
+- Original segments are inspection/audit material and remain visually separate from current publish parts. Upload
+  status is always attached to the current publish-part rows.
+- For `READY_TO_UPLOAD` sources, the parent status is derived from enabled destination states: `Upload failed` wins over
+  `Uploading`, and all enabled destinations successful displays `Upload complete`. `Ready to upload` is reserved for a
+  source that still has pending/waiting delivery work.
+- Once review is approved, the action label is `Re-review`, not `Require review`. A completed Bilibili publication does
+  not show a disabled review button that looks like current state.
+- The expanded detail shows the latest Bilibili publication error and per-output COS error when a module is failed.
+
 ## Upload Settings
 
 - Bilibili and COS settings are managed from a dedicated Upload Settings page, separate from Recording Profiles and

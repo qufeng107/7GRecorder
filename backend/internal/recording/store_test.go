@@ -634,6 +634,7 @@ func TestCleanupCandidatesExcludeProtectedRecordings(t *testing.T) {
 	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
 		t.Fatalf("ReconcileLocal returned error: %v", err)
 	}
+	seedDeliveredCleanupSource(t, ctx, database, actor.ID, 1, 1)
 	candidates, err := store.CleanupCandidates(ctx, actor, 10)
 	if err != nil {
 		t.Fatalf("CleanupCandidates returned error: %v", err)
@@ -684,6 +685,14 @@ func TestRunLocalCleanupDeletesOldestUnprotectedCompletedRecording(t *testing.T)
 	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
 		t.Fatalf("ReconcileLocal returned error: %v", err)
 	}
+	seedDeliveredCleanupSource(t, ctx, database, actor.ID, 1, 1)
+	derivedPath := filepath.Join(cfg.DataRoot, "upload-sources", "1", "1", "parts", "part-01.flv")
+	if err := os.MkdirAll(filepath.Dir(derivedPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll derived output returned error: %v", err)
+	}
+	if err := os.WriteFile(derivedPath, []byte("derived"), 0o644); err != nil {
+		t.Fatalf("WriteFile derived output returned error: %v", err)
+	}
 	if _, err := store.UpsertLocalStorageSettings(ctx, actor, LocalStorageSettingsUpsert{
 		MaxRecordingBytes:          1,
 		MinSystemFreeBytes:         1,
@@ -697,11 +706,21 @@ func TestRunLocalCleanupDeletesOldestUnprotectedCompletedRecording(t *testing.T)
 	if err != nil {
 		t.Fatalf("RunLocalCleanup returned error: %v", err)
 	}
-	if result.DeletedRecordings != 1 || result.DeletedFiles != 1 || result.ReclaimedBytes != 5 {
+	if result.DeletedRecordings != 1 || result.DeletedFiles != 1 || result.ReclaimedBytes != 12 {
 		t.Fatalf("unexpected cleanup result: %#v", result)
 	}
 	if _, err := os.Stat(filePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected file to be deleted, stat err=%v", err)
+	}
+	if _, err := os.Stat(derivedPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected derived output to be deleted, stat err=%v", err)
+	}
+	var cleanupStatus string
+	if err := database.QueryRowContext(ctx, `SELECT local_cleanup_status FROM upload_sources WHERE id = 1`).Scan(&cleanupStatus); err != nil {
+		t.Fatalf("read upload source cleanup status returned error: %v", err)
+	}
+	if cleanupStatus != "DELETED" {
+		t.Fatalf("expected delivered source to be marked deleted, got %q", cleanupStatus)
 	}
 
 	items, err := store.List(ctx, actor)
@@ -710,6 +729,55 @@ func TestRunLocalCleanupDeletesOldestUnprotectedCompletedRecording(t *testing.T)
 	}
 	if len(items) != 1 || items[0].LocalStorageStatus != "DELETED" || items[0].Files[0].FileStatus != "DELETED" {
 		t.Fatalf("expected deleted metadata, got %#v", items)
+	}
+}
+
+func TestAutomaticCleanupRequiresAllEnabledDestinationsAndRetainsNewestSource(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name: "7G", RoomID: "1741048619", StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title: "old", StartedAt: "2026-09-05T10:00:00Z", CompletedAt: "2026-09-05T10:30:00Z", DurationMs: 1800000, SizeBytes: 5,
+	})
+	seedDeliveredCleanupSource(t, ctx, database, actor.ID, 1, 1)
+	if _, err := database.ExecContext(ctx, `UPDATE publications SET status = 'FAILED' WHERE id = 1`); err != nil {
+		t.Fatalf("mark publication failed returned error: %v", err)
+	}
+
+	store := NewStore(database, cfg)
+	if _, err := store.UpsertLocalStorageSettings(ctx, actor, LocalStorageSettingsUpsert{
+		MaxRecordingBytes: 1, MinSystemFreeBytes: 1, CleanupTargetRatio: 0.5, AbsoluteEmergencyFreeBytes: 1,
+	}); err != nil {
+		t.Fatalf("UpsertLocalStorageSettings returned error: %v", err)
+	}
+	result, err := store.RunAutomaticUploadSourceCleanup(ctx, 10)
+	if err != nil {
+		t.Fatalf("RunAutomaticUploadSourceCleanup returned error: %v", err)
+	}
+	if result.DeletedRecordings != 0 {
+		t.Fatalf("expected failed Bilibili delivery to block cleanup, got %#v", result)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE publications SET status = 'VERIFIED' WHERE id = 1`); err != nil {
+		t.Fatalf("mark publication verified returned error: %v", err)
+	}
+	result, err = store.RunAutomaticUploadSourceCleanup(ctx, 10)
+	if err != nil {
+		t.Fatalf("second RunAutomaticUploadSourceCleanup returned error: %v", err)
+	}
+	if result.DeletedRecordings != 1 {
+		t.Fatalf("expected delivered old source cleanup, got %#v", result)
+	}
+	var newestStatus string
+	if err := database.QueryRowContext(ctx, `SELECT local_cleanup_status FROM upload_sources WHERE id = 2`).Scan(&newestStatus); err != nil {
+		t.Fatalf("read newest cleanup status returned error: %v", err)
+	}
+	if newestStatus != "AVAILABLE" {
+		t.Fatalf("expected newest source to remain available, got %q", newestStatus)
 	}
 }
 
@@ -743,6 +811,7 @@ func TestRunLocalCleanupSkipsProtectedRecording(t *testing.T) {
 	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
 		t.Fatalf("ReconcileLocal returned error: %v", err)
 	}
+	seedDeliveredCleanupSource(t, ctx, database, actor.ID, 1, 1)
 	items, err := store.List(ctx, actor)
 	if err != nil {
 		t.Fatalf("List returned error: %v", err)
@@ -1573,6 +1642,34 @@ func TestRepairUploadSourcesResetsMissingDerivedFilesToMerge(t *testing.T) {
 	}
 }
 
+func TestRepairUploadSourcesSkipsIntentionalLocalCleanup(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name: "7G", RoomID: "1741048619", StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, status, recording_count, local_cleanup_status, local_deleted_at)
+		VALUES (1, 1, 'cleaned', '1741048619', 'Streamer',
+			'2026-09-05T10:00:00Z', '2026-09-05T11:00:00Z', 'READY_TO_UPLOAD', 1, 'DELETED', CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed cleaned upload source returned error: %v", err)
+	}
+
+	result, err := NewStore(database, cfg).RepairUploadSources(ctx, actor)
+	if err != nil {
+		t.Fatalf("RepairUploadSources returned error: %v", err)
+	}
+	if result.Checked != 0 || result.ResetToMerge != 0 || result.ResetToPackage != 0 {
+		t.Fatalf("expected intentional cleanup to be ignored by repair, got %#v", result)
+	}
+}
+
 func TestDiscoverUploadSourcesBackfillsMissingMergeJobs(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
@@ -1706,6 +1803,44 @@ func insertRecordingMetadata(t *testing.T, ctx context.Context, database *sql.DB
 		VALUES (?, ?, ?, 'video', 'CLOSED', ?, ?, ?)
 	`, recordingID, "recordings/1741048619-Streamer/"+req.Title+".flv", req.Title+".flv", req.SizeBytes, req.DurationMs, req.CompletedAt); err != nil {
 		t.Fatalf("insert recording file returned error: %v", err)
+	}
+}
+
+func seedDeliveredCleanupSource(t *testing.T, ctx context.Context, database *sql.DB, ownerUserID, recordingID, recordingFileID int64) {
+	t.Helper()
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO credentials
+			(id, owner_user_id, scope, platform, purpose, account_label, encrypted_secret, status)
+		VALUES (1, ?, 'USER', 'bilibili', 'PUBLISHER', 'cleanup test', X'00', 'UNVERIFIED');
+		INSERT INTO publishing_profiles
+			(id, recording_profile_id, platform, credential_id, enabled, settings_json)
+		VALUES (1, 1, 'bilibili', 1, 1, '{}');
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, title, source_room_id, streamer_name_snapshot,
+				started_at, completed_at, duration_ms, status, total_bytes, recording_count,
+				file_count, max_gap_seconds, merge_gap_threshold_seconds, ready_at)
+		VALUES
+			(1, 1, 'cleanup-old', 'old delivered source', '1741048619', 'Streamer',
+				'2026-09-05T10:00:00Z', '2026-09-05T10:30:00Z', 1800000,
+				'READY_TO_UPLOAD', 5, 1, 1, 0, 600, CURRENT_TIMESTAMP),
+			(2, 1, 'cleanup-newest', 'newest retained source', '1741048619', 'Streamer',
+				'2026-09-06T10:00:00Z', '2026-09-06T10:30:00Z', 1800000,
+				'MERGE_PENDING', 0, 0, 0, 0, 600, NULL);
+		INSERT INTO upload_source_segments
+			(upload_source_id, recording_id, recording_file_id, sort_order, source_started_at,
+				source_completed_at, timeline_start_ms, timeline_end_ms, relative_path, size_bytes, duration_ms)
+		SELECT 1, ?, ?, 0, rec.started_at, rec.completed_at, 0, rec.duration_ms,
+			rf.relative_path, rf.size_bytes, rf.duration_ms
+		FROM recordings rec
+		JOIN recording_files rf ON rf.id = ?
+		WHERE rec.id = ?;
+		INSERT INTO publications
+			(id, recording_profile_id, upload_source_id, platform, credential_id, external_id,
+				external_url, status, published_at, verified_at)
+		VALUES (1, 1, 1, 'bilibili', 1, 'BV1cleanup', 'https://www.bilibili.com/video/BV1cleanup',
+			'VERIFIED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+	`, ownerUserID, recordingID, recordingFileID, recordingFileID, recordingID); err != nil {
+		t.Fatalf("seed delivered cleanup source returned error: %v", err)
 	}
 }
 

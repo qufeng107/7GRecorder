@@ -587,3 +587,22 @@ Terraform
 ```
 
 GitHub Actions + immutable artifact + SSH 已足够。
+
+---
+
+## 17. Review Feature Migration And Rollback
+
+The upload review release requires migrations `00007_upload_review_gate.sql` and
+`00008_review_gate_invariants.sql`. Production deployment must keep the normal pre-migration SQLite backup and verify
+both migrations before the new backend starts serving review actions.
+
+These migrations are forward-only. If a rollback must cross back before the review feature, stop only the 7GRecorder
+application worker, keep BililiveRecorder running, and restore the matching pre-migration database backup before
+starting the older application. Do not remove the review triggers or columns manually on a live database.
+
+A normal review-feature deploy/redeploy must not reset `review_status`, clear `edit_decision_json`, retry cancelled
+remote jobs, delete `edited/...` files, or restart BililiveRecorder.
+
+Automatic delivered-source cleanup additionally requires `00009_upload_source_local_cleanup.sql`. Existing rows
+must default to `local_cleanup_status = 'AVAILABLE'`; the migration itself deletes no files. Reclamation starts only
+when the worker observes disk pressure and an older source satisfies every remote-success and safety gate.

@@ -29,7 +29,7 @@ Recording 是基础能力；其余能力均为可选模块。
 - COS 上传/删除失败：不影响本地和 Bilibili；
 - AI/Songs 失败：不影响完整录播归档；
 - 网易云失效：不影响 Songs 本地播放；
-- 本地滚动清理不等待 Bilibili/COS/Songs 成功。
+- 本地业务视频滚动清理必须等待所有已启用远端目的地确认成功；未配置的可选模块不构成阻塞，Songs 等不持有视频副本的模块不参与视频删除判定。
 
 可选模块只共享 Recording/File 元数据和基础 Job Runtime，不形成跨模块 Pipeline。
 
@@ -316,7 +316,7 @@ SOURCE_MISSING
 - 进程中断后不得盲目重复投稿；
 - 任一必要视频分段已经滚动删除时标记 `SOURCE_MISSING`，第一版不投稿残缺半场；
 - Bilibili 成功/失败都不改变 Recording 完成状态；
-- Bilibili 状态不决定本地文件是否可以滚动删除；
+- Bilibili 模块启用时，只有 `VERIFIED` 才允许该 Upload Source 进入本地业务视频清理候选；Bilibili 失败仍不改变 Recording 完成状态，也不阻塞其他模块；
 - 第一版只从 Local Source 投稿，不自动从 COS 回源。
 
 Bilibili 是长期观看归档，不视为原始文件 bit-for-bit 备份。
@@ -719,3 +719,38 @@ WebSocket 基础设施
 - Operators may submit cut ranges against the parent upload-source timeline. The system must produce edited local publish parts, keep the source waiting for review, and only release Bilibili/COS upload after the operator approves review.
 - Approving review releases upload records and jobs back to pending, but must not implicitly re-enable a disabled publishing or COS profile.
 - The review decision must be persisted in the database before any future media edit/cut processor is allowed to release the upload source.
+
+## Review and edit acceptance criteria
+
+- An active recording is visible in the recording list before it has a completed upload source.
+- A successful review freeze persists `REQUIRED` before cancellation is requested from running Bilibili/COS workers.
+- Cut ranges use the parent upload-source timeline, are deletion ranges, and must satisfy `0 <= start_ms < end_ms <= duration_ms` after normalization.
+- Applying cuts is asynchronous. The source remains under review while the media job runs and after edited outputs are produced.
+- Edit completion is observable only when the edit job succeeds, `edit_decision_json` is cleared, and current output rows point to `edited/...` with recomputed duration and size. Clearing the textarea alone is not evidence of success.
+- Review approval is rejected while an edit decision is pending or an edit job has not safely replaced the output manifest.
+- After approval, Bilibili and COS must upload the current `upload_source_outputs`; when editing occurred, no pre-edit `parts/...` file may be selected.
+- Requiring review must not delete original segments, packaged parts, edited parts, publications, or COS records.
+- Cancelling an upload cannot prove that an external platform received no bytes or submission. A near-complete Bilibili freeze remains operationally ambiguous and must be checked before a manual retry.
+- A ready upload source must expose an operator-facing aggregate delivery state. If any enabled destination failed it
+  shows upload failure; if any destination is transferring it shows uploading; and when every enabled destination is
+  successful it shows upload complete instead of the packaging-level `READY_TO_UPLOAD` label.
+- After an approved review, a new review action must be labelled as re-review so it cannot be mistaken for a reverted
+  review state. Sources already published to Bilibili do not offer a misleading review action for the completed upload.
+- Bilibili and COS failure details must be visible from the upload-source detail view without requiring direct SQLite
+  access.
+
+## Automatic local reclamation after delivery
+
+- Disk-pressure cleanup runs automatically from the maintenance loop; it does not require an operator to notice a full
+  disk or press the manual cleanup button.
+- An upload source is reclaimable only when it is complete, not protected, not under review/edit, has no running job,
+  and every currently enabled remote destination has reached confirmed success (`VERIFIED` for Bilibili and
+  `AVAILABLE` for every current COS output).
+- At least one remote destination must be enabled and successful. Disabled modules are ignored, but a pending or failed
+  enabled module blocks cleanup.
+- The newest non-replaced upload source for each recording profile is retained locally even after successful delivery.
+  Active/writing recordings and all files belonging to them are never candidates.
+- Reclamation deletes only database-indexed closed source video files and the controlled derived directory belonging to
+  that upload source. It preserves database rows, publication/COS metadata, danmaku assets, and remote objects.
+- Cleanup state is persisted before filesystem deletion so periodic repair cannot mistake intentional removal for
+  damage and regenerate or re-upload the source.

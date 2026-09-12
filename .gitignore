@@ -216,6 +216,12 @@ __marimo__/
 
 # 7GRecorder
 backend/7grecorder
+.go-toolchain/
+.go-toolchain.zip
+.gocache/
+.gocache-linux/
+.node-toolchain/
+.node-toolchain.zip
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/

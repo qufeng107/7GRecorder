@@ -211,7 +211,7 @@ Current implementation note:
 
 - 未配置时无任何 Bilibili Job；
 - 上传失败不影响 Recording；
-- 本地滚动删除不等待 Publication；
+- 本地业务视频滚动删除等待所有已启用远端目的地确认成功；模块失败不改变 Recording 状态，但会阻止该 Upload Source 被回收；
 - retry 不重复投稿。
 
 ---
@@ -388,3 +388,22 @@ WebSocket infrastructure
 ```
 
 新增依赖必须解决当前真实问题。
+
+---
+
+## 16. Completed Increment: Upload Review And Editing (2026-09-12)
+
+Completed scope:
+
+- show active recordings before upload-source completion;
+- persist review requests on recordings and upload sources;
+- freeze pending/running Bilibili and COS work without stopping BililiveRecorder;
+- preserve a database-level late-completion guard;
+- allow reviewed local publish-part download;
+- accept parent-timeline deletion ranges and generate replacement `edited/...` parts;
+- require explicit approval after edit verification;
+- resume Bilibili and COS independently from the current output manifest.
+
+The completed increment does not include browser video preview, a graphical timeline editor, frame-accurate cuts, or
+automatic detection of content to remove. Those are optional future UI/media increments and must preserve the same
+review gate and current-output-manifest rules.

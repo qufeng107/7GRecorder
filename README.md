@@ -22,6 +22,8 @@
 - 7GRecorder 是业务控制中枢，不重新实现成熟的直播抓流、编解码和 Bilibili 上传底层。
 - **BililiveRecorder** 是独立录制执行器；7GRecorder 通过 HTTP API 下发配置，通过 Webhook 接收事件。
 - **biliup / FFmpeg / ffprobe** 作为 CLI 工具由 7GRecorder Worker 调用，不作为额外常驻服务。
+- Upload sources can be frozen for review before remote publishing, inspected through local part downloads, edited by
+  parent-timeline deletion ranges, and explicitly approved before Bilibili/COS resume from the edited output manifest.
 - 数据库使用本机 **SQLite**；任务队列也使用 SQLite 持久化，不引入 Redis / RabbitMQ / Kafka。
 - 媒体文件通过共享文件系统交互，不经过数据库或内部 HTTP 传输。
 - 本地录播采用**容量上限 + 最小系统剩余空间保护 + 最旧优先滚动删除**，避免录播写满系统盘影响同机其他服务。
@@ -66,12 +68,14 @@ Docker Compose
 
 ## 文档
 
+- [当前生产状态与交接](docs/CURRENT_STATUS.md)
 - [需求说明](docs/REQUIREMENTS.md)
 - [技术架构](docs/ARCHITECTURE.md)
 - [数据库设计](docs/DATABASE.md)
 - [开发计划](docs/DEVELOPMENT_PLAN.md)
 - [测试规范](docs/TESTING.md)
 - [API 设计约定](docs/API_DESIGN.md)
+- [前端交互约定](docs/FRONTEND_UI.md)
 - [外部集成边界](docs/INTEGRATIONS.md)
 - [CI/CD 与生产部署](docs/DEPLOYMENT.md)
 - [运行配置、运维与恢复](docs/OPERATIONS.md)
@@ -81,11 +85,9 @@ Docker Compose
 
 ## 当前阶段
 
-当前仓库处于 Pre-v1 **Phase 0 工程初始化** 阶段，已具备 GoFrame Backend、React/Vite Frontend、SQLite migration、Docker Compose、GitHub Actions CI 与 main-only Production Deploy 的基础骨架。
+当前仓库处于 Pre-v1 生产运行与持续完善阶段，不再是 Phase 0 工程骨架。已经上线自动录制、录像索引、两小时发布分片、Bilibili/COS 独立上传、上传进度、滚动存储以及生产 CI/CD。
 
-架构、模块自治、Recording 生命周期、SQLite Job Queue、本地/COS 滚动存储、API 约定、外部集成、CI/CD、生产部署、备份/恢复和运行安全边界均已确定。
-
-开发阶段仍需基于仓库固定的 BililiveRecorder/biliup 版本制作真实脱敏 fixture，并继续把 `DATABASE.md` / `API_DESIGN.md` 落成 DAO、DTO、OpenAPI 和业务实现；这些属于实现验证，不再是大的架构决策。
+上传审核与编辑链路也已实现：正在录制的内容可提前设为需要审核，分片后可本地下载检查、按父时间轴删除区间，并在人工点击“审核完成”后才会放行 Bilibili/COS。实际生产版本、已知限制和操作顺序以 `docs/CURRENT_STATUS.md` 为准。
 
 ## 工程入口
 

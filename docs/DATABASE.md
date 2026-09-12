@@ -849,3 +849,58 @@ upload status remains isolated in `upload_source_cos_objects`.
 - `upload_sources.edit_decision_json` stores reviewed cut/delete decisions as parent upload-source timeline ranges. If it is non-empty, upload-source Bilibili/COS jobs must remain blocked until the `APPLY_UPLOAD_SOURCE_EDIT` media job has produced safe outputs and cleared the decision.
 - Reconcile may still merge/package an upload source while review is required, because operators need the publish parts for inspection. Bilibili publication jobs and upload-source COS video jobs must not be created or executed while `review_status = 'REQUIRED'` or `edit_decision_json` is non-empty.
 - Database triggers reject transitions of Bilibili publications to `UPLOADING`/`VERIFYING`/`VERIFIED` and upload-source COS objects to `UPLOADING`/`AVAILABLE` while that gate is active. This prevents a cancelled worker's late completion from overriding an accepted review freeze.
+
+## Review persistence details
+
+Migration `00007_upload_review_gate.sql` adds the review fields and indexes. Migration
+`00008_review_gate_invariants.sql` adds the database-level Bilibili/COS guards. Both migrations are forward-only; a
+schema rollback requires restoring the pre-migration SQLite backup.
+
+`recordings` review columns:
+
+```text
+upload_review_status        NONE | REQUIRED
+upload_review_requested_at
+upload_review_completed_at
+upload_review_notes
+```
+
+`upload_sources` review/edit columns:
+
+```text
+review_status               NONE | REQUIRED | APPROVED
+review_requested_at
+review_completed_at
+review_notes
+edit_decision_json
+```
+
+`edit_decision_json` is a durable object whose `cuts` array contains normalized parent-timeline ranges:
+
+```json
+{"cuts":[{"start_ms":0,"end_ms":1193000}]}
+```
+
+While this JSON is non-empty, approval and remote execution remain blocked. A successful
+`APPLY_UPLOAD_SOURCE_EDIT` transaction updates the existing `upload_source_outputs` rows by sort order, changes their
+paths to the generated `edited/...` files, recomputes size/duration/timeline fields, resets output-linked COS metadata,
+and clears `edit_decision_json`. It deliberately leaves `review_status = 'REQUIRED'` for human verification.
+
+The current rows in `upload_source_outputs` are the publish manifest. Historical files may remain on disk temporarily,
+but their paths are not upload inputs after the rows have been replaced.
+
+## Upload-source local reclamation
+
+`upload_sources.local_cleanup_status` records intentional derived/source-video reclamation:
+
+```text
+AVAILABLE | DELETING | DELETED | FAILED
+```
+
+`upload_sources.local_deleted_at` records successful completion. Cleanup claims a source by changing `AVAILABLE` to
+`DELETING` before deleting files. Repair skips any source not in `AVAILABLE`, preventing intentional deletion from
+being interpreted as package corruption. A successful cleanup keeps upload-source/output/publication/COS rows for
+history and remote download metadata while marking associated closed source video files and recordings locally
+deleted.
+
+Migration `00009_upload_source_local_cleanup.sql` introduces these fields and an index. It does not delete data.
