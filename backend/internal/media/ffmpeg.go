@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -80,6 +81,7 @@ type CompressionRequest struct {
 	InputRelativePath  string
 	OutputRelativePath string
 	Preset             string
+	Threads            int64
 }
 
 type CompressionResult struct {
@@ -879,19 +881,7 @@ func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (Com
 	defer os.RemoveAll(workDir)
 
 	tempOutput := compressionTempOutputPath(workDir, outputPath)
-	cmd := exec.CommandContext(ctx, m.FFmpegPath,
-		"-hide_banner", "-loglevel", "error",
-		"-i", inputPath,
-		"-map", "0:v:0", "-map", "0:a?",
-		"-c:v", "libx264",
-		"-preset", "medium",
-		"-crf", "23",
-		"-pix_fmt", "yuv420p",
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-movflags", "+faststart",
-		"-y", tempOutput,
-	)
+	cmd := exec.CommandContext(ctx, m.FFmpegPath, compressionArgs(inputPath, tempOutput, req.Threads)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
@@ -914,6 +904,26 @@ func (m FFmpegMerger) Compress(ctx context.Context, req CompressionRequest) (Com
 		return CompressionResult{}, err
 	}
 	return CompressionResult{RelativePath: req.OutputRelativePath, SizeBytes: outputInfo.Size(), Preset: preset}, nil
+}
+
+func compressionArgs(inputPath string, outputPath string, threads int64) []string {
+	if threads <= 0 {
+		threads = 2
+	}
+	return []string{
+		"-hide_banner", "-loglevel", "error",
+		"-i", inputPath,
+		"-map", "0:v:0", "-map", "0:a?",
+		"-c:v", "libx264",
+		"-preset", "medium",
+		"-crf", "23",
+		"-threads", strconv.FormatInt(threads, 10),
+		"-pix_fmt", "yuv420p",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-movflags", "+faststart",
+		"-y", outputPath,
+	}
 }
 
 func compressionTempOutputPath(workDir string, outputPath string) string {

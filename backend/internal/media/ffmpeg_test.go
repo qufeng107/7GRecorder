@@ -124,3 +124,26 @@ func TestCompressionTempOutputKeepsFinalExtension(t *testing.T) {
 		t.Fatalf("unexpected temp output path: %q", path)
 	}
 }
+
+func TestCompressionArgsLimitVideoEncodingThreads(t *testing.T) {
+	args := compressionArgs("input.flv", "output.mp4", 2)
+	for index, arg := range args {
+		if arg == "-threads" {
+			if index+1 >= len(args) || args[index+1] != "2" {
+				t.Fatalf("unexpected thread argument in %#v", args)
+			}
+			return
+		}
+	}
+	t.Fatalf("compression args missing -threads: %#v", args)
+}
+
+func TestCompressionArgsUseSafeThreadDefault(t *testing.T) {
+	args := compressionArgs("input.flv", "output.mp4", 0)
+	for index, arg := range args {
+		if arg == "-threads" && index+1 < len(args) && args[index+1] == "2" {
+			return
+		}
+	}
+	t.Fatalf("compression args missing default thread cap: %#v", args)
+}

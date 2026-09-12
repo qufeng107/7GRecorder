@@ -175,6 +175,29 @@ printf 'ResponseData { code: 0, data: Some(Object {"bvid": String("BV1abcDEF234"
 	}
 }
 
+func TestBiliupProgressStateParsesANSIProgressLine(t *testing.T) {
+	request := BilibiliUploadRequest{Parts: []BilibiliUploadPart{
+		{SourcePath: "/data/part1.flv", SizeBytes: 317273318},
+	}}
+	state := newBiliupProgressState(request)
+	var progresses []UploadProgress
+	state.observe(context.Background(), "\x1b[2K\x1b[1G\u28e4 [00:03:11] [====] \x1b[32m125.22\x1b[0m MiB/\x1b[36m302.58 MiB\x1b[0m (664.71 KiB/s, 5m)", func(_ context.Context, progress UploadProgress) {
+		progresses = append(progresses, progress)
+	})
+
+	if len(progresses) != 1 {
+		t.Fatalf("expected one progress update, got %d", len(progresses))
+	}
+	got := progresses[0]
+	wantCurrent := parseBiliupBytes("125.22", "MiB")
+	if got.CurrentBytes != wantCurrent || got.TotalBytes != request.Parts[0].SizeBytes {
+		t.Fatalf("progress = %#v, want current=%d total=%d", got, wantCurrent, request.Parts[0].SizeBytes)
+	}
+	if got.Message != "uploading to bilibili" {
+		t.Fatalf("message = %q", got.Message)
+	}
+}
+
 func TestBiliupCLIUploaderFallsBackWhenPartitionIsRejected(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake shell executable test is Linux-only")

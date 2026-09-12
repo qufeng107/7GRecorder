@@ -423,6 +423,7 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 			InputRelativePath:  request.SourceRelativePath,
 			OutputRelativePath: compressedRelativePath,
 			Preset:             w.cfg.COSCompressionPreset,
+			Threads:            w.cfg.COSCompressionThreads,
 		})
 		if err != nil {
 			message := truncateError(err)

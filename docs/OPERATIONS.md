@@ -575,6 +575,11 @@ uploads refresh job progress and `heartbeat_at`; `COS_UPLOAD_MAX_BYTES_PER_SECON
 per COS worker. Bilibili throughput is controlled by the persisted biliup `upload_limit` concurrency setting until a
 separate network shaper is designed.
 
+The admin Jobs page is the authoritative live progress view. Bilibili shows aggregate transferred bytes across all
+parts after the adapter parses biliup progress output. COS shows per-object network upload progress after its optional
+compression stage; while FFmpeg is still producing the derived object, the recording detail shows `COMPRESSING` and no
+network percentage is expected. `COS_COMPRESSION_THREADS` defaults to 2 so this stage does not consume every CPU core.
+
 不是全局统一指数退避，Job Handler 使用简单默认值：
 
 | Job | 自动尝试 | 建议退避 | 特殊规则 |

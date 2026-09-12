@@ -177,9 +177,11 @@ CLI 文本解析集中在 Adapter。
 升级 biliup 必须更新 fixture。
 
 Biliup does not expose a hard bytes-per-second upload limit in the pinned CLI. 7GRecorder exposes and persists the
-CLI concurrency limit (`upload_limit`, default 1) and streams adapter output to job progress. A true Bilibili bandwidth
+CLI concurrency limit (`upload_limit`, default 1) and streams adapter output to job progress. The adapter normalizes
+ANSI/control sequences from the pinned CLI progress renderer before parsing transferred and total bytes; the admin
+Jobs page displays the resulting percentage. A true Bilibili bandwidth
 cap requires an explicit external shaper/proxy design. COS upload progress is measured in-process by wrapping the SDK
-request body.
+request body and is displayed by the same Jobs progress component once network upload begins.
 
 ---
 
@@ -221,12 +223,13 @@ container: mp4
 video:     libx264, yuv420p, CRF 23, preset medium
 audio:     aac, 128k, keep existing audio stream count conservatively
 flags:     +faststart
+threads:   2 by default for COS-derived video encoding
 ```
 
 示例语义，不作为 shell 拼接模板：
 
 ```text
-ffmpeg -i input.flv -map 0:v:0 -map 0:a? -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output.mp4
+ffmpeg -i input.flv -map 0:v:0 -map 0:a? -c:v libx264 -preset medium -crf 23 -threads 2 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output.mp4
 ```
 
 选择理由：
@@ -234,6 +237,7 @@ ffmpeg -i input.flv -map 0:v:0 -map 0:a? -c:v libx264 -preset medium -crf 23 -pi
 - H.264/AAC/MP4 兼容性强，COS 下载和浏览器播放都稳定；
 - CRF 23 通常能明显缩小直播录屏体积，同时不是激进破坏性压缩；
 - `medium` 速度和压缩率平衡，后续可允许 SUPER_ADMIN 改为 `slow` 换取更小体积；
+- `COS_COMPRESSION_THREADS` 默认 2，只限制 COS 派生压缩，为录制与管理 API 保留 CPU；
 - 输出先写 Job temp，再用 ffprobe 验证可读、时长偏差在容忍范围内后才进入 COS 上传。
 
 如果输入已经很小或压缩收益低，以后可以仍然上传原封装分片，或把压缩结果标记为 `SKIPPED_LOW_GAIN`。当前实现优先

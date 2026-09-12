@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 )
@@ -22,8 +23,9 @@ const defaultBiliupPath = "biliup"
 
 var (
 	bilibiliBVIDPattern     = regexp.MustCompile(`BV[0-9A-Za-z]+`)
-	biliupFileProgressRegex = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s+([KMGT]?i?B)/([0-9]+(?:\.[0-9]+)?)\s+([KMGT]?i?B)`)
+	biliupFileProgressRegex = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)`)
 	biliupCompletedRegex    = regexp.MustCompile(`Upload completed:\s+(.+?)\s+=>`)
+	biliupANSIRegex         = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 )
 
 type BiliupCLIUploader struct {
@@ -213,7 +215,7 @@ func (s *biliupProgressState) observe(ctx context.Context, line string, progress
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	line = strings.TrimSpace(line)
+	line = normalizeBiliupOutputLine(line)
 	if line == "" {
 		return
 	}
@@ -244,6 +246,17 @@ func (s *biliupProgressState) observe(ctx context.Context, line string, progress
 	if strings.Contains(line, "pre_upload") || strings.Contains(line, "Retry attempt") || strings.Contains(line, "APP") {
 		progress(ctx, UploadProgress{CurrentBytes: s.lastCurrent, TotalBytes: s.totalBytes, Message: truncateBiliupProgressMessage(line)})
 	}
+}
+
+func normalizeBiliupOutputLine(line string) string {
+	line = biliupANSIRegex.ReplaceAllString(line, "")
+	line = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\t' {
+			return -1
+		}
+		return r
+	}, line)
+	return strings.TrimSpace(line)
 }
 
 func parseBiliupBytes(number string, unit string) int64 {

@@ -237,6 +237,7 @@ Current implementation note:
 - 已实现：将 `UPLOAD_MAX_PART_BYTES` 默认值从早期 4 GiB 调整到更保守的 3.8GB 级别，避免超过 Bilibili
   单文件上传边界；
 - 已实现：COS 上传前按受控 preset 压缩每个 output part，默认 `h264_crf23_medium_mp4`；
+- 已实现：COS 派生压缩通过 `COS_COMPRESSION_THREADS` 限制 FFmpeg 编码线程（默认 2）；
 - 已实现：COS 对象记录原始大小、上传对象大小、压缩状态和压缩 preset；
 - 当前开发：原始弹幕文件按 `recording_files.kind = 'danmaku'` 扫描入库，使用 `UPLOAD_COS_RECORDING_FILE`
   任务上传到 COS `raw/` 前缀；先归档原文，不解析、不对齐时间轴；

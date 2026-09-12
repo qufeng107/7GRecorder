@@ -224,10 +224,12 @@ Optional upload pressure controls:
 
 ```env
 COS_UPLOAD_MAX_BYTES_PER_SECOND=0
+COS_COMPRESSION_THREADS=2
 ```
 
 `0` leaves COS unlimited. Bilibili uses the per-profile `upload_limit` setting passed to biliup as `--limit`; the pinned
-CLI does not provide a hard bytes-per-second limiter.
+CLI does not provide a hard bytes-per-second limiter. `COS_COMPRESSION_THREADS` is a positive FFmpeg video-encoding
+thread cap for COS-derived files; invalid or zero values fall back to 2.
 
 Production deploys build the Go binary on GitHub Actions and include it as `bin/7grecorder` in the release artifact.
 The production server builds a small app image from the cached runtime base image and the release binary. The deploy

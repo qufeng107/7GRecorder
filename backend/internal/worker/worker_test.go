@@ -603,6 +603,7 @@ func TestRunOnceCompressesCOSObjectBeforeUpload(t *testing.T) {
 	cfg, database := openTestDBWithConfig(t, ctx)
 	cfg.COSCompressionEnabled = true
 	cfg.COSCompressionPreset = upload.COSCompressionPresetH264CRF23MediumMP4
+	cfg.COSCompressionThreads = 2
 	actor := bootstrapTestAdmin(t, ctx, database)
 	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
 		Name:         "7G Live",
@@ -690,6 +691,9 @@ func TestRunOnceCompressesCOSObjectBeforeUpload(t *testing.T) {
 	}
 	if compressor.request.InputRelativePath != sourceRelativePath || compressor.request.OutputRelativePath != compressedRelativePath {
 		t.Fatalf("unexpected compression request: %#v", compressor.request)
+	}
+	if compressor.request.Threads != 2 {
+		t.Fatalf("compression threads = %d, want 2", compressor.request.Threads)
 	}
 	if cosUploader.request.SourcePath != compressedPath {
 		t.Fatalf("expected compressed upload path %q, got %q", compressedPath, cosUploader.request.SourcePath)

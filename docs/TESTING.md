@@ -65,6 +65,10 @@ Bilibili CLI adapter tests use a fake executable instead of a real Bilibili acco
 construction, temp `cookies.json` creation, BV id parsing, and rejection of browser cookie strings. Real biliup fixture
 refresh remains a pinned-version maintenance task and must not introduce real secrets into the repository.
 
+Progress regression tests include carriage-return progress lines and ANSI control sequences from the pinned biliup
+renderer, and assert non-zero aggregate byte progress. FFmpeg compression tests assert the configured COS thread cap is
+passed as a structured `-threads` argument rather than shell text.
+
 ---
 
 ## 5. 模块隔离测试 — 必须有

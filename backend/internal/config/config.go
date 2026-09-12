@@ -19,6 +19,7 @@ type Config struct {
 	COSUploadMaxBytesPerSec   int64
 	COSCompressionEnabled     bool
 	COSCompressionPreset      string
+	COSCompressionThreads     int64
 	LogLevel                  string
 }
 
@@ -41,6 +42,7 @@ func LoadFromEnv() Config {
 		COSUploadMaxBytesPerSec:   envInt64("COS_UPLOAD_MAX_BYTES_PER_SECOND", 0),
 		COSCompressionEnabled:     envBool("COS_COMPRESSION_ENABLED", true),
 		COSCompressionPreset:      env("COS_COMPRESSION_PRESET", "h264_crf23_medium_mp4"),
+		COSCompressionThreads:     envInt64("COS_COMPRESSION_THREADS", 2),
 		LogLevel:                  env("LOG_LEVEL", "info"),
 	}
 }
