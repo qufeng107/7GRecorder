@@ -21,15 +21,15 @@ import (
 )
 
 type Worker struct {
-	db         *sql.DB
-	recorder   recorder.SyncClient
-	cfg        config.Config
-	merger     media.Merger
-	packager   media.Packager
-	editor     media.Editor
-	cos        upload.COSUploader
-	bilibili   upload.BilibiliUploader
-	lockID     string
+	db       *sql.DB
+	recorder recorder.SyncClient
+	cfg      config.Config
+	merger   media.Merger
+	packager media.Packager
+	editor   media.Editor
+	cos      upload.COSUploader
+	bilibili upload.BilibiliUploader
+	lockID   string
 }
 
 type workerJob struct {
@@ -55,15 +55,15 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		cfg = cfgs[0]
 	}
 	return Worker{
-		db:         database,
-		recorder:   recorderClient,
-		cfg:        cfg,
-		merger:     media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		packager:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		editor:     media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		cos:        upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
-		bilibili:   upload.NewBiliupCLIUploader(cfg),
-		lockID:     fmt.Sprintf("%s:%d", host, os.Getpid()),
+		db:       database,
+		recorder: recorderClient,
+		cfg:      cfg,
+		merger:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		packager: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		editor:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		cos:      upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
+		bilibili: upload.NewBiliupCLIUploader(cfg),
+		lockID:   fmt.Sprintf("%s:%d", host, os.Getpid()),
 	}
 }
 
