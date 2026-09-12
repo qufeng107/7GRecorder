@@ -408,3 +408,21 @@ Completed scope:
 The completed increment does not include browser video preview, a graphical timeline editor, frame-accurate cuts, or
 automatic detection of content to remove. Those are optional future UI/media increments and must preserve the same
 review gate and current-output-manifest rules.
+
+---
+
+## 17. Validated Increment: Concise Bilibili Part Titles (2026-09-12)
+
+Validated on `dev` at `e4686395f1579bb578ff59fafda8b503a6abb806`; production release is intentionally pending
+until no Bilibili/COS/media worker is active.
+
+Completed scope:
+
+- present Bilibili multipart titles as `p01`, `p02`, `p03`, and so on;
+- create lightweight per-job symlink aliases instead of copying or renaming large media files;
+- preserve canonical local output names, database relative paths, and COS object keys;
+- remove aliases with the restricted biliup credential/work directory;
+- cover alias naming and original-target resolution with the fake biliup adapter test.
+
+This increment changes only future Bilibili submissions started after deployment. It does not rewrite an existing
+submission or alter COS archive naming.

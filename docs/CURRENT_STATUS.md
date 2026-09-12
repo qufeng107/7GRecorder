@@ -13,12 +13,32 @@ Recommended first-read order:
 
 ## Production
 
-- Current verified production commit: `44883f8a28e8a9962cfd90b2fec2af355001d4bc`.
+- Current verified production commit: `f3b7c68e79e507a4d1507f01ca4bbe706e346a1d`.
 - `main` runs the reusable CI gate before the release job; `dev` runs CI only.
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
+- Production includes safe delivered-source cleanup, review/module resume guards, Bilibili/COS progress reporting,
+  and the default two-thread limit for COS FFmpeg compression.
 - Normal backend deployment recreates only `7grecorder`. It must not use `docker compose down` or restart the
   independently recording `bililiverecorder` container.
+
+## Validated Dev Change Pending Production
+
+- `dev` currently ends at `e4686395f1579bb578ff59fafda8b503a6abb806` (`Use concise Bilibili part titles` plus
+  its build fix).
+- CI run `34710195150` passed the complete repository gate.
+- The Bilibili adapter presents multipart inputs through per-job aliases named `p01.<ext>`, `p02.<ext>`, and so on,
+  so new Bilibili submissions display concise part names such as `p01`, `p02`, and `p03`.
+- These aliases are symlinks inside the existing restricted biliup job directory. They neither copy multi-GB media
+  nor rename canonical upload-source files.
+- Persisted output paths and COS object keys keep their full traceable filenames. The change is Bilibili-only.
+- This change has not been pushed to `main` and has not been deployed. It cannot rename parts in a submission that
+  has already started.
+
+Before releasing this dev change, confirm the active source has no running Bilibili upload, COS upload/compression,
+or review-edit job. A backend release terminates worker subprocesses even though it correctly leaves
+`bililiverecorder` running. Check the Jobs page, or use read-only server inspection; do not manually rewrite job
+statuses merely to make deployment appear idle.
 
 ## Implemented Recording And Upload Flow
 
@@ -88,7 +108,6 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - Bilibili has no true bytes-per-second limiter in the pinned CLI. `upload_limit=1` limits upload concurrency, not
   exact bandwidth.
 - Bilibili verification/listing should later fill a missing BV URL when successful CLI output lacks an identifier.
-- Local derived-file cleanup after all enabled destinations reach a terminal state is still pending.
 - Danmaku timeline transformation and a richer browser media editor are still pending.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
