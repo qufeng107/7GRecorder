@@ -73,6 +73,10 @@ func (u BiliupCLIUploader) Upload(ctx context.Context, request BilibiliUploadReq
 			return BilibiliUploadResult{}, NewClassifiedError("SOURCE_MISSING", "bilibili upload part has no source path")
 		}
 	}
+	request, err = prepareBiliupPartAliases(workDir, request)
+	if err != nil {
+		return BilibiliUploadResult{}, err
+	}
 
 	cmd := exec.CommandContext(ctx, u.Path, buildBiliupArgs(cookieFile, request, primaryTID)...)
 	cmd.Dir = workDir
@@ -96,6 +100,27 @@ func (u BiliupCLIUploader) Upload(ctx context.Context, request BilibiliUploadReq
 		externalURL = "https://www.bilibili.com/video/" + externalID
 	}
 	return BilibiliUploadResult{ExternalID: externalID, ExternalURL: externalURL}, nil
+}
+
+func prepareBiliupPartAliases(workDir string, request BilibiliUploadRequest) (BilibiliUploadRequest, error) {
+	aliasDir := filepath.Join(workDir, "parts")
+	if err := os.MkdirAll(aliasDir, 0o700); err != nil {
+		return BilibiliUploadRequest{}, fmt.Errorf("create biliup part alias dir: %w", err)
+	}
+	for index := range request.Parts {
+		extension := filepath.Ext(request.Parts[index].SourcePath)
+		if extension == "" {
+			extension = ".flv"
+		}
+		title := fmt.Sprintf("p%02d", index+1)
+		aliasPath := filepath.Join(aliasDir, title+extension)
+		if err := os.Symlink(request.Parts[index].SourcePath, aliasPath); err != nil {
+			return BilibiliUploadRequest{}, fmt.Errorf("create biliup part alias %s: %w", title, err)
+		}
+		request.Parts[index].Title = title
+		request.Parts[index].SourcePath = aliasPath
+	}
+	return request, nil
 }
 
 func buildBiliupArgs(cookieFile string, request BilibiliUploadRequest, tid int) []string {

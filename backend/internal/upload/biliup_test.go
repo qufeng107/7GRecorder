@@ -21,10 +21,16 @@ func TestBiliupCLIUploaderRunsUploadCommandWithTempCookieFile(t *testing.T) {
 	fakeBiliup := filepath.Join(tempRoot, "fake-biliup")
 	argsOut := filepath.Join(tempRoot, "args.txt")
 	cookieOut := filepath.Join(tempRoot, "cookie.json")
+	aliasOut := filepath.Join(tempRoot, "aliases.txt")
 	script := `#!/bin/sh
 set -eu
 printf '%s\n' "$@" > "$BILIUP_ARGS_OUT"
 cp "$2" "$BILIUP_COOKIE_OUT"
+for arg in "$@"; do
+  case "$(basename "$arg")" in
+    p[0-9][0-9].*) printf '%s=%s\n' "$(basename "$arg")" "$(readlink "$arg")" >> "$BILIUP_ALIAS_OUT" ;;
+  esac
+done
 cat "$BILIUP_SUCCESS_FIXTURE"
 `
 	if err := os.WriteFile(fakeBiliup, []byte(script), 0o755); err != nil {
@@ -36,8 +42,11 @@ cat "$BILIUP_SUCCESS_FIXTURE"
 	}
 	t.Setenv("BILIUP_ARGS_OUT", argsOut)
 	t.Setenv("BILIUP_COOKIE_OUT", cookieOut)
+	t.Setenv("BILIUP_ALIAS_OUT", aliasOut)
 	t.Setenv("BILIUP_SUCCESS_FIXTURE", filepath.Join(workingDir, "testdata", "biliup", "upload_success.txt"))
 
+	part1 := filepath.Join(tempRoot, "full-recording-name-p01.flv")
+	part2 := filepath.Join(tempRoot, "full-recording-name-p02.flv")
 	cookie := json.RawMessage(`{"cookie_info":{"cookies":[{"name":"SESSDATA","value":"redacted"}]},"token_info":{"access_token":"redacted"}}`)
 	uploader := NewBiliupCLIUploader(config.Config{DataRoot: tempRoot, TempRoot: filepath.Join(tempRoot, "tmp"), BiliupPath: fakeBiliup})
 	result, err := uploader.Upload(context.Background(), BilibiliUploadRequest{
@@ -48,8 +57,8 @@ cat "$BILIUP_SUCCESS_FIXTURE"
 		Tags:           []string{"tag1", "tag2"},
 		Copyright:      1,
 		Parts: []BilibiliUploadPart{
-			{SourcePath: filepath.Join(tempRoot, "part1.flv")},
-			{SourcePath: filepath.Join(tempRoot, "part2.flv")},
+			{SourcePath: part1},
+			{SourcePath: part2},
 		},
 		Settings: BilibiliPublishingSettings{TID: 65, Submit: "web", UploadLimit: 2, Line: "bda2"},
 		Secret:   cookie,
@@ -87,8 +96,8 @@ cat "$BILIUP_SUCCESS_FIXTURE"
 		"tag1,tag2",
 		"--line",
 		"bda2",
-		"part1.flv",
-		"part2.flv",
+		"p01.flv",
+		"p02.flv",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("args missing %q in:\n%s", want, args)
@@ -101,6 +110,14 @@ cat "$BILIUP_SUCCESS_FIXTURE"
 	}
 	if strings.TrimSpace(string(cookieRaw)) != strings.TrimSpace(string(cookie)) {
 		t.Fatalf("cookie file mismatch:\n%s", cookieRaw)
+	}
+	aliasRaw, err := os.ReadFile(aliasOut)
+	if err != nil {
+		t.Fatalf("read aliases: %v", err)
+	}
+	aliases := string(aliasRaw)
+	if !strings.Contains(aliases, "p01.flv="+part1) || !strings.Contains(aliases, "p02.flv="+part2) {
+		t.Fatalf("unexpected aliases:\n%s", aliases)
 	}
 }
 
@@ -139,7 +156,7 @@ func TestBiliupCLIUploaderReportsProgress(t *testing.T) {
 	script := `#!/bin/sh
 set -eu
 printf ' 12.00 MiB/24.00 MiB (1.00 MiB/s, 12s)\r'
-printf 'Upload completed: part1.flv => cost 1.0s, 1.0 MB/s.\n'
+printf 'Upload completed: p01.flv => cost 1.0s, 1.0 MB/s.\n'
 printf 'ResponseData { code: 0, data: Some(Object {"bvid": String("BV1abcDEF234")}), message: "OK" }\n'
 `
 	if err := os.WriteFile(fakeBiliup, []byte(script), 0o755); err != nil {

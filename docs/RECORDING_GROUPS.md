@@ -21,6 +21,8 @@ Recording Profile before later upload work.
   `<profile-name>-<YYYYMMDD>-第NN场直播-pNN.flv`, where the date and live ordinal use China time for that recording
   profile. If the file is already within limits, packaging creates one named part; larger or longer files are split
   under `DATA_ROOT/upload-sources/<profile-id>/<source-id>/parts/`.
+- Bilibili presents these packaged parts through temporary `p01`, `p02`, ... aliases. The aliases affect only
+  Bilibili multipart titles; packaged filenames and COS object keys keep the full traceable names above.
 - COS may create compressed delivery derivatives from these post-package parts before upload. The derivative is a COS
   module concern: it must not overwrite the packaged part, must not become Bilibili's default source, and must retain a
   database link back to the post-package part and the original pre-package source timeline.

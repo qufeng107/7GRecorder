@@ -438,12 +438,8 @@ func (s Store) uploadSourceChinaOrdinal(ctx context.Context, profileID int64, up
 	return 1
 }
 
-func partTitle(relativePath string, fallback int) string {
-	name := strings.TrimSuffix(filepath.Base(relativePath), filepath.Ext(relativePath))
-	if strings.TrimSpace(name) == "" {
-		return fmt.Sprintf("P%02d", fallback)
-	}
-	return name
+func partTitle(_ string, fallback int) string {
+	return fmt.Sprintf("p%02d", fallback)
 }
 
 func parseTime(value string) time.Time {

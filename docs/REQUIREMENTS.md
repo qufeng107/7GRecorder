@@ -350,6 +350,9 @@ COS 对象，不影响 Bilibili 投稿和本地录制状态。
 COS 压缩必须限制 FFmpeg 视频编码线程，默认最多使用 2 个线程，为管理后台和正在运行的录制预留 CPU。该限制只
 作用于 COS 派生压缩，不改变 BililiveRecorder、发布分片封装或审核剪辑行为。
 
+Bilibili 多 P 投稿使用简短、稳定的分 P 名 `p01`、`p02`、`p03`……。该展示名只属于 Bilibili Adapter，
+不得重命名本地发布分片、改变数据库相对路径或改变 COS object key。
+
 需要记录：
 
 ```text

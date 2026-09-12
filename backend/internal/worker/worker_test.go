@@ -805,6 +805,9 @@ func TestRunOnceUploadsBilibiliPublication(t *testing.T) {
 	if len(uploader.request.Parts) != 1 || uploader.request.Parts[0].SourcePath == "" {
 		t.Fatalf("unexpected bilibili parts: %#v", uploader.request.Parts)
 	}
+	if uploader.request.Parts[0].Title != "p01" {
+		t.Fatalf("unexpected bilibili part title: %q", uploader.request.Parts[0].Title)
+	}
 	if len(uploader.request.Tags) != 2 || uploader.request.Copyright != 2 {
 		t.Fatalf("unexpected bilibili settings: %#v", uploader.request)
 	}

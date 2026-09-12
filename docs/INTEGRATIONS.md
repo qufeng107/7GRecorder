@@ -172,6 +172,11 @@ Verification result
 7GRecorder renders Bilibili title, description, tags, and multipart file metadata before calling the adapter. The
 adapter receives a stable upload request and must not read plaintext credential files from a long-lived location.
 
+Before invoking biliup, the adapter exposes each source through a per-job temporary alias named `p01.<ext>`,
+`p02.<ext>`, and so on. biliup therefore submits concise part titles while the canonical local filenames, persisted
+paths, and COS object names remain unchanged. Aliases must not copy multi-GB media and are removed with the credential
+work directory after the command exits.
+
 CLI 文本解析集中在 Adapter。
 
 升级 biliup 必须更新 fixture。
