@@ -24,8 +24,8 @@ Recommended first-read order:
 
 ## Validated Dev Change Pending Production
 
-- `dev` currently ends at `e4686395f1579bb578ff59fafda8b503a6abb806` (`Use concise Bilibili part titles` plus
-  its build fix).
+- The concise Bilibili part-title implementation ended at `e4686395f1579bb578ff59fafda8b503a6abb806` and is included
+  in the current `dev` history.
 - CI run `34710195150` passed the complete repository gate.
 - The Bilibili adapter presents multipart inputs through per-job aliases named `p01.<ext>`, `p02.<ext>`, and so on,
   so new Bilibili submissions display concise part names such as `p01`, `p02`, and `p03`.
@@ -112,7 +112,8 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 
 ## Validated Dev Change Pending Production: Direct COS Video Upload
 
-- Implementation commit: `fc6c205` (`Upload original video parts to COS`). CI validation is pending.
+- Implementation commit: `fc6c205` (`Upload original video parts to COS`) with formatting fix `030e2a5`.
+- CI run `34723297009` passed the complete repository gate.
 - Stop creating COS-only MP4 or archive derivatives; upload each original publish part directly.
 - New COS video keys target `videos/YYYY-MM-DD/session-NN/pNN.<source-format>` below the configured profile prefix.
 - Bilibili and COS continue reading the same original publish part through independent jobs.
