@@ -3756,6 +3756,14 @@ func resetRemoteUploadsForReviewApprovalTx(ctx context.Context, tx *sql.Tx, uplo
 		WHERE upload_source_id = ?
 			AND platform = 'bilibili'
 			AND status IN ('PENDING', 'FAILED', 'UPLOADING', 'VERIFYING')
+			AND EXISTS (
+				SELECT 1
+				FROM publishing_profiles pp
+				WHERE pp.recording_profile_id = publications.recording_profile_id
+					AND pp.platform = 'bilibili'
+					AND pp.enabled = 1
+					AND pp.credential_id = publications.credential_id
+			)
 	`, uploadSourceID); err != nil {
 		return fmt.Errorf("reset bilibili publication after review approval: %w", err)
 	}
@@ -3767,6 +3775,16 @@ func resetRemoteUploadsForReviewApprovalTx(ctx context.Context, tx *sql.Tx, uplo
 		WHERE upload_source_id = ?
 			AND upload_source_output_id IS NOT NULL
 			AND status IN ('PENDING', 'FAILED', 'SOURCE_MISSING', 'UPLOADING')
+			AND EXISTS (
+				SELECT 1
+				FROM cos_storage_profiles csp
+				JOIN upload_source_outputs uso
+					ON uso.id = upload_source_cos_objects.upload_source_output_id
+					AND uso.upload_source_id = upload_source_cos_objects.upload_source_id
+					AND uso.status = 'READY_TO_UPLOAD'
+				WHERE csp.id = upload_source_cos_objects.cos_storage_profile_id
+					AND csp.enabled = 1
+			)
 	`, uploadSourceID); err != nil {
 		return fmt.Errorf("reset cos objects after review approval: %w", err)
 	}
@@ -3784,6 +3802,41 @@ func resetRemoteUploadsForReviewApprovalTx(ctx context.Context, tx *sql.Tx, uplo
 		WHERE upload_source_id = ?
 			AND type IN ('UPLOAD_BILIBILI', 'UPLOAD_COS_OBJECT')
 			AND status IN ('FAILED', 'CANCELLED')
+			AND (
+				(
+					type = 'UPLOAD_BILIBILI'
+					AND EXISTS (
+						SELECT 1
+						FROM publications p
+						JOIN publishing_profiles pp
+							ON pp.recording_profile_id = p.recording_profile_id
+							AND pp.platform = 'bilibili'
+							AND pp.enabled = 1
+							AND pp.credential_id = p.credential_id
+						WHERE p.id = jobs.publication_id
+							AND p.upload_source_id = jobs.upload_source_id
+							AND p.status = 'PENDING'
+					)
+				)
+				OR
+				(
+					type = 'UPLOAD_COS_OBJECT'
+					AND EXISTS (
+						SELECT 1
+						FROM upload_source_cos_objects co
+						JOIN cos_storage_profiles csp
+							ON csp.id = co.cos_storage_profile_id
+							AND csp.enabled = 1
+						JOIN upload_source_outputs uso
+							ON uso.id = co.upload_source_output_id
+							AND uso.upload_source_id = co.upload_source_id
+							AND uso.status = 'READY_TO_UPLOAD'
+						WHERE co.id = json_extract(jobs.payload_json, '$.cos_object_id')
+							AND co.upload_source_id = jobs.upload_source_id
+							AND co.status = 'PENDING'
+					)
+				)
+			)
 	`, uploadSourceID); err != nil {
 		return fmt.Errorf("reset upload jobs after review approval: %w", err)
 	}

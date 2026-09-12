@@ -349,6 +349,7 @@ System:
 ## Review/edit release gate
 
 - Store tests must reject approval while `edit_decision_json` is non-empty.
+- Store tests must prove approval resumes enabled destinations but leaves disabled Bilibili/COS records and jobs frozen; disabled destinations must never become runnable and fail as missing resources.
 - Media tests must cover deletion at the beginning, middle, and end; multiple normalized ranges; ranges crossing a
   two-hour part boundary; all-content deletion rejection; cancellation; and missing input files.
 - Successful edit tests must assert `parts/...` changes to `edited/...`, total duration equals original duration minus

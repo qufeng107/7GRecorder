@@ -1020,6 +1020,9 @@ Bilibili and COS reconcile independently from the current output rows
 The database review gate is authoritative. Application checks prevent new remote work, worker request loaders reject
 stale jobs, running commands are cancelled cooperatively, and SQLite triggers reject late remote-success transitions.
 Local merge/package and edit jobs remain MEDIA work; Bilibili and COS remain independent NETWORK work after approval.
+Approval must not make a job runnable when its destination profile is disabled or no longer matches the persisted
+credential/output relationship. Such jobs remain frozen for normal reconciliation after an explicit module enable;
+the worker must not misclassify this configuration state as a missing upload resource.
 
 `upload_source_outputs` is the only current publish-part manifest. Editing may change its paths from `parts/...` to
 `edited/...`; downstream adapters must resolve the rows again when a job starts and must never retain an older path

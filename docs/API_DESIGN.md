@@ -637,7 +637,8 @@ Go Request/Response DTO
   - Publication/COS state is returned to `PENDING` while the review gate remains authoritative, and late worker completion must not overwrite the review freeze.
 - `POST /api/v1/upload-sources/{id}/actions/approve-review`
   - Clears the review gate by setting `review_status=APPROVED`.
-  - Frozen or failed Bilibili/COS upload records and jobs for the source are reset to `PENDING`, but disabled publishing/COS profiles are not re-enabled implicitly.
+  - Frozen or failed Bilibili/COS upload records and jobs are reset to `PENDING` only when their current module profile is enabled and its credential/output relationship is still valid. Disabled destinations remain frozen and are not reported as missing resources.
+  - Disabled publishing/COS profiles are never re-enabled implicitly.
   - The normal upload reconciler is responsible for creating or running Bilibili and COS jobs after approval and after the relevant upload profile is enabled.
 - `POST /api/v1/upload-sources/{id}/actions/apply-edit`
   - Accepts `{ "cuts": [{ "start_ms": 123000, "end_ms": 150000 }] }` in parent upload-source timeline coordinates.
@@ -671,8 +672,9 @@ upload source/job state. Success is represented by a succeeded `APPLY_UPLOAD_SOU
 the operator explicitly approves it.
 
 `approve-review` returns a not-ready conflict when `edit_decision_json` remains non-empty. On success it resets only
-eligible failed/cancelled remote jobs and pending remote records; it does not enable disabled module profiles. Reconcile
-then schedules Bilibili and COS independently.
+eligible failed/cancelled remote jobs and pending remote records whose current destination profile is enabled and
+valid; it does not enable disabled module profiles. Disabled destinations remain frozen until a later explicit enable
+and reconcile. Reconcile then schedules Bilibili and COS independently.
 
 The local output download endpoint must re-resolve the requested output row, enforce `review_status = REQUIRED`, verify
 that the resolved path stays under `DATA_ROOT`, and fail when the local file is missing.

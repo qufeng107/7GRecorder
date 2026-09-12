@@ -717,7 +717,7 @@ WebSocket 基础设施
 - A reviewed upload source may continue local merge/package work, but Bilibili publishing and upload-source COS video upload must wait until review is approved.
 - While a parent upload source is waiting for review, operators with local-file permission may download the local packaged parts for inspection without waiting for COS.
 - Operators may submit cut ranges against the parent upload-source timeline. The system must produce edited local publish parts, keep the source waiting for review, and only release Bilibili/COS upload after the operator approves review.
-- Approving review releases upload records and jobs back to pending, but must not implicitly re-enable a disabled publishing or COS profile.
+- Approving review releases eligible upload records and jobs back to pending only for currently enabled destination profiles; disabled Bilibili or COS work remains frozen until explicitly enabled and reconciled.
 - The review decision must be persisted in the database before any future media edit/cut processor is allowed to release the upload source.
 
 ## Review and edit acceptance criteria
@@ -729,6 +729,7 @@ WebSocket 基础设施
 - Edit completion is observable only when the edit job succeeds, `edit_decision_json` is cleared, and current output rows point to `edited/...` with recomputed duration and size. Clearing the textarea alone is not evidence of success.
 - Review approval is rejected while an edit decision is pending or an edit job has not safely replaced the output manifest.
 - After approval, Bilibili and COS must upload the current `upload_source_outputs`; when editing occurred, no pre-edit `parts/...` file may be selected.
+- Approval releases only destinations whose current module profiles are enabled and whose credential/output links remain valid. A disabled destination stays frozen until explicitly enabled and reconciled, and must not fail as a missing upload resource merely because review was approved.
 - Requiring review must not delete original segments, packaged parts, edited parts, publications, or COS records.
 - Cancelling an upload cannot prove that an external platform received no bytes or submission. A near-complete Bilibili freeze remains operationally ambiguous and must be checked before a manual retry.
 - A ready upload source must expose an operator-facing aggregate delivery state. If any enabled destination failed it
