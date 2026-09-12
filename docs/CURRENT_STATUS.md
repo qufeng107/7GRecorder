@@ -110,11 +110,13 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - Bilibili verification/listing should later fill a missing BV URL when successful CLI output lacks an identifier.
 - Danmaku timeline transformation and a richer browser media editor are still pending.
 
-## Current Uncommitted Work
+## Validated Dev Change Pending Production: Direct COS Video Upload
 
+- Implementation commit: `fc6c205` (`Upload original video parts to COS`). CI validation is pending.
 - Stop creating COS-only MP4 or archive derivatives; upload each original publish part directly.
 - New COS video keys target `videos/YYYY-MM-DD/session-NN/pNN.<source-format>` below the configured profile prefix.
 - Bilibili and COS continue reading the same original publish part through independent jobs.
 - Existing FLV/MP4 COS object rows and keys remain unchanged. No automatic remote move or deletion is planned.
+- This change has not been pushed to `main` and has not been deployed.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
