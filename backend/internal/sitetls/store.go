@@ -297,7 +297,8 @@ func scheduleSyncTx(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO jobs (type, resource_class, business_key, payload_json, status, priority, max_attempts)
 		VALUES ('SYNC_SITE_TLS', 'NETWORK', 'system:site-tls:sync', '{}', 'PENDING', 90, 5)
-		ON CONFLICT(business_key) DO UPDATE SET status = 'PENDING', attempts = 0, run_after = CURRENT_TIMESTAMP,
+		ON CONFLICT(business_key) WHERE business_key IS NOT NULL DO UPDATE SET
+			status = 'PENDING', attempts = 0, run_after = CURRENT_TIMESTAMP,
 			locked_at = NULL, heartbeat_at = NULL, locked_by = NULL, last_error_class = NULL, last_error = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE jobs.status != 'RUNNING'
