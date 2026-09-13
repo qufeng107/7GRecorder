@@ -13,12 +13,12 @@ Recommended first-read order:
 
 ## Production
 
-- Current deployed production commit: `96dcc61fd4008311a516d9b7a4b2be1f029c59b6`.
+- Current deployed production commit: `d4ba421513f3be894ed060b2bd03f757db6668f9`.
 - `main` runs the reusable CI gate before the release job; `dev` runs CI only.
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
-- CI runs `34730687766` (dev) and `34730783719` (main) passed the complete repository gate. Production Deploy run
-  `34730783854` completed successfully.
+- CI runs `34778144266` (dev) and `34778284487` (main) passed the complete repository gate. Production Deploy run
+  `34778284588` completed successfully.
 - Production includes safe delivered-source cleanup, review/module resume guards, Bilibili/COS progress reporting,
   direct original-part COS upload, safe interrupted-job recovery, and verified BililiveRecorder room-config sync.
 - Normal backend deployment recreates only `7grecorder`. It must not use `docker compose down` or restart the
@@ -38,6 +38,11 @@ Recommended first-read order:
 
 - Active recordings appear in the admin recording list before an upload source exists.
 - Completed source recordings are grouped into one parent upload source and packaged directly into upload parts.
+- Parent discovery does not use possibly stale Profile `LIVE/RECORDING` runtime values as a permanent gate. It waits
+  for the merge gap and uses adjacent `ACTIVE` recordings, `WRITING` video rows, and recent adjacent recorder files as
+  the authoritative active-recording evidence.
+- The worker polls the Recorder room endpoint every 30 seconds to refresh Profile runtime display state. A failed
+  runtime read retains the last known state but cannot block closed-file discovery.
 - Packaging targets two-hour parts, while the configured maximum byte size remains authoritative. If the estimated
   two-hour part would exceed the byte limit, packaging first falls back to one hour and then uses a smaller safety
   estimate only for unusually high-bitrate input.
@@ -94,8 +99,8 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - BililiveRecorder 2.18.0 room sync uses `POST /api/room/{roomId}/config` and the real `OptionalRecordDanmaku`
   request shape. A 200 response is accepted only when returned room values match the desired settings.
 - Every Backend Worker startup requeues Recorder config sync, correcting settings previously reported as synced but
-  ignored by BililiveRecorder. The server-side saved config and first XML created after a new file opens still need
-  read-only production verification after release `96dcc61`.
+  ignored by BililiveRecorder. Production verification on 2026-09-13 confirmed `RecordDanmaku=true` in Recorder's
+  saved room config and one closed XML file beside each of five closed video segments.
 - Raw danmaku files are indexed only when BililiveRecorder actually writes a closed danmaku asset.
 - Closed raw danmaku assets are archived byte-for-byte to COS under the controlled `raw/` prefix.
 - Parsing, merging, and aligning danmaku to edited/split video timelines remains out of scope pending real samples.
@@ -119,8 +124,8 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - Before retrying an ambiguous Bilibili job, verify in Creator Center that the same title/date submission does not
   exist. The admin confirmation sends `confirm_ambiguous_bilibili=true` and atomically reuses the existing
   Publication and Job.
-- Release `96dcc61` still requires a read-only production state check before deciding whether any recovered
-  Bilibili job should be retried. Do not edit SQLite statuses manually.
+- The interrupted 2026-09-12 Bilibili job was retried only after Creator Center was checked and no matching submission
+  existed; it subsequently completed successfully. Do not edit SQLite statuses manually for future ambiguous jobs.
 
 ## Future Design Documents
 
