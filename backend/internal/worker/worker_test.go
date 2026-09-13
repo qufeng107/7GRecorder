@@ -287,6 +287,40 @@ func TestWorkerDrainPreventsJobClaim(t *testing.T) {
 	}
 }
 
+func TestWorkerStartupRequeuesRecorderSync(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name: "7G", RoomID: "1741048619", StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE jobs SET status = 'SUCCEEDED', attempts = 2 WHERE recording_profile_id = ? AND type = 'SYNC_RECORDER_PROFILE';
+		UPDATE recording_profile_runtime SET sync_status = 'SYNCED' WHERE recording_profile_id = ?;
+	`, created.ID, created.ID); err != nil {
+		t.Fatalf("seed completed recorder sync returned error: %v", err)
+	}
+
+	if err := New(database, &fakeRecorder{}).RequeueRecorderSyncJobs(ctx); err != nil {
+		t.Fatalf("RequeueRecorderSyncJobs returned error: %v", err)
+	}
+	var jobStatus, syncStatus string
+	var attempts int
+	if err := database.QueryRowContext(ctx, `
+		SELECT j.status, j.attempts, r.sync_status
+		FROM jobs j JOIN recording_profile_runtime r ON r.recording_profile_id = j.recording_profile_id
+		WHERE j.recording_profile_id = ? AND j.type = 'SYNC_RECORDER_PROFILE'
+	`, created.ID).Scan(&jobStatus, &attempts, &syncStatus); err != nil {
+		t.Fatalf("query recorder resync state returned error: %v", err)
+	}
+	if jobStatus != "PENDING" || attempts != 0 || syncStatus != "PENDING" {
+		t.Fatalf("unexpected recorder resync state: job=%s attempts=%d runtime=%s", jobStatus, attempts, syncStatus)
+	}
+}
+
 func TestRunOnceMergesPendingUploadSource(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDBWithConfig(t, ctx)

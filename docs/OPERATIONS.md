@@ -616,6 +616,9 @@ Worker 每次进程启动使用新的 lock identity，并在开始 reconciliatio
 - merge/package/edit/sync 等本地可逆任务恢复为 `PENDING`，且本次进程中断不消耗一次业务重试额度；
 - 未知 Job 类型按 `AMBIGUOUS/FAILED` 冻结，不猜测其幂等性。
 
+恢复结束后，Worker 必须将现有 `SYNC_RECORDER_PROFILE` Job 重新排队。同步仍受 deploy drain 控制，新容器 ready
+后才执行；这样每次 Backend 启动都会用 SQLite Desired State 校正 Recorder 房间配置漂移。
+
 管理员重试 `AMBIGUOUS` Bilibili Job 前必须先在创作中心确认同标题/日期稿件不存在。API 要求显式提交
 `confirm_ambiguous_bilibili=true`，随后才把原 Publication 与原 Job 原子恢复为 `PENDING`；没有确认不得重试。
 

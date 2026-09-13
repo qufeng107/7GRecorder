@@ -91,6 +91,7 @@ Recorder workdir/config 是**运行保障副本**：
 
 同步成功必须同时满足 HTTP 200 与响应 DTO 中 AutoRecord、分段、弹幕、画质的有效值和期望值一致。HTTP 成功但
 响应缺字段或值不一致视为同步失败，写入 runtime ERROR，避免产生“后台已开启但 Recorder 实际沿用默认值”的假成功。
+Backend Worker 每次启动都会把 Recorder 配置同步 Job 重新排队，以修正 Backend 停机期间或旧版本造成的配置漂移。
 
 日常业务不通过 BililiveRecorder WebUI 修改 Room；WebUI 只用于 debug/运维。
 

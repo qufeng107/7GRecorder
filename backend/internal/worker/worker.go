@@ -121,6 +121,10 @@ func (w Worker) Run(ctx context.Context) {
 	if recovery.Retryable > 0 || recovery.Ambiguous > 0 || recovery.Completed > 0 {
 		log.Printf("worker startup recovery completed: retryable=%d ambiguous=%d completed=%d", recovery.Retryable, recovery.Ambiguous, recovery.Completed)
 	}
+	if err := w.RequeueRecorderSyncJobs(ctx); err != nil {
+		log.Printf("worker recorder resync preparation failed; worker disabled: %v", err)
+		return
+	}
 	if err := w.discoverUploadSources(ctx); err != nil {
 		log.Printf("worker reconcile failed: %v", err)
 	}
@@ -129,6 +133,39 @@ func (w Worker) Run(ctx context.Context) {
 	go w.runResourceLoop(ctx, "MEDIA", 1)
 	go w.runResourceLoop(ctx, "NETWORK", 1)
 	w.runResourceLoop(ctx, "NETWORK", 2)
+}
+
+func (w Worker) RequeueRecorderSyncJobs(ctx context.Context) error {
+	tx, err := w.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin recorder resync preparation: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING', attempts = 0, run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL, heartbeat_at = NULL, locked_by = NULL,
+			last_error_class = NULL, last_error = NULL,
+			progress_current_bytes = 0, progress_total_bytes = 0,
+			progress_message = NULL, progress_updated_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE type = 'SYNC_RECORDER_PROFILE'
+	`); err != nil {
+		return fmt.Errorf("requeue recorder sync jobs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET sync_status = 'PENDING', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE recording_profile_id IN (
+			SELECT recording_profile_id FROM jobs WHERE type = 'SYNC_RECORDER_PROFILE'
+		)
+	`); err != nil {
+		return fmt.Errorf("mark recorder runtimes pending: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit recorder resync preparation: %w", err)
+	}
+	return nil
 }
 
 func (w Worker) RecoverAbandonedJobs(ctx context.Context) (RecoveryResult, error) {

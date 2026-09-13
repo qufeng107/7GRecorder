@@ -201,6 +201,7 @@ song processing FAILED
 - an orphaned Bilibili job with an already `VERIFIED` Publication is finalized as `SUCCEEDED` without resubmission;
 - ambiguous Bilibili retry requires explicit operator confirmation and atomically resets the existing Publication/Job;
 - `worker_drain=true` prevents claims without mutating queued or running jobs;
+- worker startup requeues completed Recorder sync jobs so persisted room settings are verified and corrected;
 - resource class 并发限制；
 - live recording 时不启动新的 NETWORK/MEDIA/AI；
 - Storage Critical 可以阻止低优先级重任务。
