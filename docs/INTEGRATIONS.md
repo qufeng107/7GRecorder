@@ -84,6 +84,14 @@ Recorder workdir/config 是**运行保障副本**：
 - Backend down 时允许 Recorder 独立继续；
 - Backend 恢复后 reconciliation 以 SQLite Desired State 修正漂移。
 
+固定版本 `BililiveRecorder 2.18.0` 的房间设置接口为 `POST /api/room/{roomId}/config`。请求必须使用该版本
+`SetRoomConfig` DTO 的 `OptionalRecordMode`、`OptionalCuttingMode`、`OptionalCuttingNumber`、
+`OptionalRecordDanmaku`、`OptionalRecordingQuality` 字段，并以 `{ "HasValue": true, "Value": ... }`
+表达房间级覆盖值；不能把配置文件中的 `RecordDanmaku` 等字段名直接当作 HTTP DTO。
+
+同步成功必须同时满足 HTTP 200 与响应 DTO 中 AutoRecord、分段、弹幕、画质的有效值和期望值一致。HTTP 成功但
+响应缺字段或值不一致视为同步失败，写入 runtime ERROR，避免产生“后台已开启但 Recorder 实际沿用默认值”的假成功。
+
 日常业务不通过 BililiveRecorder WebUI 修改 Room；WebUI 只用于 debug/运维。
 
 ---

@@ -47,6 +47,10 @@ type Store struct {
 	db *sql.DB
 }
 
+type RetryRequest struct {
+	ConfirmAmbiguousBilibili bool `json:"confirm_ambiguous_bilibili"`
+}
+
 func NewStore(database *sql.DB) Store {
 	return Store{db: database}
 }
@@ -147,7 +151,7 @@ func (s Store) List(ctx context.Context, actor account.User, limit int) ([]Job, 
 	return items, nil
 }
 
-func (s Store) Retry(ctx context.Context, actor account.User, id int64) (Job, error) {
+func (s Store) Retry(ctx context.Context, actor account.User, id int64, req RetryRequest) (Job, error) {
 	if id <= 0 {
 		return Job{}, ErrValidation
 	}
@@ -158,7 +162,34 @@ func (s Store) Retry(ctx context.Context, actor account.User, id int64) (Job, er
 	if current.Status != "FAILED" && current.Status != "CANCELLED" {
 		return Job{}, ErrValidation
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Job{}, fmt.Errorf("begin retry job: %w", err)
+	}
+	defer tx.Rollback()
+
+	if current.Type == "UPLOAD_BILIBILI" && current.LastErrorClass == "AMBIGUOUS" {
+		if !req.ConfirmAmbiguousBilibili {
+			return Job{}, ErrValidation
+		}
+		result, err := tx.ExecContext(ctx, `
+			UPDATE publications
+			SET status = 'PENDING', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = (SELECT publication_id FROM jobs WHERE id = ?)
+				AND status = 'AMBIGUOUS'
+		`, id)
+		if err != nil {
+			return Job{}, fmt.Errorf("reset ambiguous Bilibili publication: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return Job{}, fmt.Errorf("read ambiguous Bilibili publication reset: %w", err)
+		}
+		if changed != 1 {
+			return Job{}, ErrValidation
+		}
+	}
+	result, err := tx.ExecContext(ctx, `
 		UPDATE jobs
 		SET status = 'PENDING',
 			attempts = 0,
@@ -173,9 +204,20 @@ func (s Store) Retry(ctx context.Context, actor account.User, id int64) (Job, er
 			progress_message = NULL,
 			progress_updated_at = NULL,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, id); err != nil {
+		WHERE id = ? AND status IN ('FAILED', 'CANCELLED')
+	`, id)
+	if err != nil {
 		return Job{}, fmt.Errorf("retry job: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return Job{}, fmt.Errorf("read retry job rows affected: %w", err)
+	}
+	if changed != 1 {
+		return Job{}, ErrValidation
+	}
+	if err := tx.Commit(); err != nil {
+		return Job{}, fmt.Errorf("commit retry job: %w", err)
 	}
 	return s.Get(ctx, actor, id)
 }

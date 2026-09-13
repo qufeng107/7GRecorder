@@ -34,11 +34,19 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 				t.Fatalf("expected roomId 1741048619, got %#v", payload["roomId"])
 			}
 			w.WriteHeader(http.StatusCreated)
-		case "PUT /api/room/1741048619/config":
+		case "POST /api/room/1741048619/config":
 			if err := json.NewDecoder(r.Body).Decode(&configPayload); err != nil {
 				t.Fatalf("decode config payload: %v", err)
 			}
-			w.WriteHeader(http.StatusNoContent)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"AutoRecord":true,
+				"OptionalRecordMode":{"HasValue":true,"Value":0},
+				"OptionalRecordDanmaku":{"HasValue":true,"Value":true},
+				"OptionalCuttingMode":{"HasValue":true,"Value":1},
+				"OptionalCuttingNumber":{"HasValue":true,"Value":30},
+				"OptionalRecordingQuality":{"HasValue":true,"Value":"avc20000,hevc20000,avc10000,hevc10000"}
+			}`))
 		default:
 			t.Fatalf("unexpected recorder request %s %s", r.Method, r.URL.Path)
 		}
@@ -64,7 +72,7 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 		"GET /api/room/1741048619",
 		"POST /api/room",
 		"GET /api/room/1741048619",
-		"PUT /api/room/1741048619/config",
+		"POST /api/room/1741048619/config",
 	}
 	if len(calls) != len(wantCalls) {
 		t.Fatalf("expected calls %v, got %v", wantCalls, calls)
@@ -77,27 +85,37 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 	if configPayload["AutoRecord"] != true {
 		t.Fatalf("expected AutoRecord true, got %#v", configPayload["AutoRecord"])
 	}
-	if configPayload["CuttingNumber"] != float64(30) {
-		t.Fatalf("expected 30 minute segments, got %#v", configPayload["CuttingNumber"])
+	cuttingNumber := configPayload["OptionalCuttingNumber"].(map[string]interface{})
+	if cuttingNumber["HasValue"] != true || cuttingNumber["Value"] != float64(30) {
+		t.Fatalf("expected explicit 30 minute segments, got %#v", cuttingNumber)
 	}
-	if configPayload["RecordingQuality"] != "avc20000,hevc20000,avc10000,hevc10000" {
-		t.Fatalf("unexpected recording quality: %#v", configPayload["RecordingQuality"])
+	danmaku := configPayload["OptionalRecordDanmaku"].(map[string]interface{})
+	if danmaku["HasValue"] != true || danmaku["Value"] != true {
+		t.Fatalf("expected explicit danmaku recording, got %#v", danmaku)
+	}
+	quality := configPayload["OptionalRecordingQuality"].(map[string]interface{})
+	if quality["HasValue"] != true || quality["Value"] != "avc20000,hevc20000,avc10000,hevc10000" {
+		t.Fatalf("unexpected recording quality: %#v", quality)
 	}
 }
 
-func TestHTTPClientSyncProfileFallsBackWhenPutConfigIsNotAllowed(t *testing.T) {
+func TestHTTPClientSyncProfileRejectsSuccessfulConfigResponseWithDrift(t *testing.T) {
 	ctx := context.Background()
-	var calls []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/room/1741048619":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"roomId":1741048619,"streaming":false,"recording":false}`))
-		case "PUT /api/room/1741048619/config":
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		case "PATCH /api/room/1741048619/config":
-			w.WriteHeader(http.StatusNoContent)
+		case "POST /api/room/1741048619/config":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"AutoRecord":true,
+				"OptionalRecordMode":{"HasValue":true,"Value":0},
+				"OptionalRecordDanmaku":{"HasValue":false,"Value":false},
+				"OptionalCuttingMode":{"HasValue":true,"Value":1},
+				"OptionalCuttingNumber":{"HasValue":true,"Value":30},
+				"OptionalRecordingQuality":{"HasValue":true,"Value":"avc10000,hevc10000"}
+			}`))
 		default:
 			t.Fatalf("unexpected recorder request %s %s", r.Method, r.URL.Path)
 		}
@@ -112,21 +130,8 @@ func TestHTTPClientSyncProfileFallsBackWhenPutConfigIsNotAllowed(t *testing.T) {
 		RecordDanmaku:      true,
 		SegmentDurationSec: 1800,
 	})
-	if err != nil {
-		t.Fatalf("SyncProfile returned error: %v", err)
-	}
-	wantCalls := []string{
-		"GET /api/room/1741048619",
-		"PUT /api/room/1741048619/config",
-		"PATCH /api/room/1741048619/config",
-	}
-	if len(calls) != len(wantCalls) {
-		t.Fatalf("expected calls %v, got %v", wantCalls, calls)
-	}
-	for i := range wantCalls {
-		if calls[i] != wantCalls[i] {
-			t.Fatalf("expected calls %v, got %v", wantCalls, calls)
-		}
+	if err == nil || !strings.Contains(err.Error(), "OptionalRecordDanmaku did not match desired value") {
+		t.Fatalf("expected verified config drift error, got %v", err)
 	}
 }
 
@@ -137,9 +142,7 @@ func TestHTTPClientSyncProfileIncludesConfigErrorDetails(t *testing.T) {
 		case "GET /api/room/1741048619":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"roomId":1741048619,"streaming":false,"recording":false}`))
-		case "PUT /api/room/1741048619/config":
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		case "PATCH /api/room/1741048619/config":
+		case "POST /api/room/1741048619/config":
 			http.Error(w, "bad config field", http.StatusBadRequest)
 		default:
 			t.Fatalf("unexpected recorder request %s %s", r.Method, r.URL.Path)
@@ -159,7 +162,7 @@ func TestHTTPClientSyncProfileIncludesConfigErrorDetails(t *testing.T) {
 		t.Fatal("expected SyncProfile error")
 	}
 	message := err.Error()
-	if !strings.Contains(message, "via PATCH returned status 400") || !strings.Contains(message, "bad config field") {
+	if !strings.Contains(message, "returned status 400") || !strings.Contains(message, "bad config field") {
 		t.Fatalf("expected method and body in error, got %q", message)
 	}
 }

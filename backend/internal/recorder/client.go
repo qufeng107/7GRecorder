@@ -117,33 +117,65 @@ func (c HTTPClient) addRoom(ctx context.Context, roomID int64, autoRecord bool) 
 
 func (c HTTPClient) setRoomConfig(ctx context.Context, roomID int64, desired DesiredProfile) error {
 	payload := map[string]interface{}{
-		"RoomId":           roomID,
-		"AutoRecord":       desired.AutoRecord,
-		"RecordMode":       0,
-		"RecordDanmaku":    desired.RecordDanmaku,
-		"CuttingMode":      1,
-		"CuttingNumber":    segmentMinutes(desired.SegmentDurationSec),
-		"RecordingQuality": qualityQN(desired.Quality),
+		"AutoRecord":               desired.AutoRecord,
+		"OptionalRecordMode":       optionalValue[int]{HasValue: true, Value: 0},
+		"OptionalRecordDanmaku":    optionalValue[bool]{HasValue: true, Value: desired.RecordDanmaku},
+		"OptionalCuttingMode":      optionalValue[int]{HasValue: true, Value: 1},
+		"OptionalCuttingNumber":    optionalValue[int64]{HasValue: true, Value: segmentMinutes(desired.SegmentDurationSec)},
+		"OptionalRecordingQuality": optionalValue[string]{HasValue: true, Value: qualityQN(desired.Quality)},
 	}
 	path := fmt.Sprintf("/api/room/%d/config", roomID)
-	var status int
-	var responseBody []byte
-	var err error
-	var attempted []string
-	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodPost} {
-		attempted = append(attempted, method)
-		status, responseBody, err = c.do(ctx, method, path, payload)
-		if err != nil {
-			return err
-		}
-		if status == http.StatusOK || status == http.StatusNoContent {
-			return nil
-		}
-		if status != http.StatusMethodNotAllowed {
-			return fmt.Errorf("set recorder room %d config via %s returned status %d: %s", roomID, method, status, trimBody(responseBody))
+	status, responseBody, err := c.do(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("set recorder room %d config returned status %d: %s", roomID, status, trimBody(responseBody))
+	}
+	var actual roomConfigResponse
+	if err := json.Unmarshal(responseBody, &actual); err != nil {
+		return fmt.Errorf("decode recorder room %d config response: %w", roomID, err)
+	}
+	if err := verifyRoomConfig(desired, actual); err != nil {
+		return fmt.Errorf("verify recorder room %d config: %w", roomID, err)
+	}
+	return nil
+}
+
+type optionalValue[T any] struct {
+	HasValue bool `json:"HasValue"`
+	Value    T    `json:"Value"`
+}
+
+type roomConfigResponse struct {
+	AutoRecord               bool                  `json:"AutoRecord"`
+	OptionalRecordMode       optionalValue[int]    `json:"OptionalRecordMode"`
+	OptionalRecordDanmaku    optionalValue[bool]   `json:"OptionalRecordDanmaku"`
+	OptionalCuttingMode      optionalValue[int]    `json:"OptionalCuttingMode"`
+	OptionalCuttingNumber    optionalValue[int64]  `json:"OptionalCuttingNumber"`
+	OptionalRecordingQuality optionalValue[string] `json:"OptionalRecordingQuality"`
+}
+
+func verifyRoomConfig(desired DesiredProfile, actual roomConfigResponse) error {
+	wantMinutes := segmentMinutes(desired.SegmentDurationSec)
+	wantQuality := qualityQN(desired.Quality)
+	checks := []struct {
+		name string
+		ok   bool
+	}{
+		{"AutoRecord", actual.AutoRecord == desired.AutoRecord},
+		{"OptionalRecordMode", actual.OptionalRecordMode.HasValue && actual.OptionalRecordMode.Value == 0},
+		{"OptionalRecordDanmaku", actual.OptionalRecordDanmaku.HasValue && actual.OptionalRecordDanmaku.Value == desired.RecordDanmaku},
+		{"OptionalCuttingMode", actual.OptionalCuttingMode.HasValue && actual.OptionalCuttingMode.Value == 1},
+		{"OptionalCuttingNumber", actual.OptionalCuttingNumber.HasValue && actual.OptionalCuttingNumber.Value == wantMinutes},
+		{"OptionalRecordingQuality", actual.OptionalRecordingQuality.HasValue && actual.OptionalRecordingQuality.Value == wantQuality},
+	}
+	for _, check := range checks {
+		if !check.ok {
+			return fmt.Errorf("%s did not match desired value", check.name)
 		}
 	}
-	return fmt.Errorf("set recorder room %d config returned status %d after methods %s: %s", roomID, status, strings.Join(attempted, ","), trimBody(responseBody))
+	return nil
 }
 
 func (c HTTPClient) do(ctx context.Context, method string, path string, payload interface{}) (int, []byte, error) {

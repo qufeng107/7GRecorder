@@ -196,6 +196,11 @@ song processing FAILED
 - business_key 唯一；
 - stale LIGHT/MEDIA Job 可恢复；
 - external side effect Job stale 走模块-specific ambiguous policy；
+- Worker restart recovers orphaned COS/local jobs to `PENDING` without consuming an attempt, while orphaned Bilibili
+  uploads become `AMBIGUOUS` and are never claimed automatically;
+- an orphaned Bilibili job with an already `VERIFIED` Publication is finalized as `SUCCEEDED` without resubmission;
+- ambiguous Bilibili retry requires explicit operator confirmation and atomically resets the existing Publication/Job;
+- `worker_drain=true` prevents claims without mutating queued or running jobs;
 - resource class 并发限制；
 - live recording 时不启动新的 NETWORK/MEDIA/AI；
 - Storage Critical 可以阻止低优先级重任务。
@@ -302,6 +307,8 @@ login
 - Release SHA/checksum 校验失败时不得安装；
 - migration 前创建可打开的 SQLite backup；
 - Backend 发布只重启 7GRecorder，不执行 `docker compose down`；
+- deploy drain prevents new claims and refuses to recreate the current container while it owns any `RUNNING` job;
+- deploy exit paths clear the temporary drain control;
 - 模拟 Backend restart 时 BililiveRecorder 继续运行；
 - Backend ready 后 deploy 才成功；
 - 回滚到上一 Git SHA 后 Backend/Frontend 版本一致；

@@ -844,4 +844,93 @@ describe("AdminDashboard", () => {
       );
     });
   });
+
+  it("requires explicit confirmation before retrying an ambiguous Bilibili upload", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = input instanceof Request ? input.url : input.toString();
+      if (path.endsWith("/api/v1/me")) {
+        return {
+          ok: true,
+          json: async () => ({
+            user: { id: 1, username: "admin", role: "SUPER_ADMIN", enabled: true }
+          })
+        } as Response;
+      }
+      if (path.includes("/api/v1/jobs?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                id: 10,
+                recording_profile_id: 1,
+                type: "UPLOAD_BILIBILI",
+                resource_class: "NETWORK",
+                business_key: "upload-source:3:bilibili:upload",
+                status: "FAILED",
+                priority: 0,
+                attempts: 1,
+                max_attempts: 3,
+                run_after: "2026-09-13T08:00:00Z",
+                last_error_class: "AMBIGUOUS",
+                last_error: "verify Creator Center before retry",
+                created_at: "2026-09-13T07:00:00Z",
+                updated_at: "2026-09-13T08:01:00Z",
+                profile_name: "7G",
+                owner_username: "admin"
+              }
+            ],
+            total: 1
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/jobs/10/actions/retry")) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 10,
+            type: "UPLOAD_BILIBILI",
+            resource_class: "NETWORK",
+            status: "PENDING",
+            priority: 0,
+            attempts: 0,
+            max_attempts: 3,
+            run_after: "2026-09-13T08:02:00Z",
+            created_at: "2026-09-13T07:00:00Z",
+            updated_at: "2026-09-13T08:02:00Z"
+          })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ items: [], total: 0, status: "ok", release_sha: "test" })
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    renderWithClient();
+    await switchToEnglish();
+    fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
+    const retryButton = await screen.findByRole("button", { name: "Retry" });
+
+    fireEvent.click(retryButton);
+    expect(confirmMock).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/jobs/10/actions/retry",
+      expect.anything()
+    );
+
+    confirmMock.mockReturnValue(true);
+    fireEvent.click(retryButton);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/jobs/10/actions/retry",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ confirm_ambiguous_bilibili: true })
+        })
+      );
+    });
+  });
 });

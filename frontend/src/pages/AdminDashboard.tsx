@@ -726,6 +726,7 @@ const uiCopy = {
     lastError: "最近错误",
     retry: "重试",
     retryJob: "重试任务",
+    confirmAmbiguousBilibiliRetry: "上次 Bilibili 上传被中断，平台可能已经收到稿件。请先在创作中心确认同标题、同日期稿件不存在。确认不存在并继续重试吗？",
     cancelJob: "取消任务",
     jobsFailed: "任务加载失败，请查看服务器日志。",
     noJobs: "暂无任务。",
@@ -1048,6 +1049,7 @@ const uiCopy = {
     lastError: "Last Error",
     retry: "Retry",
     retryJob: "Retry job",
+    confirmAmbiguousBilibiliRetry: "The previous Bilibili upload was interrupted and may already exist. First verify that no matching title/date is present in Creator Center. Confirm it is absent and retry?",
     cancelJob: "Cancel job",
     jobsFailed: "Jobs failed to load. Check server logs.",
     noJobs: "No jobs yet.",
@@ -2019,10 +2021,10 @@ export function AdminDashboard() {
   });
 
   const retryJobMutation = useMutation({
-    mutationFn: (jobId: number) =>
-      requestJson<JobItem>(`/api/v1/jobs/${jobId}/actions/retry`, {
+    mutationFn: (request: { jobId: number; confirmAmbiguousBilibili: boolean }) =>
+      requestJson<JobItem>(`/api/v1/jobs/${request.jobId}/actions/retry`, {
         method: "POST",
-        body: "{}"
+        body: JSON.stringify({ confirm_ambiguous_bilibili: request.confirmAmbiguousBilibili })
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -2523,7 +2525,13 @@ export function AdminDashboard() {
                 visibleTotal={visibleJobs.length}
                 onCancel={(job) => cancelJobMutation.mutate(job.id)}
                 onRefresh={() => void jobsQuery.refetch()}
-                onRetry={(job) => retryJobMutation.mutate(job.id)}
+                onRetry={(job) => {
+                  const ambiguousBilibili = job.type === "UPLOAD_BILIBILI" && job.last_error_class === "AMBIGUOUS";
+                  if (ambiguousBilibili && !window.confirm(ui.confirmAmbiguousBilibiliRetry)) {
+                    return;
+                  }
+                  retryJobMutation.mutate({ jobId: job.id, confirmAmbiguousBilibili: ambiguousBilibili });
+                }}
                 onSearchChange={setJobSearch}
                 onSortChange={setJobSort}
               />

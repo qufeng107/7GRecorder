@@ -65,12 +65,64 @@ func TestRetryFailedJobResetsState(t *testing.T) {
 	created := createTestProfile(t, ctx, database, admin, "7G", "1741048619")
 	id := insertTestJob(t, ctx, database, created.ID, "FAILED")
 
-	updated, err := NewStore(database).Retry(ctx, admin, id)
+	updated, err := NewStore(database).Retry(ctx, admin, id, RetryRequest{})
 	if err != nil {
 		t.Fatalf("Retry returned error: %v", err)
 	}
 	if updated.Status != "PENDING" || updated.Attempts != 0 || updated.LastError != "" {
 		t.Fatalf("unexpected retried job: %#v", updated)
+	}
+}
+
+func TestRetryAmbiguousBilibiliRequiresConfirmation(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	admin := bootstrapTestAdmin(t, ctx, database)
+	created := createTestProfile(t, ctx, database, admin, "7G", "1741048619")
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+			 started_at, completed_at, status, total_bytes, recording_count, file_count)
+		VALUES (1, ?, 'source:1', '1741048619', '7G',
+			 '2026-09-12T10:00:00Z', '2026-09-12T11:00:00Z', 'READY_TO_UPLOAD', 100, 1, 1);
+		INSERT INTO publications
+			(id, recording_profile_id, upload_source_id, platform, status, last_error)
+		VALUES (1, ?, 1, 'bilibili', 'AMBIGUOUS', 'verify before retry');
+		INSERT INTO jobs
+			(id, recording_profile_id, upload_source_id, publication_id, type, resource_class,
+			 business_key, status, attempts, max_attempts, last_error_class, last_error)
+		VALUES (10, ?, 1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'source:1:bili',
+			 'FAILED', 1, 3, 'AMBIGUOUS', 'verify before retry');
+	`, created.ID, created.ID, created.ID); err != nil {
+		t.Fatalf("seed ambiguous Bilibili job returned error: %v", err)
+	}
+
+	store := NewStore(database)
+	if _, err := store.Retry(ctx, admin, 10, RetryRequest{}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected confirmation validation error, got %v", err)
+	}
+	var publicationStatus, jobStatus string
+	if err := database.QueryRowContext(ctx, `
+		SELECT p.status, j.status FROM publications p JOIN jobs j ON j.publication_id = p.id WHERE j.id = 10
+	`).Scan(&publicationStatus, &jobStatus); err != nil {
+		t.Fatalf("query frozen states returned error: %v", err)
+	}
+	if publicationStatus != "AMBIGUOUS" || jobStatus != "FAILED" {
+		t.Fatalf("unconfirmed retry mutated states: publication=%s job=%s", publicationStatus, jobStatus)
+	}
+
+	updated, err := store.Retry(ctx, admin, 10, RetryRequest{ConfirmAmbiguousBilibili: true})
+	if err != nil {
+		t.Fatalf("confirmed Retry returned error: %v", err)
+	}
+	if updated.Status != "PENDING" || updated.Attempts != 0 {
+		t.Fatalf("unexpected confirmed retry job: %#v", updated)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM publications WHERE id = 1`).Scan(&publicationStatus); err != nil {
+		t.Fatalf("query retried publication returned error: %v", err)
+	}
+	if publicationStatus != "PENDING" {
+		t.Fatalf("expected pending publication, got %s", publicationStatus)
 	}
 }
 

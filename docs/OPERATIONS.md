@@ -608,6 +608,17 @@ AMBIGUOUS       → module-specific verify/reconcile/manual decision
 
 手动 Retry 复用原 Job/business_key，不创建第二个业务 Job；实现可为原 Job 增加一次新的允许尝试并立即 `run_after=now`。
 
+Worker 每次进程启动使用新的 lock identity，并在开始 reconciliation/claim 前恢复不属于本次进程的 `RUNNING` Job：
+
+- `UPLOAD_BILIBILI` 的外部副作用无法仅凭本地状态判断，Publication 与 Job 转为 `AMBIGUOUS/FAILED`，禁止自动重传；
+- 若 Bilibili Publication 已经是 `VERIFIED`，仅补记对应 Job 为 `SUCCEEDED`，不得降级或重新投稿；
+- `UPLOAD_COS_OBJECT`、`UPLOAD_COS_RECORDING_FILE` 使用固定 object key 且可幂等覆盖，恢复为 `PENDING`；
+- merge/package/edit/sync 等本地可逆任务恢复为 `PENDING`，且本次进程中断不消耗一次业务重试额度；
+- 未知 Job 类型按 `AMBIGUOUS/FAILED` 冻结，不猜测其幂等性。
+
+管理员重试 `AMBIGUOUS` Bilibili Job 前必须先在创作中心确认同标题/日期稿件不存在。API 要求显式提交
+`confirm_ambiguous_bilibili=true`，随后才把原 Publication 与原 Job 原子恢复为 `PENDING`；没有确认不得重试。
+
 RUNNING Job 的取消：
 
 - 本地可逆任务可以终止 subprocess；

@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,6 +164,123 @@ func TestCancelWhenJobStopsCancelsClaimedJobContext(t *testing.T) {
 	case <-jobCtx.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("worker job context was not cancelled after persisted job cancellation")
+	}
+}
+
+func TestRecoverAbandonedJobsFreezesBilibiliAndRetriesCOS(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name: "7G", RoomID: "1741048619", StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO credentials (id, scope, platform, purpose, account_label, encrypted_secret)
+		VALUES (1, 'SYSTEM', 'tencent_cos', 'STORAGE', 'cos', X'00');
+		INSERT INTO cos_storage_profiles
+			(id, recording_profile_id, credential_id, enabled, region, bucket, prefix, max_managed_bytes)
+		VALUES (1, ?, 1, 1, 'ap-shanghai', 'bucket', 'prefix/', 1000);
+		INSERT INTO upload_sources
+			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
+			 started_at, completed_at, status, total_bytes, recording_count, file_count)
+		VALUES (1, ?, 'source:1', '1741048619', '7G',
+			 '2026-09-12T10:00:00Z', '2026-09-12T11:00:00Z', 'READY_TO_UPLOAD', 100, 1, 1);
+		INSERT INTO upload_source_outputs
+			(id, upload_source_id, sort_order, relative_path, size_bytes, status)
+		VALUES (1, 1, 0, 'upload-sources/1/1/parts/p01.flv', 100, 'READY_TO_UPLOAD');
+		INSERT INTO publications
+			(id, recording_profile_id, upload_source_id, platform, status)
+		VALUES
+			(1, ?, 1, 'bilibili', 'UPLOADING'),
+			(2, ?, 1, 'bilibili', 'VERIFIED');
+		INSERT INTO upload_source_cos_objects
+			(id, cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id,
+			 object_key, size_bytes, source_size_bytes, status, compression_status)
+		VALUES (1, 1, ?, 1, 1, 'old/p01.mp4', 80, 100, 'UPLOADING', 'COMPRESSING');
+		INSERT INTO jobs
+			(id, recording_profile_id, upload_source_id, publication_id, type, resource_class,
+			 business_key, payload_json, status, attempts, max_attempts, locked_by)
+		VALUES
+			(10, ?, 1, 1, 'UPLOAD_BILIBILI', 'NETWORK', 'source:1:bili',
+				 '{"publication_id":1,"upload_source_id":1}', 'RUNNING', 1, 3, 'old-container:1'),
+			(11, ?, 1, NULL, 'UPLOAD_COS_OBJECT', 'NETWORK', 'source:1:cos',
+				 '{"cos_object_id":1,"upload_source_id":1,"output_id":1}', 'RUNNING', 1, 5, 'old-container:1'),
+			(12, ?, 1, 2, 'UPLOAD_BILIBILI', 'NETWORK', 'source:1:verified-bili',
+				 '{"publication_id":2,"upload_source_id":1}', 'RUNNING', 1, 3, 'old-container:1');
+	`, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID); err != nil {
+		t.Fatalf("seed abandoned jobs returned error: %v", err)
+	}
+
+	result, err := New(database, &fakeRecorder{}).RecoverAbandonedJobs(ctx)
+	if err != nil {
+		t.Fatalf("RecoverAbandonedJobs returned error: %v", err)
+	}
+	if result.Ambiguous != 1 || result.Retryable != 1 || result.Completed != 1 {
+		t.Fatalf("unexpected recovery result: %#v", result)
+	}
+	var publicationStatus, publicationError string
+	if err := database.QueryRowContext(ctx, `SELECT status, last_error FROM publications WHERE id = 1`).Scan(&publicationStatus, &publicationError); err != nil {
+		t.Fatalf("query publication returned error: %v", err)
+	}
+	if publicationStatus != "AMBIGUOUS" || !strings.Contains(publicationError, "verify Creator Center") {
+		t.Fatalf("unexpected recovered publication: %s %q", publicationStatus, publicationError)
+	}
+	var biliStatus, biliClass string
+	if err := database.QueryRowContext(ctx, `SELECT status, last_error_class FROM jobs WHERE id = 10`).Scan(&biliStatus, &biliClass); err != nil {
+		t.Fatalf("query Bilibili job returned error: %v", err)
+	}
+	if biliStatus != "FAILED" || biliClass != "AMBIGUOUS" {
+		t.Fatalf("unexpected Bilibili job recovery: %s %s", biliStatus, biliClass)
+	}
+	var verifiedJobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = 12`).Scan(&verifiedJobStatus); err != nil {
+		t.Fatalf("query verified Bilibili job returned error: %v", err)
+	}
+	if verifiedJobStatus != "SUCCEEDED" {
+		t.Fatalf("expected verified Bilibili job to complete, got %s", verifiedJobStatus)
+	}
+	var cosStatus, compressionStatus, cosJobStatus string
+	var attempts int
+	if err := database.QueryRowContext(ctx, `
+		SELECT co.status, co.compression_status, j.status, j.attempts
+		FROM upload_source_cos_objects co JOIN jobs j ON j.id = 11 WHERE co.id = 1
+	`).Scan(&cosStatus, &compressionStatus, &cosJobStatus, &attempts); err != nil {
+		t.Fatalf("query COS recovery returned error: %v", err)
+	}
+	if cosStatus != "PENDING" || compressionStatus != "DISABLED" || cosJobStatus != "PENDING" || attempts != 0 {
+		t.Fatalf("unexpected COS recovery: object=%s compression=%s job=%s attempts=%d", cosStatus, compressionStatus, cosJobStatus, attempts)
+	}
+}
+
+func TestWorkerDrainPreventsJobClaim(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name: "7G", RoomID: "1741048619", StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO system_settings (key, value_json) VALUES ('worker_drain', 'true')
+	`); err != nil {
+		t.Fatalf("enable worker drain returned error: %v", err)
+	}
+
+	worker := New(database, &fakeRecorder{})
+	if _, err := worker.claimJob(ctx); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected no claim while drained, got %v", err)
+	}
+	var status string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE recording_profile_id = ?`, created.ID).Scan(&status); err != nil {
+		t.Fatalf("query drained job returned error: %v", err)
+	}
+	if status != "PENDING" {
+		t.Fatalf("drain mutated pending job to %s", status)
 	}
 }
 

@@ -41,6 +41,21 @@ type workerJob struct {
 	MaxAttempts        int
 }
 
+type RecoveryResult struct {
+	Retryable int
+	Ambiguous int
+	Completed int
+}
+
+type abandonedJob struct {
+	ID                 int64
+	Type               string
+	RecordingProfileID int64
+	PublicationID      int64
+	PublicationStatus  string
+	PayloadJSON        string
+}
+
 type mergeJobPayload struct {
 	UploadSourceID int64 `json:"upload_source_id"`
 }
@@ -63,7 +78,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		editor:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		cos:      upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
 		bilibili: upload.NewBiliupCLIUploader(cfg),
-		lockID:   fmt.Sprintf("%s:%d", host, os.Getpid()),
+		lockID:   fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano()),
 	}
 }
 
@@ -98,6 +113,14 @@ func NewWithBilibiliUploader(database *sql.DB, recorderClient recorder.SyncClien
 }
 
 func (w Worker) Run(ctx context.Context) {
+	recovery, err := w.RecoverAbandonedJobs(ctx)
+	if err != nil {
+		log.Printf("worker startup recovery failed; worker disabled: %v", err)
+		return
+	}
+	if recovery.Retryable > 0 || recovery.Ambiguous > 0 || recovery.Completed > 0 {
+		log.Printf("worker startup recovery completed: retryable=%d ambiguous=%d completed=%d", recovery.Retryable, recovery.Ambiguous, recovery.Completed)
+	}
 	if err := w.discoverUploadSources(ctx); err != nil {
 		log.Printf("worker reconcile failed: %v", err)
 	}
@@ -106,6 +129,179 @@ func (w Worker) Run(ctx context.Context) {
 	go w.runResourceLoop(ctx, "MEDIA", 1)
 	go w.runResourceLoop(ctx, "NETWORK", 1)
 	w.runResourceLoop(ctx, "NETWORK", 2)
+}
+
+func (w Worker) RecoverAbandonedJobs(ctx context.Context) (RecoveryResult, error) {
+	tx, err := w.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RecoveryResult{}, fmt.Errorf("begin abandoned job recovery: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT j.id, j.type, COALESCE(j.recording_profile_id, 0), COALESCE(j.publication_id, 0),
+			COALESCE(p.status, ''), COALESCE(j.payload_json, '')
+		FROM jobs j
+		LEFT JOIN publications p ON p.id = j.publication_id
+		WHERE j.status = 'RUNNING'
+			AND COALESCE(j.locked_by, '') != ?
+		ORDER BY j.id ASC
+	`, w.lockID)
+	if err != nil {
+		return RecoveryResult{}, fmt.Errorf("list abandoned jobs: %w", err)
+	}
+	items := make([]abandonedJob, 0)
+	for rows.Next() {
+		var item abandonedJob
+		if err := rows.Scan(&item.ID, &item.Type, &item.RecordingProfileID, &item.PublicationID, &item.PublicationStatus, &item.PayloadJSON); err != nil {
+			rows.Close()
+			return RecoveryResult{}, fmt.Errorf("scan abandoned job: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return RecoveryResult{}, fmt.Errorf("iterate abandoned jobs: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return RecoveryResult{}, fmt.Errorf("close abandoned jobs: %w", err)
+	}
+
+	result := RecoveryResult{}
+	for _, item := range items {
+		switch item.Type {
+		case "UPLOAD_BILIBILI":
+			if item.PublicationStatus == "VERIFIED" {
+				if err := recoverJobAsSucceeded(ctx, tx, item.ID); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Completed++
+				continue
+			}
+			message := "upload worker stopped before Bilibili result was persisted; verify Creator Center before retry"
+			if item.PublicationID > 0 {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE publications
+					SET status = 'AMBIGUOUS', last_error = ?, updated_at = CURRENT_TIMESTAMP
+					WHERE id = ? AND status != 'VERIFIED'
+				`, message, item.PublicationID); err != nil {
+					return RecoveryResult{}, fmt.Errorf("mark abandoned Bilibili publication ambiguous: %w", err)
+				}
+			}
+			if err := recoverJobAsAmbiguous(ctx, tx, item.ID, message); err != nil {
+				return RecoveryResult{}, err
+			}
+			result.Ambiguous++
+		case "UPLOAD_COS_OBJECT":
+			var payload upload.COSJobPayload
+			if err := json.Unmarshal([]byte(item.PayloadJSON), &payload); err != nil || payload.COSObjectID <= 0 {
+				if err := recoverJobAsAmbiguous(ctx, tx, item.ID, "cannot safely recover COS job with invalid payload"); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Ambiguous++
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE upload_source_cos_objects
+				SET status = 'PENDING', compression_status = 'DISABLED', compression_preset = NULL,
+					compressed_from_relative_path = NULL, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ?
+			`, payload.COSObjectID); err != nil {
+				return RecoveryResult{}, fmt.Errorf("reset abandoned upload-source COS object: %w", err)
+			}
+			if err := recoverJobAsPending(ctx, tx, item.ID); err != nil {
+				return RecoveryResult{}, err
+			}
+			result.Retryable++
+		case "UPLOAD_COS_RECORDING_FILE":
+			var payload upload.COSRecordingFileJobPayload
+			if err := json.Unmarshal([]byte(item.PayloadJSON), &payload); err != nil || payload.COSObjectID <= 0 {
+				if err := recoverJobAsAmbiguous(ctx, tx, item.ID, "cannot safely recover COS recording-file job with invalid payload"); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Ambiguous++
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE cos_objects
+				SET status = 'PENDING', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ?
+			`, payload.COSObjectID); err != nil {
+				return RecoveryResult{}, fmt.Errorf("reset abandoned recording-file COS object: %w", err)
+			}
+			if err := recoverJobAsPending(ctx, tx, item.ID); err != nil {
+				return RecoveryResult{}, err
+			}
+			result.Retryable++
+		case "SYNC_RECORDER_PROFILE", "MERGE_UPLOAD_SOURCE", "PACKAGE_UPLOAD_SOURCE", "APPLY_UPLOAD_SOURCE_EDIT":
+			if item.Type == "SYNC_RECORDER_PROFILE" && item.RecordingProfileID > 0 {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE recording_profile_runtime
+					SET sync_status = 'PENDING', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+					WHERE recording_profile_id = ?
+				`, item.RecordingProfileID); err != nil {
+					return RecoveryResult{}, fmt.Errorf("reset abandoned recorder sync runtime: %w", err)
+				}
+			}
+			if err := recoverJobAsPending(ctx, tx, item.ID); err != nil {
+				return RecoveryResult{}, err
+			}
+			result.Retryable++
+		default:
+			if err := recoverJobAsAmbiguous(ctx, tx, item.ID, "worker stopped during a job with unknown recovery semantics"); err != nil {
+				return RecoveryResult{}, err
+			}
+			result.Ambiguous++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return RecoveryResult{}, fmt.Errorf("commit abandoned job recovery: %w", err)
+	}
+	return result, nil
+}
+
+func recoverJobAsSucceeded(ctx context.Context, tx *sql.Tx, jobID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'SUCCEEDED', locked_at = NULL, heartbeat_at = NULL, locked_by = NULL,
+			last_error_class = NULL, last_error = NULL, progress_message = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'RUNNING'
+	`, jobID)
+	if err != nil {
+		return fmt.Errorf("complete abandoned job %d with verified result: %w", jobID, err)
+	}
+	return nil
+}
+
+func recoverJobAsPending(ctx context.Context, tx *sql.Tx, jobID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'PENDING', attempts = MAX(attempts - 1, 0), run_after = CURRENT_TIMESTAMP,
+			locked_at = NULL, heartbeat_at = NULL, locked_by = NULL,
+			last_error_class = NULL, last_error = NULL,
+			progress_current_bytes = 0, progress_total_bytes = 0,
+			progress_message = NULL, progress_updated_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'RUNNING'
+	`, jobID)
+	if err != nil {
+		return fmt.Errorf("reset abandoned job %d: %w", jobID, err)
+	}
+	return nil
+}
+
+func recoverJobAsAmbiguous(ctx context.Context, tx *sql.Tx, jobID int64, message string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'FAILED', locked_at = NULL, heartbeat_at = NULL, locked_by = NULL,
+			last_error_class = 'AMBIGUOUS', last_error = ?, progress_message = NULL,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'RUNNING'
+	`, message, jobID)
+	if err != nil {
+		return fmt.Errorf("freeze abandoned job %d: %w", jobID, err)
+	}
+	return nil
 }
 
 func (w Worker) runDiscoveryLoop(ctx context.Context) {
@@ -507,6 +703,10 @@ func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs 
 		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
+			AND NOT EXISTS (
+				SELECT 1 FROM system_settings
+				WHERE key = 'worker_drain' AND json_extract(value_json, '$') = 1
+			)
 			`+extraWhere+`
 		ORDER BY priority ASC, run_after ASC, id ASC
 		LIMIT 1
@@ -528,6 +728,10 @@ func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs 
 			progress_updated_at = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status = 'PENDING'
+			AND NOT EXISTS (
+				SELECT 1 FROM system_settings
+				WHERE key = 'worker_drain' AND json_extract(value_json, '$') = 1
+			)
 	`, w.lockID, job.ID)
 	if err != nil {
 		return workerJob{}, fmt.Errorf("claim job: %w", err)

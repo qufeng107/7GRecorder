@@ -403,6 +403,16 @@ Current admin API supports operational visibility for queued work. Super admins 
 Managers can list and operate only on jobs attached to their own recording profiles. `retry` is allowed only for
 `FAILED` and `CANCELLED` jobs and resets attempts, locks, and last error fields. `cancel` is allowed for queued or
 failed non-terminal jobs, but not for `RUNNING`, `SUCCEEDED`, or already `CANCELLED` jobs.
+
+For an `UPLOAD_BILIBILI` job whose `last_error_class` is `AMBIGUOUS`, retry additionally requires:
+
+```json
+{"confirm_ambiguous_bilibili":true}
+```
+
+The operator must first verify in Bilibili Creator Center that the submission does not exist. A confirmed retry
+atomically restores the existing Publication and Job to `PENDING`; it does not create a second Publication or job.
+An omitted or false confirmation returns a validation error.
 Job DTOs expose optional `progress_current_bytes`, `progress_total_bytes`, `progress_message`, and
 `progress_updated_at` fields. Long-running Bilibili and COS uploads update these fields and refresh `heartbeat_at` while
 they run.

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -47,8 +48,15 @@ func bindJobHandlers(cfg config.Config, s *ghttp.Server) {
 			return
 		}
 		id := r.Get("id").Int64()
+		var req job.RetryRequest
+		if len(r.GetBody()) > 0 {
+			if err := json.Unmarshal(r.GetBody(), &req); err != nil {
+				writeAPIError(r, http.StatusBadRequest, "INVALID_JSON", "Request body must be valid JSON.", nil)
+				return
+			}
+		}
 		withJobStore(r, cfg, func(actor account.User, store job.Store) {
-			item, err := store.Retry(r.Context(), actor, id)
+			item, err := store.Retry(r.Context(), actor, id, req)
 			if err != nil {
 				writeJobError(r, err)
 				return

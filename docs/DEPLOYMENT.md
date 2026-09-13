@@ -386,6 +386,13 @@ BililiveRecorder 的升级是独立运维动作：
 
 Backend 停止期间 BililiveRecorder 继续录制。
 
+在执行 `docker compose up` 前，部署脚本必须通过 SQLite 写入临时 `worker_drain=true`，使当前 Worker 原子停止领取新
+Job，然后检查当前 `7grecorder` 容器 lock identity 所持有的 `RUNNING` Job。只要仍有一个任务，部署就失败退出并
+清除 drain，不得重建容器。旧容器已经不存在的 orphan lock 不阻止发布，由新版本启动恢复策略处理。
+
+部署脚本必须使用退出 trap 清除 drain。新容器通过 readiness 后再正常清除；因此成功、构建失败和健康检查失败都
+不会把 Worker 永久留在 drain 状态。该机制只协调 7GRecorder Job，不停止或重启 BililiveRecorder。
+
 短暂 Webhook 投递失败通过：
 
 - Recorder 自身重试；

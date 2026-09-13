@@ -144,6 +144,8 @@ Phase 0 只搭正式部署通道，不建设 test/staging server。
 - run_after；
 - retry/backoff；
 - heartbeat/stale recovery；
+- 已实现目标：每次 Worker 启动使用唯一 lock identity；旧进程 Bilibili Job 冻结为 `AMBIGUOUS`，COS/本地可逆
+  Job 自动恢复；部署使用 SQLite drain 阻止新 claim，并拒绝中断当前容器持有的任务；
 - resource class semaphore；
 - explicit resource IDs。
 
@@ -205,6 +207,7 @@ Current implementation note:
 - `VERIFY_BILIBILI`；
 - Publication status；
 - AMBIGUOUS recovery；
+- AMBIGUOUS 人工确认后重试，复用原 Publication/Job；
 - SOURCE_MISSING。
 
 验收：

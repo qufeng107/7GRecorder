@@ -5,6 +5,47 @@ set -euo pipefail
 : "${RELEASE_SHA:?RELEASE_SHA is required}"
 
 release_root="/opt/7grecorder/releases/${RELEASE_SHA}"
+worker_drain_enabled=0
+
+clear_worker_drain() {
+  if [ "${worker_drain_enabled}" -eq 1 ] && [ -f /data/7grecorder/db/7grecorder.db ]; then
+    sqlite3 /data/7grecorder/db/7grecorder.db \
+      "DELETE FROM system_settings WHERE key = 'worker_drain';" >/dev/null 2>&1 || true
+    worker_drain_enabled=0
+  fi
+}
+
+enable_worker_drain() {
+  sqlite3 /data/7grecorder/db/7grecorder.db "
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES ('worker_drain', 'true', CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value_json = 'true', updated_at = CURRENT_TIMESTAMP;
+  "
+  worker_drain_enabled=1
+}
+
+assert_current_container_has_no_running_jobs() {
+  local container_id=""
+  container_id="$(docker inspect --format '{{.Id}}' 7grecorder 2>/dev/null | cut -c1-12 || true)"
+  [ -n "${container_id}" ] || return 0
+
+  local running_jobs=""
+  running_jobs="$(sqlite3 -separator ' | ' /data/7grecorder/db/7grecorder.db "
+    SELECT id, type, COALESCE(progress_current_bytes, 0), COALESCE(progress_total_bytes, 0)
+    FROM jobs
+    WHERE status = 'RUNNING' AND locked_by LIKE '${container_id}:%'
+    ORDER BY id;
+  ")"
+  if [ -n "${running_jobs}" ]; then
+    echo "deployment refused: current 7grecorder container still owns RUNNING jobs" >&2
+    echo "job_id | type | progress_current_bytes | progress_total_bytes" >&2
+    echo "${running_jobs}" >&2
+    echo "wait for completion or cancel through the admin workflow, then deploy again" >&2
+    return 1
+  fi
+}
+
+trap clear_worker_drain EXIT
 
 cleanup_old_deploy_artifacts() {
   local keep_releases="${KEEP_RELEASES:-3}"
@@ -103,10 +144,14 @@ cp "${release_root}/source/deploy/compose.yaml" /opt/7grecorder/deploy/compose.y
 
 cd /opt/7grecorder/deploy
 GIT_SHA="${RELEASE_SHA}" docker compose --env-file /etc/7grecorder/app.env run --rm --no-deps 7grecorder migrate
+enable_worker_drain
+sleep 3
+assert_current_container_has_no_running_jobs
 GIT_SHA="${RELEASE_SHA}" docker compose --env-file /etc/7grecorder/app.env up -d --no-deps 7grecorder
 
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8080/health/ready >/dev/null; then
+    clear_worker_drain
     ln -sfn "${release_root}" /opt/7grecorder/current
     echo "${RELEASE_SHA}" > /opt/7grecorder/current-release
     cleanup_old_deploy_artifacts
