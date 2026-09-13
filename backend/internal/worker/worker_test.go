@@ -186,8 +186,11 @@ func TestRecoverAbandonedJobsFreezesBilibiliAndRetriesCOS(t *testing.T) {
 		INSERT INTO upload_sources
 			(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot,
 			 started_at, completed_at, status, total_bytes, recording_count, file_count)
-		VALUES (1, ?, 'source:1', '1741048619', '7G',
-			 '2026-09-12T10:00:00Z', '2026-09-12T11:00:00Z', 'READY_TO_UPLOAD', 100, 1, 1);
+		VALUES
+			(1, ?, 'source:1', '1741048619', '7G',
+			 '2026-09-12T10:00:00Z', '2026-09-12T11:00:00Z', 'READY_TO_UPLOAD', 100, 1, 1),
+			(2, ?, 'source:2', '1741048619', '7G',
+			 '2026-09-11T10:00:00Z', '2026-09-11T11:00:00Z', 'READY_TO_UPLOAD', 100, 1, 1);
 		INSERT INTO upload_source_outputs
 			(id, upload_source_id, sort_order, relative_path, size_bytes, status)
 		VALUES (1, 1, 0, 'upload-sources/1/1/parts/p01.flv', 100, 'READY_TO_UPLOAD');
@@ -195,7 +198,7 @@ func TestRecoverAbandonedJobsFreezesBilibiliAndRetriesCOS(t *testing.T) {
 			(id, recording_profile_id, upload_source_id, platform, status)
 		VALUES
 			(1, ?, 1, 'bilibili', 'UPLOADING'),
-			(2, ?, 1, 'bilibili', 'VERIFIED');
+			(2, ?, 2, 'bilibili', 'VERIFIED');
 		INSERT INTO upload_source_cos_objects
 			(id, cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id,
 			 object_key, size_bytes, source_size_bytes, status, compression_status)
@@ -208,9 +211,9 @@ func TestRecoverAbandonedJobsFreezesBilibiliAndRetriesCOS(t *testing.T) {
 				 '{"publication_id":1,"upload_source_id":1}', 'RUNNING', 1, 3, 'old-container:1'),
 			(11, ?, 1, NULL, 'UPLOAD_COS_OBJECT', 'NETWORK', 'source:1:cos',
 				 '{"cos_object_id":1,"upload_source_id":1,"output_id":1}', 'RUNNING', 1, 5, 'old-container:1'),
-			(12, ?, 1, 2, 'UPLOAD_BILIBILI', 'NETWORK', 'source:1:verified-bili',
-				 '{"publication_id":2,"upload_source_id":1}', 'RUNNING', 1, 3, 'old-container:1');
-	`, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID); err != nil {
+			(12, ?, 2, 2, 'UPLOAD_BILIBILI', 'NETWORK', 'source:2:verified-bili',
+				 '{"publication_id":2,"upload_source_id":2}', 'RUNNING', 1, 3, 'old-container:1');
+	`, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID, created.ID); err != nil {
 		t.Fatalf("seed abandoned jobs returned error: %v", err)
 	}
 
