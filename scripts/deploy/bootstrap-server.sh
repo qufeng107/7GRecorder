@@ -13,6 +13,7 @@ install -d -m 0755 /data/7grecorder/backups/db
 
 deploy_user="${SUDO_USER:-ubuntu}"
 deploy_group="$(id -gn "${deploy_user}" 2>/dev/null || printf '%s' "${deploy_user}")"
+install -d -o "${deploy_user}" -g "${deploy_group}" -m 0700 /data/7grecorder/tls
 
 if [ ! -f /etc/7grecorder/master.key ]; then
   umask 077
@@ -24,7 +25,7 @@ chmod 0640 /etc/7grecorder/master.key
 if [ ! -f /etc/7grecorder/app.env ]; then
   cat > /etc/7grecorder/app.env <<'EOF'
 APP_LISTEN_ADDR=:8080
-APP_PUBLIC_BASE_URL=https://recorder.example.com
+APP_PUBLIC_BASE_URL=https://7g.chat
 DATA_ROOT=/data/7grecorder
 SQLITE_PATH=/data/7grecorder/db/7grecorder.db
 TEMP_ROOT=/data/7grecorder/temp

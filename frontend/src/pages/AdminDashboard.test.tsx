@@ -707,6 +707,23 @@ describe("AdminDashboard", () => {
           })
         } as Response;
       }
+      if (path.endsWith("/api/v1/system/site-tls")) {
+        return {
+          ok: true,
+          json: async () => ({
+            enabled: true,
+            credential_id: 2,
+            primary_domain: "7g.chat",
+            additional_domains: ["www.7g.chat"],
+            status: "ACTIVE",
+            latest_certificate_id: "akxHVwKv",
+            deployed_certificate_id: "akxHVwKv",
+            latest_not_after: "2026-12-12T04:59:59Z",
+            last_checked_at: "2026-09-13T12:00:00Z",
+            updated_at: "2026-09-13T12:00:00Z"
+          })
+        } as Response;
+      }
       if (path.includes("/api/v1/storage/local/cleanup-candidates")) {
         return {
           ok: true,
@@ -753,6 +770,9 @@ describe("AdminDashboard", () => {
     await switchToEnglish();
 
     fireEvent.click(await screen.findByRole("button", { name: /system settings/i }));
+    expect(await screen.findByRole("heading", { name: "Site Domain & HTTPS" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Primary Domain")).toHaveValue("7g.chat");
+    expect(await screen.findAllByText("akxHVwKv")).not.toHaveLength(0);
     await screen.findByText("old recording");
     fireEvent.click(await screen.findByRole("button", { name: "Run Cleanup" }));
 

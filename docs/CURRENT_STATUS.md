@@ -125,7 +125,10 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 ## Future Design Documents
 
 - `docs/7GRecorder_Songs_V1_Technical_Design.md` defines the future evidence-driven Songs V1 pipeline.
-- `docs/TencentCloud_SSL_Auto_Sync_Ubuntu_Nginx.md` describes a future Tencent Cloud SSL-to-Nginx sync design.
+- Current development replaces the future-only Tencent SSL draft with the implemented `7g.chat`/`www.7g.chat` Site
+  TLS increment: SUPER_ADMIN-managed encrypted Tencent SSL credentials, durable certificate sync, validated staging,
+  and a root-owned Nginx deployment timer. It is not production-active until CI passes, the release is deployed, DNS
+  is confirmed, the host installer runs, and Site TLS reports `ACTIVE`.
 - These are design inputs only; neither feature is implemented by release `96dcc61`.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.

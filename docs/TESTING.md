@@ -324,6 +324,17 @@ login
 
 ## 15. Release Gate
 
+Site TLS coverage:
+
+- only SUPER_ADMIN can read, update, or manually sync site TLS settings;
+- only a `SYSTEM / tencent_ssl / TLS` credential can enable the module;
+- API secret plaintext and certificate private keys are never returned;
+- certificate selection requires exact X.509 hostname coverage for `7g.chat` and `www.7g.chat`;
+- malformed ZIPs, unsafe paths, mismatched keys, and expired certificates are rejected without replacing staged data;
+- `SYNC_SITE_TLS` is durable, idempotent, restart-retryable, and isolated from Recording/upload jobs;
+- the host installer keeps the previous certificate when host validation or `nginx -t` fails;
+- Nginx redirects named HTTP hosts, serves both production names over TLS, and does not expose `/internal/*`.
+
 Manual local cleanup coverage:
 
 - cleanup runs only when local storage policy reports reclaim is needed;

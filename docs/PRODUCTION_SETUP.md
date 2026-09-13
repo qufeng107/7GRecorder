@@ -102,3 +102,17 @@ http://<server-ip>/admin
 ```
 
 Keep the 7GRecorder container bound to `127.0.0.1`; Nginx is the public entry point.
+
+## Production Domain And TLS
+
+After DNS for `7g.chat` and `www.7g.chat` points to the production server, keep temporary IP access running and:
+
+1. Create a dedicated Tencent Cloud CAM sub-user allowed to list and download the SSL certificate.
+2. In the SUPER_ADMIN System page, create a `Tencent SSL` credential with
+   `{"secret_id":"...","secret_key":"..."}` and save the Site TLS settings.
+3. Run `sudo bash /opt/7grecorder/current/source/scripts/deploy/install-nginx-domain-site.sh` once on the host.
+4. Use `Sync now` in the System page. The app stages the validated certificate and the root-owned timer deploys it.
+5. Confirm Site TLS status is `ACTIVE`, then test `https://7g.chat/admin` and `https://www.7g.chat/admin`.
+
+Set `APP_PUBLIC_BASE_URL=https://7g.chat` in `/etc/7grecorder/app.env`. The installer does not stop or restart
+BililiveRecorder and leaves the existing Nginx site active until a valid staged certificate passes `nginx -t`.

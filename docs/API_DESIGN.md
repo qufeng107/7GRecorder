@@ -202,6 +202,29 @@ POST   /api/v1/credentials/{id}/actions/verify
 
 Secret 只写不读。
 
+Site domain/TLS is SUPER_ADMIN-only:
+
+```text
+GET  /api/v1/system/site-tls
+PUT  /api/v1/system/site-tls
+POST /api/v1/system/site-tls/actions/sync
+```
+
+The PUT body is:
+
+```json
+{
+  "enabled": true,
+  "credential_id": 12,
+  "primary_domain": "7g.chat",
+  "additional_domains": ["www.7g.chat"]
+}
+```
+
+The response contains configuration, certificate IDs, expiry, status, timestamps, and a bounded error summary. It
+never contains API secret plaintext, certificate private-key content, or host absolute key paths. Enabling requires a
+visible `SYSTEM / tencent_ssl / TLS` credential. The sync action is idempotent and requeues the singleton durable job.
+
 模块配置：
 
 ```text

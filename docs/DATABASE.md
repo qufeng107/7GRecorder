@@ -183,6 +183,32 @@ updated_at
 
 用于 Bilibili、网易云等“平台发布”。
 
+### site_tls_settings
+
+Singleton system configuration for the host Nginx certificate:
+
+```text
+id                         always 1
+credential_id nullable     -> credentials.id (`SYSTEM`, `tencent_ssl`, `TLS`)
+enabled
+primary_domain             default `7g.chat`
+additional_domains_json    JSON string array, default `["www.7g.chat"]`
+status                     DISABLED | PENDING | STAGED | ACTIVE | ERROR
+latest_certificate_id nullable
+latest_not_after nullable
+staged_certificate_id nullable
+staged_at nullable
+deployed_certificate_id nullable
+deployed_at nullable
+last_checked_at nullable
+last_error nullable
+created_at
+updated_at
+```
+
+Only SUPER_ADMIN may read or change this configuration. Certificate/private-key bytes are filesystem artifacts and
+must not be stored in SQLite. A settings update schedules the singleton `SYNC_SITE_TLS` durable job.
+
 ```text
 id
 recording_profile_id
@@ -655,6 +681,9 @@ publishing_profiles.recording_profile_id
   → recording_profiles.id
 
 publishing_profiles.credential_id
+  → credentials.id
+
+site_tls_settings.credential_id
   → credentials.id
 
 cos_storage_profiles.recording_profile_id

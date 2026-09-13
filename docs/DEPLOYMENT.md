@@ -293,6 +293,13 @@ frontend/dist
 
 > **Nginx 作为宿主机共享反向代理/TLS 服务，不放进 7GRecorder Compose。**
 
+Production domain TLS uses `7g.chat` and `www.7g.chat`. The application stages a validated Tencent Cloud certificate
+under `/data/7grecorder/tls/7g.chat/pending`; it never writes `/etc/nginx` or reloads host services. The one-time
+`install-nginx-domain-site.sh` installer creates a root-owned systemd timer. Its deploy helper installs the staged
+certificate, runs `nginx -t`, reloads only Nginx, and restores the previous certificate/config on failure. Normal
+7GRecorder release deployment does not restart Nginx unless the Nginx config itself changed and passed its config
+test, and it never restarts BililiveRecorder.
+
 7GRecorder `compose.yaml` 只管理：
 
 ```text

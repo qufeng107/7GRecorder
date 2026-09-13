@@ -17,6 +17,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/media"
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 	"github.com/7grecorder/7grecorder/backend/internal/recording"
+	"github.com/7grecorder/7grecorder/backend/internal/sitetls"
 	"github.com/7grecorder/7grecorder/backend/internal/upload"
 )
 
@@ -29,6 +30,7 @@ type Worker struct {
 	editor   media.Editor
 	cos      upload.COSUploader
 	bilibili upload.BilibiliUploader
+	siteTLS  sitetls.Synchronizer
 	lockID   string
 }
 
@@ -78,6 +80,7 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		editor:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
 		cos:      upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
 		bilibili: upload.NewBiliupCLIUploader(cfg),
+		siteTLS:  sitetls.NewTencentSynchronizer(cfg.DataRoot),
 		lockID:   fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano()),
 	}
 }
@@ -109,6 +112,12 @@ func NewWithCOSUploader(database *sql.DB, recorderClient recorder.SyncClient, cf
 func NewWithBilibiliUploader(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, bilibiliUploader upload.BilibiliUploader) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.bilibili = bilibiliUploader
+	return worker
+}
+
+func NewWithSiteTLSSynchronizer(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, synchronizer sitetls.Synchronizer) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.siteTLS = synchronizer
 	return worker
 }
 
@@ -270,7 +279,7 @@ func (w Worker) RecoverAbandonedJobs(ctx context.Context) (RecoveryResult, error
 				return RecoveryResult{}, err
 			}
 			result.Retryable++
-		case "SYNC_RECORDER_PROFILE", "MERGE_UPLOAD_SOURCE", "PACKAGE_UPLOAD_SOURCE", "APPLY_UPLOAD_SOURCE_EDIT":
+		case "SYNC_RECORDER_PROFILE", "MERGE_UPLOAD_SOURCE", "PACKAGE_UPLOAD_SOURCE", "APPLY_UPLOAD_SOURCE_EDIT", "SYNC_SITE_TLS":
 			if item.Type == "SYNC_RECORDER_PROFILE" && item.RecordingProfileID > 0 {
 				if _, err := tx.ExecContext(ctx, `
 					UPDATE recording_profile_runtime
@@ -427,6 +436,8 @@ func (w Worker) executeClaimedJob(ctx context.Context, job workerJob) error {
 		return w.runCOSRecordingFileUploadJob(ctx, job)
 	case "UPLOAD_BILIBILI":
 		return w.runBilibiliUploadJob(ctx, job)
+	case "SYNC_SITE_TLS":
+		return w.runSiteTLSSyncJob(ctx, job)
 	default:
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("unknown job type %q", job.Type))
 	}
@@ -692,7 +703,30 @@ func (w Worker) runBilibiliUploadJob(ctx context.Context, job workerJob) error {
 	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
 
+func (w Worker) runSiteTLSSyncJob(ctx context.Context, job workerJob) error {
+	store := sitetls.NewStore(w.db, w.cfg)
+	request, err := store.SyncRequest(ctx)
+	if err != nil {
+		class := classifySiteTLSError(err)
+		_ = store.MarkError(ctx, truncateError(err))
+		return w.failJob(ctx, job, class, err)
+	}
+	result, err := w.siteTLS.Sync(ctx, request)
+	if err != nil {
+		class := classifySiteTLSError(err)
+		_ = store.MarkError(ctx, truncateError(err))
+		return w.failJob(ctx, job, class, err)
+	}
+	if err := store.MarkChecked(ctx, result); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
 func (w Worker) discoverUploadSources(ctx context.Context) error {
+	if err := sitetls.NewStore(w.db, w.cfg).Reconcile(ctx); err != nil {
+		log.Printf("site TLS reconcile failed: %v", err)
+	}
 	recordingStore := recording.NewStore(w.db, w.cfg)
 	if _, err := recordingStore.ReconcileLocal(ctx, accountSuperAdmin()); err != nil {
 		return err
@@ -737,7 +771,7 @@ func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs 
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI', 'SYNC_SITE_TLS')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 			AND NOT EXISTS (
@@ -865,6 +899,17 @@ func classifyUploadError(err error) string {
 		return classified.ErrorClass()
 	}
 	if errors.Is(err, upload.ErrValidation) || errors.Is(err, upload.ErrNotFound) || errors.Is(err, upload.ErrForbidden) {
+		return "PERMANENT"
+	}
+	return "TRANSIENT"
+}
+
+func classifySiteTLSError(err error) string {
+	var classified interface{ ErrorClass() string }
+	if errors.As(err, &classified) {
+		return classified.ErrorClass()
+	}
+	if errors.Is(err, sitetls.ErrValidation) || errors.Is(err, sitetls.ErrForbidden) || errors.Is(err, sitetls.ErrNotFound) {
 		return "PERMANENT"
 	}
 	return "TRANSIENT"

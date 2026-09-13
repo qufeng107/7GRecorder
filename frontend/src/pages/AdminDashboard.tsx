@@ -438,6 +438,30 @@ type COSStorageConfig = {
   updated_at?: string;
 };
 
+type SiteTLSSettings = {
+  enabled: boolean;
+  credential_id?: number;
+  primary_domain: string;
+  additional_domains: string[];
+  status: string;
+  latest_certificate_id?: string;
+  latest_not_after?: string;
+  staged_certificate_id?: string;
+  staged_at?: string;
+  deployed_certificate_id?: string;
+  deployed_at?: string;
+  last_checked_at?: string;
+  last_error?: string;
+  updated_at: string;
+};
+
+type SiteTLSForm = {
+  enabled: boolean;
+  credential_id: string;
+  primary_domain: string;
+  additional_domains: string;
+};
+
 type UploadModuleReconcileResult = {
   publications_created: number;
   bilibili_jobs_created: number;
@@ -524,6 +548,13 @@ const emptyProfileForm: ProfileForm = {
   record_danmaku: true,
   segment_duration_sec: 1800,
   finalize_grace_period_sec: 300
+};
+
+const emptySiteTLSForm: SiteTLSForm = {
+  enabled: false,
+  credential_id: "",
+  primary_domain: "7g.chat",
+  additional_domains: "www.7g.chat"
 };
 
 const defaultManagerPolicy: ManagerPolicy = {
@@ -614,6 +645,25 @@ const uiCopy = {
     blocked: "禁止",
     access: "权限",
     systemSettings: "系统设置",
+    siteTLS: "站点域名与 HTTPS",
+    siteTLSHint: "腾讯云负责续期；7GRecorder 校验证书后交由宿主机 Nginx 安全部署。",
+    primaryDomain: "主域名",
+    additionalDomains: "附加域名",
+    additionalDomainsHint: "每行一个域名。DNS 记录需已指向生产服务器。",
+    tlsCredential: "腾讯云 SSL 凭证",
+    tlsCredentialLabel: "凭证名称",
+    tlsCredentialSecret: "Secret JSON",
+    createTLSCredential: "保存 SSL 凭证",
+    saveSiteTLS: "保存并排队同步",
+    syncSiteTLS: "立即同步",
+    siteTLSStatus: "同步状态",
+    latestCertificate: "云端证书",
+    stagedCertificate: "待部署证书",
+    deployedCertificate: "已部署证书",
+    certificateExpires: "证书到期",
+    lastChecked: "最近检查",
+    siteTLSSaveFailed: "站点 TLS 保存失败，请检查域名和凭证。",
+    tlsCredentialCreateFailed: "SSL 凭证保存失败，请检查 Secret JSON。",
     profiles: "录制配置",
     allOwners: "全部账号",
     policyUnavailable: "账号权限暂不可用。",
@@ -715,6 +765,7 @@ const uiCopy = {
     jobUploadBilibili: "上传到 Bilibili",
     jobUploadCOS: "上传到 COS",
     jobUploadCOSRecordingFile: "上传原始文件到 COS",
+    jobSyncSiteTLS: "同步站点 TLS 证书",
     jobStatusPending: "待开始",
     jobStatusRunning: "运行中",
     jobStatusSucceeded: "已成功",
@@ -935,6 +986,25 @@ const uiCopy = {
     blocked: "Blocked",
     access: "Access",
     systemSettings: "System Settings",
+    siteTLS: "Site Domain & HTTPS",
+    siteTLSHint: "Tencent Cloud renews the certificate; 7GRecorder validates it before host Nginx deploys it.",
+    primaryDomain: "Primary Domain",
+    additionalDomains: "Additional Domains",
+    additionalDomainsHint: "One domain per line. DNS must already point to the production server.",
+    tlsCredential: "Tencent SSL Credential",
+    tlsCredentialLabel: "Credential Name",
+    tlsCredentialSecret: "Secret JSON",
+    createTLSCredential: "Save SSL Credential",
+    saveSiteTLS: "Save & Queue Sync",
+    syncSiteTLS: "Sync Now",
+    siteTLSStatus: "Sync Status",
+    latestCertificate: "Cloud Certificate",
+    stagedCertificate: "Staged Certificate",
+    deployedCertificate: "Deployed Certificate",
+    certificateExpires: "Certificate Expiry",
+    lastChecked: "Last Checked",
+    siteTLSSaveFailed: "Could not save Site TLS. Check the domains and credential.",
+    tlsCredentialCreateFailed: "Could not save the SSL credential. Check the secret JSON.",
     profiles: "Profiles",
     allOwners: "All owners",
     policyUnavailable: "Access policy is not available.",
@@ -1038,6 +1108,7 @@ const uiCopy = {
     jobUploadBilibili: "Upload to Bilibili",
     jobUploadCOS: "Upload to COS",
     jobUploadCOSRecordingFile: "Upload raw file to COS",
+    jobSyncSiteTLS: "Sync site TLS certificate",
     jobStatusPending: "Pending",
     jobStatusRunning: "Running",
     jobStatusSucceeded: "Succeeded",
@@ -1537,6 +1608,9 @@ export function AdminDashboard() {
     cleanupTargetPercent: 85
   });
   const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredentialForm);
+  const [siteTLSForm, setSiteTLSForm] = useState<SiteTLSForm>(emptySiteTLSForm);
+  const [tlsCredentialLabel, setTLSCredentialLabel] = useState("7g.chat SSL sync");
+  const [tlsCredentialSecret, setTLSCredentialSecret] = useState('{"secret_id":"","secret_key":""}');
   const [uploadSettingsForm, setUploadSettingsForm] = useState<UploadSettingsForm>(emptyUploadSettingsForm);
   const [accountForm, setAccountForm] = useState<AccountForm>({
     ...emptyAccountForm,
@@ -1626,9 +1700,17 @@ export function AdminDashboard() {
   const credentialsQuery = useQuery({
     queryKey: ["credentials"],
     queryFn: () => requestJson<CredentialListResponse>("/api/v1/credentials"),
-    enabled: Boolean(meQuery.data?.user && canManageUploadSettings),
+    enabled: Boolean(meQuery.data?.user && (canManageUploadSettings || canManageSystemSettings)),
     retry: false,
     refetchInterval: 30000
+  });
+
+  const siteTLSQuery = useQuery({
+    queryKey: ["site-tls"],
+    queryFn: () => requestJson<SiteTLSSettings>("/api/v1/system/site-tls"),
+    enabled: Boolean(canManageSystemSettings && activePage === "system"),
+    retry: false,
+    refetchInterval: 10000
   });
 
   const profiles = useMemo(() => profilesQuery.data?.items ?? [], [profilesQuery.data?.items]);
@@ -1724,6 +1806,19 @@ export function AdminDashboard() {
       cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100)
     });
   }, [localStorageSettings]);
+
+  useEffect(() => {
+    const settings = siteTLSQuery.data;
+    if (!settings) {
+      return;
+    }
+    setSiteTLSForm({
+      enabled: settings.enabled,
+      credential_id: settings.credential_id ? String(settings.credential_id) : "",
+      primary_domain: settings.primary_domain,
+      additional_domains: settings.additional_domains.join("\n")
+    });
+  }, [siteTLSQuery.data]);
 
   useEffect(() => {
     const config = bilibiliConfigQuery.data;
@@ -2063,6 +2158,50 @@ export function AdminDashboard() {
     }
   });
 
+  const createTLSCredentialMutation = useMutation({
+    mutationFn: () =>
+      requestJson<Credential>("/api/v1/credentials", {
+        method: "POST",
+        body: JSON.stringify({
+          scope: "SYSTEM",
+          platform: "tencent_ssl",
+          purpose: "TLS",
+          account_label: tlsCredentialLabel,
+          secret: parseConfigJSON(tlsCredentialSecret)
+        })
+      }),
+    onSuccess: (credential) => {
+      setSiteTLSForm((form) => ({ ...form, credential_id: String(credential.id) }));
+      setTLSCredentialSecret('{"secret_id":"","secret_key":""}');
+      void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    }
+  });
+
+  const saveSiteTLSMutation = useMutation({
+    mutationFn: () =>
+      requestJson<SiteTLSSettings>("/api/v1/system/site-tls", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: siteTLSForm.enabled,
+          credential_id: Number(siteTLSForm.credential_id || 0),
+          primary_domain: siteTLSForm.primary_domain,
+          additional_domains: siteTLSForm.additional_domains.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)
+        })
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["site-tls"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
+  const syncSiteTLSMutation = useMutation({
+    mutationFn: () => requestJson<SiteTLSSettings>("/api/v1/system/site-tls/actions/sync", { method: "POST", body: "{}" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["site-tls"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  });
+
   const saveBilibiliConfigMutation = useMutation({
     mutationFn: () =>
       requestJson<BilibiliPublishingConfig>(`/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`, {
@@ -2378,26 +2517,47 @@ export function AdminDashboard() {
             ) : null}
 
             {activePage === "system" && canManageSystemSettings ? (
-              <StoragePanel
-                candidates={cleanupCandidatesQuery.data?.items ?? []}
-                previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
-                form={storageForm}
-                cleanupError={cleanupMutation.isError}
-                cleanupPending={cleanupMutation.isPending}
-                cleanupResult={cleanupMutation.data}
-                isLoading={localStorageQuery.isLoading}
-                isSaving={saveStorageSettingsMutation.isPending}
-                labels={ui}
-                saveError={saveStorageSettingsMutation.isError}
-                status={localStorageQuery.data}
-                onFormChange={setStorageForm}
-                onRunCleanup={() => {
-                  if (window.confirm(ui.cleanupConfirm)) {
-                    cleanupMutation.mutate();
-                  }
-                }}
-                onSave={() => saveStorageSettingsMutation.mutate()}
-              />
+              <div className="grid gap-4">
+                <SiteTLSPanel
+                  credentials={credentials.filter((item) => item.scope === "SYSTEM" && item.platform === "tencent_ssl" && item.purpose === "TLS")}
+                  credentialCreateError={createTLSCredentialMutation.isError}
+                  credentialCreatePending={createTLSCredentialMutation.isPending}
+                  credentialLabel={tlsCredentialLabel}
+                  credentialSecret={tlsCredentialSecret}
+                  form={siteTLSForm}
+                  labels={ui}
+                  saveError={saveSiteTLSMutation.isError}
+                  savePending={saveSiteTLSMutation.isPending}
+                  settings={siteTLSQuery.data}
+                  syncPending={syncSiteTLSMutation.isPending}
+                  onCreateCredential={(event) => { event.preventDefault(); createTLSCredentialMutation.mutate(); }}
+                  onCredentialLabelChange={setTLSCredentialLabel}
+                  onCredentialSecretChange={setTLSCredentialSecret}
+                  onFormChange={setSiteTLSForm}
+                  onSave={() => saveSiteTLSMutation.mutate()}
+                  onSync={() => syncSiteTLSMutation.mutate()}
+                />
+                <StoragePanel
+                  candidates={cleanupCandidatesQuery.data?.items ?? []}
+                  previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
+                  form={storageForm}
+                  cleanupError={cleanupMutation.isError}
+                  cleanupPending={cleanupMutation.isPending}
+                  cleanupResult={cleanupMutation.data}
+                  isLoading={localStorageQuery.isLoading}
+                  isSaving={saveStorageSettingsMutation.isPending}
+                  labels={ui}
+                  saveError={saveStorageSettingsMutation.isError}
+                  status={localStorageQuery.data}
+                  onFormChange={setStorageForm}
+                  onRunCleanup={() => {
+                    if (window.confirm(ui.cleanupConfirm)) {
+                      cleanupMutation.mutate();
+                    }
+                  }}
+                  onSave={() => saveStorageSettingsMutation.mutate()}
+                />
+              </div>
             ) : null}
 
             {activePage === "uploads" ? (
@@ -3742,6 +3902,84 @@ function JSONTextArea(props: {
   );
 }
 
+function SiteTLSPanel(props: {
+  credentialCreateError: boolean;
+  credentialCreatePending: boolean;
+  credentialLabel: string;
+  credentialSecret: string;
+  credentials: Credential[];
+  form: SiteTLSForm;
+  labels: AdminCopy;
+  saveError: boolean;
+  savePending: boolean;
+  settings?: SiteTLSSettings;
+  syncPending: boolean;
+  onCreateCredential: (event: FormEvent<HTMLFormElement>) => void;
+  onCredentialLabelChange: (value: string) => void;
+  onCredentialSecretChange: (value: string) => void;
+  onFormChange: (form: SiteTLSForm) => void;
+  onSave: () => void;
+  onSync: () => void;
+}) {
+  const update = <K extends keyof SiteTLSForm>(key: K, value: SiteTLSForm[K]) => {
+    props.onFormChange({ ...props.form, [key]: value });
+  };
+
+  return (
+    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <ShieldCheck className="mt-0.5 h-5 w-5 text-accent" aria-hidden="true" />
+        <div>
+          <h2 className="text-sm font-semibold">{props.labels.siteTLS}</h2>
+          <p className="mt-1 text-sm text-muted">{props.labels.siteTLSHint}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+        <div className="grid content-start gap-3">
+          <ToggleField label={props.labels.enabled} checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
+          <CredentialSelect credentials={props.credentials} label={props.labels.tlsCredential} labels={props.labels} value={props.form.credential_id} onChange={(value) => update("credential_id", value)} />
+          <TextField disabled label={props.labels.primaryDomain} value={props.form.primary_domain} onChange={(value) => update("primary_domain", value)} />
+          <TextAreaField disabled label={props.labels.additionalDomains} value={props.form.additional_domains} onChange={(value) => update("additional_domains", value)} />
+          <p className="text-xs text-muted">{props.labels.additionalDomainsHint}</p>
+          {props.saveError ? <p className="text-sm text-red-700">{props.labels.siteTLSSaveFailed}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <button className="inline-flex h-9 items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60" disabled={props.savePending} type="button" onClick={props.onSave}>
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {props.labels.saveSiteTLS}
+            </button>
+            <button className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold disabled:opacity-60" disabled={props.syncPending || !props.settings?.enabled} type="button" onClick={props.onSync}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {props.labels.syncSiteTLS}
+            </button>
+          </div>
+        </div>
+        <div className="grid content-start gap-4 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+          <div className="grid grid-cols-2 gap-3">
+            <Metric label={props.labels.siteTLSStatus} value={props.settings?.status ?? props.labels.unknown} />
+            <Metric label={props.labels.latestCertificate} value={props.settings?.latest_certificate_id ?? "-"} />
+            <Metric label={props.labels.stagedCertificate} value={props.settings?.staged_certificate_id ?? "-"} />
+            <Metric label={props.labels.deployedCertificate} value={props.settings?.deployed_certificate_id ?? "-"} />
+            <Metric label={props.labels.certificateExpires} value={props.settings?.latest_not_after ? formatDateTime(props.settings.latest_not_after, props.labels) : "-"} />
+            <Metric label={props.labels.lastChecked} value={props.settings?.last_checked_at ? formatDateTime(props.settings.last_checked_at, props.labels) : "-"} />
+          </div>
+          {props.settings?.last_error ? <p className="text-sm text-red-700">{props.settings.last_error}</p> : null}
+          <form className="grid gap-3 border-t border-border pt-4" onSubmit={props.onCreateCredential}>
+            <h3 className="text-sm font-semibold">{props.labels.tlsCredential}</h3>
+            <TextField label={props.labels.tlsCredentialLabel} value={props.credentialLabel} onChange={props.onCredentialLabelChange} />
+            <JSONTextArea label={props.labels.tlsCredentialSecret} value={props.credentialSecret} onChange={props.onCredentialSecretChange} />
+            <p className="text-xs text-muted">{props.labels.credentialSecretHint}</p>
+            {props.credentialCreateError ? <p className="text-sm text-red-700">{props.labels.tlsCredentialCreateFailed}</p> : null}
+            <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold disabled:opacity-60" disabled={props.credentialCreatePending} type="submit">
+              <Lock className="h-4 w-4" aria-hidden="true" />
+              {props.labels.createTLSCredential}
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function StoragePanel(props: {
   candidates: CleanupCandidate[];
   cleanupError: boolean;
@@ -5081,6 +5319,9 @@ function formatJobType(value: string, labels: AdminCopy): string {
   }
   if (value === "UPLOAD_COS_RECORDING_FILE") {
     return labels.jobUploadCOSRecordingFile;
+  }
+  if (value === "SYNC_SITE_TLS") {
+    return labels.jobSyncSiteTLS;
   }
   return value;
 }

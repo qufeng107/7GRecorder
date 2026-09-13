@@ -77,6 +77,17 @@ Recording 是基础能力；其余能力均为可选模块。
 
 不允许录播写满系统盘影响其他服务。
 
+### 3.1 Production domain and TLS
+
+- The production site uses `https://7g.chat`; `www.7g.chat` is an additional accepted name.
+- Host Nginx terminates TLS and redirects the named HTTP hosts to HTTPS.
+- Tencent Cloud SSL remains the certificate authority/lifecycle provider.
+- SUPER_ADMIN configures a dedicated Tencent SSL API credential in the management site; secrets are encrypted and
+  never returned.
+- Certificate synchronization failure must not stop Nginx, BililiveRecorder, Recording Core, or other optional
+  modules. The last valid deployed certificate remains active.
+- 7GRecorder does not own or mutate public DNS records in v1.
+
 ---
 
 ## 4. 用户与直播间

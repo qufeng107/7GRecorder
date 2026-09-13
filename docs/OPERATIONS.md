@@ -735,6 +735,9 @@ github.com/tencentyun/cos-go-sdk-v5
 [ ] SQLite backup 可恢复
 [ ] BililiveRecorder API 仅内网/localhost
 [ ] Nginx /internal 未公网暴露
+[ ] 7g.chat/www.7g.chat DNS points to production and Site TLS reports ACTIVE
+[ ] Tencent SSL credential belongs to a dedicated CAM sub-user and is stored through the admin site
+[ ] 7grecorder-site-tls.timer is active; failed sync/install leaves the previous certificate serving
 [ ] SSH known_hosts pinned
 [ ] GitHub deploy key 正确
 [ ] 当前 Recorder/biliup/FFmpeg 版本已固定

@@ -429,3 +429,16 @@ Completed scope:
 
 This increment changes only future Bilibili submissions started after deployment. It does not rewrite an existing
 submission or alter COS archive naming.
+
+---
+
+## 18. Current Increment: Production Domain And TLS (2026-09-13)
+
+- serve `7g.chat` and `www.7g.chat` through host Nginx with HTTP-to-HTTPS redirect;
+- add SUPER_ADMIN site TLS settings and encrypted Tencent SSL credentials;
+- periodically discover and download the newest matching issued certificate;
+- validate and stage certificate material without giving the app permission to reload host Nginx;
+- install through a root-owned idempotent host service with rollback on validation or `nginx -t` failure;
+- surface staged/deployed IDs, expiry, timestamps, and errors in the System page.
+
+DNS mutation, certificate purchasing, and replacing Tencent Cloud's renewal lifecycle are non-goals.

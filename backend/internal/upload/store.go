@@ -2,22 +2,17 @@ package upload
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
+	"github.com/7grecorder/7grecorder/backend/internal/secretbox"
 )
 
 var (
@@ -1278,72 +1273,13 @@ func (s Store) ensureCredentialVisible(ctx context.Context, actor account.User, 
 }
 
 func (s Store) encryptSecret(secret []byte) ([]byte, error) {
-	master, err := os.ReadFile(s.cfg.MasterKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("read master key: %w", err)
-	}
-	key := sha256.Sum256([]byte(strings.TrimSpace(string(master))))
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, fmt.Errorf("create cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("create gcm: %w", err)
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, fmt.Errorf("read nonce: %w", err)
-	}
-	ciphertext := gcm.Seal(nil, nonce, secret, nil)
-	envelope := map[string]string{
-		"alg":        "AES-256-GCM",
-		"nonce":      base64.StdEncoding.EncodeToString(nonce),
-		"ciphertext": base64.StdEncoding.EncodeToString(ciphertext),
-	}
-	encoded, err := json.Marshal(envelope)
-	if err != nil {
-		return nil, fmt.Errorf("encode encrypted secret: %w", err)
-	}
-	return encoded, nil
+	return secretbox.Encrypt(s.cfg.MasterKeyPath, secret)
 }
 
 func (s Store) decryptSecret(encrypted []byte) ([]byte, error) {
-	var envelope struct {
-		Alg        string `json:"alg"`
-		Nonce      string `json:"nonce"`
-		Ciphertext string `json:"ciphertext"`
-	}
-	if err := json.Unmarshal(encrypted, &envelope); err != nil {
-		return nil, fmt.Errorf("decode encrypted secret envelope: %w", err)
-	}
-	if envelope.Alg != "AES-256-GCM" || envelope.Nonce == "" || envelope.Ciphertext == "" {
-		return nil, ErrValidation
-	}
-	nonce, err := base64.StdEncoding.DecodeString(envelope.Nonce)
+	plaintext, err := secretbox.Decrypt(s.cfg.MasterKeyPath, encrypted)
 	if err != nil {
-		return nil, fmt.Errorf("decode encrypted secret nonce: %w", err)
-	}
-	ciphertext, err := base64.StdEncoding.DecodeString(envelope.Ciphertext)
-	if err != nil {
-		return nil, fmt.Errorf("decode encrypted secret ciphertext: %w", err)
-	}
-	master, err := os.ReadFile(s.cfg.MasterKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("read master key: %w", err)
-	}
-	key := sha256.Sum256([]byte(strings.TrimSpace(string(master))))
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, fmt.Errorf("create cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("create gcm: %w", err)
-	}
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt secret: %w", err)
+		return nil, err
 	}
 	return plaintext, nil
 }
