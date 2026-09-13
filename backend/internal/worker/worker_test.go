@@ -30,6 +30,10 @@ func (f *fakeRecorder) SyncProfile(_ context.Context, desired recorder.DesiredPr
 	return f.status, f.err
 }
 
+func (f *fakeRecorder) ReadRuntimeStatus(_ context.Context, _ string) (recorder.RuntimeStatus, error) {
+	return f.status, f.err
+}
+
 type fakeMerger struct {
 	request media.MergeRequest
 	result  media.MergeResult
@@ -139,6 +143,48 @@ func TestRunOnceSyncsPendingRecorderProfile(t *testing.T) {
 	}
 	if jobStatus != "SUCCEEDED" || syncStatus != "SYNCED" || streamStatus != "LIVE" || recorderStatus != "RECORDING" {
 		t.Fatalf("unexpected statuses job=%s sync=%s stream=%s recorder=%s", jobStatus, syncStatus, streamStatus, recorderStatus)
+	}
+}
+
+func TestRefreshRecorderRuntimesRepairsStaleState(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G Live",
+		RoomID:       "1741048619",
+		StreamerName: "7G",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'LIVE', recorder_status = 'RECORDING'
+		WHERE recording_profile_id = ?
+	`, created.ID); err != nil {
+		t.Fatalf("seed stale runtime returned error: %v", err)
+	}
+
+	worker := New(database, &fakeRecorder{
+		status: recorder.RuntimeStatus{StreamStatus: "OFFLINE", RecorderStatus: "IDLE"},
+	})
+	if err := worker.refreshRecorderRuntimes(ctx); err != nil {
+		t.Fatalf("refreshRecorderRuntimes returned error: %v", err)
+	}
+
+	var streamStatus string
+	var recorderStatus string
+	var lastReconciledAt string
+	if err := database.QueryRowContext(ctx, `
+		SELECT stream_status, recorder_status, COALESCE(last_reconciled_at, '')
+		FROM recording_profile_runtime
+		WHERE recording_profile_id = ?
+	`, created.ID).Scan(&streamStatus, &recorderStatus, &lastReconciledAt); err != nil {
+		t.Fatalf("query refreshed runtime returned error: %v", err)
+	}
+	if streamStatus != "OFFLINE" || recorderStatus != "IDLE" || lastReconciledAt == "" {
+		t.Fatalf("unexpected refreshed runtime: stream=%s recorder=%s reconciled=%q", streamStatus, recorderStatus, lastReconciledAt)
 	}
 }
 

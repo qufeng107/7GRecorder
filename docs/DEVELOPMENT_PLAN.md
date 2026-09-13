@@ -237,6 +237,7 @@ Current implementation note:
 - 已实现：Worker 使用官方 Go SDK 上传 Upload Source 到 COS 并更新对象状态；
 - 已实现：Upload Source 封装分片，按 COS/Bilibili 较小限制生成平台可消费文件；
 - 已实现：Upload Source 发现会在合并窗口内存在同配置相邻 `ACTIVE`/`WRITING` 录像时暂缓生成父视频，避免直播文件轮转被过早固化成多个父视频；
+- 已实现：Upload Source 发现不再把可能因丢失事件而陈旧的 Profile `LIVE/RECORDING` 运行态作为永久门禁；超过合并窗口后，以 `ACTIVE` Recording、`WRITING` video 和近期相邻录像文件作为是否仍在录制的安全依据；
 - 已实现：将 `UPLOAD_MAX_PART_BYTES` 默认值从早期 4 GiB 调整到更保守的 3.8GB 级别，避免超过 Bilibili
   单文件上传边界；
 - 当前修正：COS 直接上传每个 output part，不再生成 MP4 转码或 ZIP 派生文件；

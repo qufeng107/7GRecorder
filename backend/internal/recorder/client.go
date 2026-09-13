@@ -22,6 +22,10 @@ type SyncClient interface {
 	SyncProfile(ctx context.Context, desired DesiredProfile) (RuntimeStatus, error)
 }
 
+type RuntimeClient interface {
+	ReadRuntimeStatus(ctx context.Context, roomID string) (RuntimeStatus, error)
+}
+
 type HTTPClient struct {
 	baseURL  string
 	username string
@@ -76,6 +80,24 @@ func (c HTTPClient) SyncProfile(ctx context.Context, desired DesiredProfile) (Ru
 	}
 	if err := c.setRoomConfig(ctx, roomID, desired); err != nil {
 		return RuntimeStatus{}, err
+	}
+	return runtimeStatus(room), nil
+}
+
+func (c HTTPClient) ReadRuntimeStatus(ctx context.Context, roomIDValue string) (RuntimeStatus, error) {
+	if c.baseURL == "" {
+		return RuntimeStatus{}, ErrNotConfigured
+	}
+	roomID, err := strconv.ParseInt(strings.TrimSpace(roomIDValue), 10, 64)
+	if err != nil || roomID <= 0 {
+		return RuntimeStatus{}, fmt.Errorf("invalid recorder room id %q", roomIDValue)
+	}
+	room, exists, err := c.room(ctx, roomID)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
+	if !exists {
+		return RuntimeStatus{StreamStatus: "UNKNOWN", RecorderStatus: "IDLE"}, nil
 	}
 	return runtimeStatus(room), nil
 }

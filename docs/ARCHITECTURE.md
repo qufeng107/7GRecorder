@@ -358,6 +358,14 @@ Scheduler 到期后变为 `COMPLETED`。
 
 `StreamStarted / StreamEnded` 只维护 Profile runtime 的直播状态，不直接创建/完成 Recording。
 
+Profile runtime is observational state and may become stale when a recorder webhook is lost. Upload Source discovery
+must not use `stream_status` or `recorder_status` as an unbounded hard gate. After the merge-gap grace period, discovery
+uses durable Recording/File facts: an adjacent `ACTIVE` Recording, a `WRITING` video row, or a recently modified
+adjacent recorder video delays finalization. When all source recordings and video files are closed and none of those
+active signals exists, stale `LIVE`/`RECORDING` runtime values do not prevent creation of the parent Upload Source.
+The Recorder reconciler also polls the pinned Recorder room endpoint every 30 seconds to refresh runtime display state;
+read failures retain the last known value and do not block file discovery.
+
 ### 7.6 File Event
 
 RecordingFile：

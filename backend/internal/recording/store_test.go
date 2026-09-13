@@ -1084,6 +1084,56 @@ func TestDiscoverUploadSourcesPersistsContinuousSegments(t *testing.T) {
 	}
 }
 
+func TestDiscoverUploadSourcesDoesNotTrustStaleProfileRuntime(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDB(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+		Name:         "7G",
+		RoomID:       "1741048619",
+		StreamerName: "Streamer",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE recording_profile_runtime
+		SET stream_status = 'LIVE', recorder_status = 'RECORDING'
+		WHERE recording_profile_id = 1
+	`); err != nil {
+		t.Fatalf("update stale runtime returned error: %v", err)
+	}
+
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 1",
+		StartedAt:   "2026-09-05T10:00:00Z",
+		CompletedAt: "2026-09-05T10:03:00Z",
+		DurationMs:  180000,
+		SizeBytes:   20,
+	})
+	insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+		Title:       "part 2",
+		StartedAt:   "2026-09-05T10:03:03Z",
+		CompletedAt: "2026-09-05T10:06:00Z",
+		DurationMs:  177000,
+		SizeBytes:   30,
+	})
+
+	result, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+	if err != nil {
+		t.Fatalf("DiscoverUploadSources returned error: %v", err)
+	}
+	if result.Created != 1 || result.Delayed != 0 {
+		t.Fatalf("expected stale runtime not to block discovery, got %#v", result)
+	}
+	sources, err := NewStore(database, cfg).ListUploadSources(ctx, actor, 600)
+	if err != nil {
+		t.Fatalf("ListUploadSources returned error: %v", err)
+	}
+	if len(sources.Items) != 1 || sources.Items[0].RecordingCount != 2 {
+		t.Fatalf("expected one parent with both closed recordings, got %#v", sources)
+	}
+}
+
 func TestDiscoverUploadSourcesWaitsForAdjacentUnfinishedRecording(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)

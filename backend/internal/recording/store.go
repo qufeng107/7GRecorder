@@ -1760,13 +1760,10 @@ func (s Store) completedLocalRecordingsWithoutUploadSource(ctx context.Context) 
 			COALESCE(rec.upload_review_completed_at, ''), COALESCE(rec.upload_review_notes, '')
 		FROM recordings rec
 		JOIN recording_profiles p ON p.id = rec.recording_profile_id
-		JOIN recording_profile_runtime rt ON rt.recording_profile_id = rec.recording_profile_id
 		WHERE rec.recording_status = 'COMPLETED'
 			AND rec.local_storage_status != 'DELETED'
 			AND rec.local_deleted_at IS NULL
 			AND p.archived_at IS NULL
-			AND COALESCE(rt.stream_status, '') != 'LIVE'
-			AND COALESCE(rt.recorder_status, '') != 'RECORDING'
 			AND NOT EXISTS (
 				SELECT 1 FROM upload_source_segments uss WHERE uss.recording_id = rec.id
 			)

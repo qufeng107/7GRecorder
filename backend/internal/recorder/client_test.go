@@ -99,6 +99,26 @@ func TestHTTPClientSyncProfileAddsRoomAndConfiguresIt(t *testing.T) {
 	}
 }
 
+func TestHTTPClientReadRuntimeStatus(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/room/1741048619" {
+			t.Fatalf("unexpected recorder request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"roomId":1741048619,"streaming":false,"recording":false}`))
+	}))
+	defer server.Close()
+
+	status, err := NewHTTPClient(config.Config{RecorderBaseURL: server.URL}).ReadRuntimeStatus(ctx, "1741048619")
+	if err != nil {
+		t.Fatalf("ReadRuntimeStatus returned error: %v", err)
+	}
+	if status.StreamStatus != "OFFLINE" || status.RecorderStatus != "IDLE" {
+		t.Fatalf("unexpected runtime status: %#v", status)
+	}
+}
+
 func TestHTTPClientSyncProfileRejectsSuccessfulConfigResponseWithDrift(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

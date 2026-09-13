@@ -71,6 +71,11 @@ alias resolves to the original source, and that canonical local/COS-facing filen
 Progress regression tests include carriage-return progress lines and ANSI control sequences from the pinned biliup
 renderer, and assert non-zero aggregate byte progress.
 
+Upload Source discovery regression tests must prove that stale Profile runtime values (`LIVE`/`RECORDING`) cannot
+permanently hide completed closed recordings. Existing adjacent `ACTIVE` Recording and `WRITING`/recent recorder-file
+tests remain the safety boundary that prevents premature parent creation during an actual recording.
+Recorder adapter and worker tests also cover read-only runtime polling from stale `LIVE/RECORDING` to `OFFLINE/IDLE`.
+
 COS tests must verify that each object uploads the original publish-part path and bytes without invoking FFmpeg or
 creating a derived file. Object-key tests must assert `videos/YYYY-MM-DD/session-NN/pNN.<source-format>`, China-date
 daily ordinals, stable output ordering, and unchanged historical object rows. Bilibili must continue to read the same

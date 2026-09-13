@@ -134,6 +134,9 @@ func (w Worker) Run(ctx context.Context) {
 		log.Printf("worker recorder resync preparation failed; worker disabled: %v", err)
 		return
 	}
+	if err := w.refreshRecorderRuntimes(ctx); err != nil {
+		log.Printf("worker recorder runtime refresh failed: %v", err)
+	}
 	if err := w.discoverUploadSources(ctx); err != nil {
 		log.Printf("worker reconcile failed: %v", err)
 	}
@@ -358,11 +361,69 @@ func (w Worker) runDiscoveryLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := w.refreshRecorderRuntimes(ctx); err != nil {
+				log.Printf("worker recorder runtime refresh failed: %v", err)
+			}
 			if err := w.discoverUploadSources(ctx); err != nil {
 				log.Printf("worker reconcile failed: %v", err)
 			}
 		}
 	}
+}
+
+func (w Worker) refreshRecorderRuntimes(ctx context.Context) error {
+	client, ok := w.recorder.(recorder.RuntimeClient)
+	if !ok {
+		return nil
+	}
+	rows, err := w.db.QueryContext(ctx, `
+		SELECT id, room_id
+		FROM recording_profiles
+		WHERE enabled = 1 AND archived_at IS NULL
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return fmt.Errorf("list recorder runtimes to refresh: %w", err)
+	}
+	type target struct {
+		profileID int64
+		roomID    string
+	}
+	targets := make([]target, 0)
+	for rows.Next() {
+		var item target
+		if err := rows.Scan(&item.profileID, &item.roomID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan recorder runtime target: %w", err)
+		}
+		targets = append(targets, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate recorder runtime targets: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close recorder runtime targets: %w", err)
+	}
+
+	var refreshErrors []error
+	for _, item := range targets {
+		status, err := client.ReadRuntimeStatus(ctx, item.roomID)
+		if err != nil {
+			refreshErrors = append(refreshErrors, fmt.Errorf("read recorder runtime for profile %d: %w", item.profileID, err))
+			continue
+		}
+		if _, err := w.db.ExecContext(ctx, `
+			UPDATE recording_profile_runtime
+			SET stream_status = ?, recorder_status = ?,
+				last_reconciled_at = CURRENT_TIMESTAMP,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE recording_profile_id = ?
+		`, status.StreamStatus, status.RecorderStatus, item.profileID); err != nil {
+			refreshErrors = append(refreshErrors, fmt.Errorf("update recorder runtime for profile %d: %w", item.profileID, err))
+		}
+	}
+	return errors.Join(refreshErrors...)
 }
 
 func (w Worker) runResourceLoop(ctx context.Context, resourceClass string, slot int) {
