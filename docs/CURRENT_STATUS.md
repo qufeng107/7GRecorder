@@ -1,6 +1,6 @@
 # 7GRecorder Current Status
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 This file is the handoff entry point for a new coding chat. Read it before reconstructing context from screenshots or
 server commands.
@@ -13,32 +13,26 @@ Recommended first-read order:
 
 ## Production
 
-- Current verified production commit: `f3b7c68e79e507a4d1507f01ca4bbe706e346a1d`.
+- Current deployed production commit: `96dcc61fd4008311a516d9b7a4b2be1f029c59b6`.
 - `main` runs the reusable CI gate before the release job; `dev` runs CI only.
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
+- CI runs `34730687766` (dev) and `34730783719` (main) passed the complete repository gate. Production Deploy run
+  `34730783854` completed successfully.
 - Production includes safe delivered-source cleanup, review/module resume guards, Bilibili/COS progress reporting,
-  and the older COS FFmpeg compression behavior that the current uncommitted work replaces.
+  direct original-part COS upload, safe interrupted-job recovery, and verified BililiveRecorder room-config sync.
 - Normal backend deployment recreates only `7grecorder`. It must not use `docker compose down` or restart the
   independently recording `bililiverecorder` container.
 
-## Validated Dev Change Pending Production
+## Bilibili And COS Delivery
 
-- The concise Bilibili part-title implementation ended at `e4686395f1579bb578ff59fafda8b503a6abb806` and is included
-  in the current `dev` history.
-- CI run `34710195150` passed the complete repository gate.
 - The Bilibili adapter presents multipart inputs through per-job aliases named `p01.<ext>`, `p02.<ext>`, and so on,
   so new Bilibili submissions display concise part names such as `p01`, `p02`, and `p03`.
 - These aliases are symlinks inside the existing restricted biliup job directory. They neither copy multi-GB media
   nor rename canonical upload-source files.
-- Persisted output paths and COS object keys keep their full traceable filenames. The change is Bilibili-only.
-- This change has not been pushed to `main` and has not been deployed. It cannot rename parts in a submission that
-  has already started.
-
-Before releasing this dev change, confirm the active source has no running Bilibili upload, COS upload/compression,
-or review-edit job. A backend release terminates worker subprocesses even though it correctly leaves
-`bililiverecorder` running. Check the Jobs page, or use read-only server inspection; do not manually rewrite job
-statuses merely to make deployment appear idle.
+- COS uploads each original publish part without FFmpeg transcoding or archive wrapping. New object keys use
+  `videos/YYYY-MM-DD/session-NN/pNN.<source-format>` below the configured profile prefix.
+- Existing remote COS objects retain their old names and formats; there is no automatic remote move or deletion.
 
 ## Implemented Recording And Upload Flow
 
@@ -97,6 +91,11 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 ## Danmaku
 
 - Recording configuration persists `record_danmaku` and exposes it in the admin profile editor.
+- BililiveRecorder 2.18.0 room sync uses `POST /api/room/{roomId}/config` and the real `OptionalRecordDanmaku`
+  request shape. A 200 response is accepted only when returned room values match the desired settings.
+- Every Backend Worker startup requeues Recorder config sync, correcting settings previously reported as synced but
+  ignored by BililiveRecorder. The server-side saved config and first XML created after a new file opens still need
+  read-only production verification after release `96dcc61`.
 - Raw danmaku files are indexed only when BililiveRecorder actually writes a closed danmaku asset.
 - Closed raw danmaku assets are archived byte-for-byte to COS under the controlled `raw/` prefix.
 - Parsing, merging, and aligning danmaku to edited/split video timelines remains out of scope pending real samples.
@@ -110,14 +109,23 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - Bilibili verification/listing should later fill a missing BV URL when successful CLI output lacks an identifier.
 - Danmaku timeline transformation and a richer browser media editor are still pending.
 
-## Validated Dev Change Pending Production: Direct COS Video Upload
+## Deployment And Interrupted Upload Recovery
 
-- Implementation commit: `fc6c205` (`Upload original video parts to COS`) with formatting fix `030e2a5`.
-- CI run `34723297009` passed the complete repository gate.
-- Stop creating COS-only MP4 or archive derivatives; upload each original publish part directly.
-- New COS video keys target `videos/YYYY-MM-DD/session-NN/pNN.<source-format>` below the configured profile prefix.
-- Bilibili and COS continue reading the same original publish part through independent jobs.
-- Existing FLV/MP4 COS object rows and keys remain unchanged. No automatic remote move or deletion is planned.
-- This change has not been pushed to `main` and has not been deployed.
+- Deployment sets a temporary SQLite `worker_drain=true`, prevents new claims, and refuses to recreate the current
+  container while it owns a real `RUNNING` job. Exit paths clear the drain; BililiveRecorder is never restarted.
+- Each Worker process has a unique lock identity. At startup, orphaned local/COS jobs are reset for idempotent retry.
+- An interrupted Bilibili upload is frozen as `Publication AMBIGUOUS` plus `Job FAILED`; it is never blindly retried.
+  If its Publication was already `VERIFIED`, the orphaned Job is finalized as `SUCCEEDED` instead.
+- Before retrying an ambiguous Bilibili job, verify in Creator Center that the same title/date submission does not
+  exist. The admin confirmation sends `confirm_ambiguous_bilibili=true` and atomically reuses the existing
+  Publication and Job.
+- Release `96dcc61` still requires a read-only production state check before deciding whether any recovered
+  Bilibili job should be retried. Do not edit SQLite statuses manually.
+
+## Future Design Documents
+
+- `docs/7GRecorder_Songs_V1_Technical_Design.md` defines the future evidence-driven Songs V1 pipeline.
+- `docs/TencentCloud_SSL_Auto_Sync_Ubuntu_Nginx.md` describes a future Tencent Cloud SSL-to-Nginx sync design.
+- These are design inputs only; neither feature is implemented by release `96dcc61`.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
