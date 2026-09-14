@@ -128,6 +128,59 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("manager")).toBeInTheDocument();
   });
 
+  it("lets a super admin select an available COS video for song analysis", async () => {
+    mockSuperAdminFetch((path) => {
+      if (path.endsWith("/api/v1/song-settings")) {
+        return {
+          ok: true,
+          json: async () => ({
+            enabled: true,
+            credential_id: 3,
+            region: "eu-west-1",
+            container_id: "songs-container",
+            destination_cos_storage_profile_id: 1,
+            songs_prefix: "songs",
+            boundary_padding_ms: 500,
+            algorithm_version: "v1",
+            updated_at: "2026-09-13T10:00:00Z"
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/song-analysis/sources")) {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [{
+              cos_object_id: 7,
+              cos_storage_profile_id: 1,
+              upload_source_id: 2,
+              output_id: 4,
+              recording_profile_id: 1,
+              profile_name: "7G",
+              object_key: "archive/videos/show.mp4",
+              size_bytes: 1024,
+              timeline_start_ms: 0,
+              timeline_end_ms: 60000,
+              upload_source_started_at: "2026-09-13T10:00:00Z"
+            }],
+            total: 1
+          })
+        } as Response;
+      }
+      if (path.endsWith("/api/v1/song-analysis/runs")) {
+        return { ok: true, json: async () => ({ items: [], total: 0 }) } as Response;
+      }
+      return undefined;
+    });
+
+    renderWithClient();
+    await switchToEnglish();
+    fireEvent.click(await screen.findByRole("button", { name: /song recognition/i }));
+    expect(await screen.findByRole("heading", { name: "Song Recognition and Clips" })).toBeInTheDocument();
+    expect(await screen.findByText(/archive\/videos\/show\.mp4/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Start Recognition" })).toBeEnabled();
+  });
+
   it("opens account editor for super admins", async () => {
     mockSuperAdminFetch((path) => {
       if (path.endsWith("/api/v1/accounts")) {

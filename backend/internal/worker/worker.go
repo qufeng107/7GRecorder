@@ -18,20 +18,22 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 	"github.com/7grecorder/7grecorder/backend/internal/recording"
 	"github.com/7grecorder/7grecorder/backend/internal/sitetls"
+	"github.com/7grecorder/7grecorder/backend/internal/songs"
 	"github.com/7grecorder/7grecorder/backend/internal/upload"
 )
 
 type Worker struct {
-	db       *sql.DB
-	recorder recorder.SyncClient
-	cfg      config.Config
-	merger   media.Merger
-	packager media.Packager
-	editor   media.Editor
-	cos      upload.COSUploader
-	bilibili upload.BilibiliUploader
-	siteTLS  sitetls.Synchronizer
-	lockID   string
+	db                   *sql.DB
+	recorder             recorder.SyncClient
+	cfg                  config.Config
+	merger               media.Merger
+	packager             media.Packager
+	editor               media.Editor
+	cos                  upload.COSUploader
+	bilibili             upload.BilibiliUploader
+	siteTLS              sitetls.Synchronizer
+	songSourceDownloader songs.SourceDownloader
+	lockID               string
 }
 
 type workerJob struct {
@@ -72,16 +74,17 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		cfg = cfgs[0]
 	}
 	return Worker{
-		db:       database,
-		recorder: recorderClient,
-		cfg:      cfg,
-		merger:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		packager: media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		editor:   media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
-		cos:      upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
-		bilibili: upload.NewBiliupCLIUploader(cfg),
-		siteTLS:  sitetls.NewTencentSynchronizer(cfg.DataRoot),
-		lockID:   fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano()),
+		db:                   database,
+		recorder:             recorderClient,
+		cfg:                  cfg,
+		merger:               media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		packager:             media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		editor:               media.NewFFmpegMerger(cfg.DataRoot, cfg.TempRoot, cfg.FFmpegPath),
+		cos:                  upload.NewTencentCOSUploader(cfg.COSUploadMaxBytesPerSec),
+		bilibili:             upload.NewBiliupCLIUploader(cfg),
+		siteTLS:              sitetls.NewTencentSynchronizer(cfg.DataRoot),
+		songSourceDownloader: songs.TencentCOSDownloader{},
+		lockID:               fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano()),
 	}
 }
 
@@ -118,6 +121,12 @@ func NewWithBilibiliUploader(database *sql.DB, recorderClient recorder.SyncClien
 func NewWithSiteTLSSynchronizer(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, synchronizer sitetls.Synchronizer) Worker {
 	worker := New(database, recorderClient, cfg)
 	worker.siteTLS = synchronizer
+	return worker
+}
+
+func NewWithSongSourceDownloader(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, downloader songs.SourceDownloader) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.songSourceDownloader = downloader
 	return worker
 }
 
@@ -282,6 +291,47 @@ func (w Worker) RecoverAbandonedJobs(ctx context.Context) (RecoveryResult, error
 				return RecoveryResult{}, err
 			}
 			result.Retryable++
+		case "DOWNLOAD_SONG_SOURCE":
+			var payload songs.DownloadJobPayload
+			if err := json.Unmarshal([]byte(item.PayloadJSON), &payload); err != nil || payload.AnalysisRunID <= 0 {
+				if err := recoverJobAsAmbiguous(ctx, tx, item.ID, "cannot safely recover song download job with invalid payload"); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Ambiguous++
+				continue
+			}
+			var runStatus string
+			err := tx.QueryRowContext(ctx, `SELECT status FROM song_analysis_runs WHERE id = ?`, payload.AnalysisRunID).Scan(&runStatus)
+			if err != nil {
+				if err := recoverJobAsAmbiguous(ctx, tx, item.ID, "cannot safely recover song download job without its analysis run"); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Ambiguous++
+				continue
+			}
+			switch runStatus {
+			case "ANALYZING", "RECOGNIZING", "FINALIZING", "GENERATING_AUDIO", "REVIEW_REQUIRED", "COMPLETED":
+				if _, err := tx.ExecContext(ctx, `DELETE FROM storage_reservations WHERE job_id = ?`, item.ID); err != nil {
+					return RecoveryResult{}, fmt.Errorf("release recovered song reservation: %w", err)
+				}
+				if err := recoverJobAsSucceeded(ctx, tx, item.ID); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Completed++
+				continue
+			case "PENDING", "DOWNLOADING":
+				if err := recoverJobAsPending(ctx, tx, item.ID); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Retryable++
+				continue
+			default:
+				if err := recoverJobAsAmbiguous(ctx, tx, item.ID, fmt.Sprintf("song analysis run is terminal while download job was running: %s", runStatus)); err != nil {
+					return RecoveryResult{}, err
+				}
+				result.Ambiguous++
+				continue
+			}
 		case "SYNC_RECORDER_PROFILE", "MERGE_UPLOAD_SOURCE", "PACKAGE_UPLOAD_SOURCE", "APPLY_UPLOAD_SOURCE_EDIT", "SYNC_SITE_TLS":
 			if item.Type == "SYNC_RECORDER_PROFILE" && item.RecordingProfileID > 0 {
 				if _, err := tx.ExecContext(ctx, `
@@ -499,9 +549,73 @@ func (w Worker) executeClaimedJob(ctx context.Context, job workerJob) error {
 		return w.runBilibiliUploadJob(ctx, job)
 	case "SYNC_SITE_TLS":
 		return w.runSiteTLSSyncJob(ctx, job)
+	case "DOWNLOAD_SONG_SOURCE":
+		return w.runDownloadSongSourceJob(ctx, job)
 	default:
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("unknown job type %q", job.Type))
 	}
+}
+
+func (w Worker) runDownloadSongSourceJob(ctx context.Context, job workerJob) error {
+	var payload songs.DownloadJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("decode song source download payload: %w", err))
+	}
+	if payload.AnalysisRunID <= 0 {
+		return w.failJob(ctx, job, "PERMANENT", errors.New("song source download payload has no analysis run"))
+	}
+	store := songs.NewStore(w.db, w.cfg)
+	request, err := store.DownloadRequest(ctx, payload.AnalysisRunID)
+	if err != nil {
+		class := classifySongError(err)
+		_ = store.MarkDownloadFailed(ctx, payload.AnalysisRunID, class, truncateError(err), job.Attempts >= job.MaxAttempts)
+		return w.failJob(ctx, job, class, err)
+	}
+	if err := store.ReserveSourceDownload(ctx, job.ID, payload.AnalysisRunID); err != nil {
+		if errors.Is(err, songs.ErrWaitingForSpace) {
+			return w.deferSongJobForSpace(ctx, job)
+		}
+		return w.failJob(ctx, job, classifySongError(err), err)
+	}
+	if err := store.MarkDownloading(ctx, payload.AnalysisRunID); err != nil {
+		_ = store.ReleaseReservation(ctx, job.ID)
+		return w.failJob(ctx, job, classifySongError(err), err)
+	}
+	reporter := w.progressReporter(job)
+	err = w.songSourceDownloader.Download(ctx, request, func(ctx context.Context, progress songs.DownloadProgress) {
+		_ = store.HeartbeatReservation(ctx, job.ID)
+		reporter(ctx, upload.UploadProgress{CurrentBytes: progress.CurrentBytes, TotalBytes: progress.TotalBytes, Message: progress.Message})
+	})
+	if err != nil {
+		class := songs.DownloadErrorClass(err)
+		_ = store.ReleaseReservation(ctx, job.ID)
+		_ = store.MarkDownloadFailed(ctx, payload.AnalysisRunID, class, truncateError(err), job.Attempts >= job.MaxAttempts)
+		return w.failJob(ctx, job, class, err)
+	}
+	if err := store.MarkDownloaded(ctx, job.ID, payload.AnalysisRunID); err != nil {
+		_ = store.ReleaseReservation(ctx, job.ID)
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
+}
+
+func (w Worker) deferSongJobForSpace(ctx context.Context, job workerJob) error {
+	_, err := w.db.ExecContext(ctx, `UPDATE jobs SET status = 'PENDING', attempts = MAX(attempts - 1, 0),
+		run_after = datetime('now', '+60 seconds'), locked_at = NULL, heartbeat_at = NULL, locked_by = NULL,
+		last_error_class = NULL, last_error = NULL, progress_message = 'WAITING_FOR_SPACE',
+		progress_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'RUNNING'`, job.ID)
+	return err
+}
+
+func classifySongError(err error) string {
+	if errors.Is(err, songs.ErrNotReady) {
+		return "SOURCE_MISSING"
+	}
+	if errors.Is(err, songs.ErrValidation) || errors.Is(err, songs.ErrForbidden) || errors.Is(err, songs.ErrNotFound) {
+		return "PERMANENT"
+	}
+	return "TRANSIENT"
 }
 
 func (w Worker) cancelWhenJobStops(ctx context.Context, jobID int64, cancel context.CancelFunc, done <-chan struct{}) {
@@ -832,7 +946,7 @@ func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs 
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI', 'SYNC_SITE_TLS')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI', 'SYNC_SITE_TLS', 'DOWNLOAD_SONG_SOURCE')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 			AND NOT EXISTS (

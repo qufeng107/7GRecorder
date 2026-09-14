@@ -403,15 +403,33 @@ POST /api/v1/publications/{id}/actions/verify
 ### Songs
 
 ```text
-GET    /api/v1/songs
-POST   /api/v1/songs
-GET    /api/v1/songs/{id}
-PATCH  /api/v1/songs/{id}
+GET/PUT  /api/v1/song-settings
+GET      /api/v1/song-analysis/sources
+POST/GET /api/v1/song-analysis/runs
+GET      /api/v1/song-analysis/runs/{id}
+POST     /api/v1/song-analysis/runs/{id}/actions/retry
+POST     /api/v1/song-analysis/runs/{id}/actions/cancel
 
-POST /api/v1/songs/{id}/actions/cut
-POST /api/v1/songs/{id}/actions/confirm
-POST /api/v1/songs/{id}/actions/reject
+GET      /api/v1/songs
+GET      /api/v1/songs/{id}
+PATCH    /api/v1/songs/{id}
+POST     /api/v1/songs/{id}/actions/confirm
+POST     /api/v1/songs/{id}/actions/reject
+POST     /api/v1/songs/{id}/actions/recut-audio
+POST     /api/v1/songs/{id}/actions/prepare-playback
+GET      /api/v1/songs/{id}/audio
+POST     /api/v1/songs/{id}/actions/export-video
+GET      /api/v1/song-video-exports/{id}/download
 ```
+
+V1 Songs mutations are SUPER_ADMIN-only. Sources only include AVAILABLE upload-source COS video outputs. Creating a run
+accepts exactly one source COS object ID. Playback preparation returns `200` with a URL on a hit or `202` with a
+coalesced Job ID on a miss. Audio/video responses are authenticated internal redirects and never expose COS credentials,
+signed source URLs, or local paths.
+
+Implementation checkpoint: `song-settings`, `song-analysis/sources`, and create/list/get `song-analysis/runs` are wired
+in the current development branch. Creating a Run queues `DOWNLOAD_SONG_SOURCE`; later endpoints in this section remain
+design contracts until the fixture-gated recognition and artifact stages are implemented.
 
 ### Jobs
 
@@ -453,7 +471,9 @@ GET /api/v1/system/version
 
 Early production bootstrap implements `GET /api/v1/storage/local` for SUPER_ADMIN only. It returns data-root disk
 capacity, available bytes, indexed local video file count/bytes, completed recording count, and protected
-recording count, the effective storage policy, health status, target video bytes, and needed reclaim bytes.
+recording count, Songs cache/work usage, active reservations, the effective storage policy, health status, target
+managed bytes, and needed reclaim bytes. `max_recording_bytes` remains a compatibility field whose product meaning is
+the complete 7GRecorder managed-local-space limit.
 
 `PUT /api/v1/storage/local/settings` remains the canonical design path. Early production bootstrap accepts the
 same payload on `PUT /api/v1/storage/local` to keep the temporary admin UI simple:

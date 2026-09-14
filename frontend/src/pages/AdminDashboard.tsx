@@ -15,6 +15,7 @@ import {
   Lock,
   LogIn,
   LogOut,
+  Music2,
   Plus,
   RefreshCw,
   Save,
@@ -462,6 +463,58 @@ type SiteTLSForm = {
   additional_domains: string;
 };
 
+type SongSettings = {
+  enabled: boolean;
+  credential_id?: number;
+  region: string;
+  container_id: string;
+  destination_cos_storage_profile_id?: number;
+  songs_prefix: string;
+  boundary_padding_ms: number;
+  algorithm_version: string;
+  updated_at: string;
+};
+
+type SongSettingsForm = {
+  enabled: boolean;
+  credential_id: string;
+  region: string;
+  container_id: string;
+  destination_cos_storage_profile_id: string;
+  songs_prefix: string;
+  boundary_padding_ms: number;
+  algorithm_version: string;
+};
+
+type SongAnalysisSource = {
+  cos_object_id: number;
+  cos_storage_profile_id: number;
+  upload_source_id: number;
+  output_id: number;
+  recording_profile_id: number;
+  profile_name: string;
+  object_key: string;
+  etag?: string;
+  size_bytes: number;
+  timeline_start_ms: number;
+  timeline_end_ms: number;
+  upload_source_started_at: string;
+};
+
+type SongAnalysisRun = {
+  id: number;
+  source_cos_object_id: number;
+  source_object_key: string;
+  source_size_bytes: number;
+  status: string;
+  progress_message?: string;
+  last_error?: string;
+  created_at: string;
+};
+
+type SongSourceListResponse = { items: SongAnalysisSource[] | null; total?: number };
+type SongRunListResponse = { items: SongAnalysisRun[] | null; total?: number };
+
 type UploadModuleReconcileResult = {
   publications_created: number;
   bilibili_jobs_created: number;
@@ -488,7 +541,7 @@ type ProfileForm = {
   finalize_grace_period_sec: number;
 };
 
-type AdminPage = "overview" | "profiles" | "recordings" | "uploads" | "jobs" | "system" | "accounts" | "me";
+type AdminPage = "overview" | "profiles" | "recordings" | "uploads" | "songs" | "jobs" | "system" | "accounts" | "me";
 type Language = "zh" | "en";
 type RecordingSortKey = "started_desc" | "started_asc" | "duration_desc" | "size_desc";
 type ProfileSortKey = "name_asc" | "room_asc";
@@ -557,6 +610,17 @@ const emptySiteTLSForm: SiteTLSForm = {
   additional_domains: "www.7g.chat"
 };
 
+const emptySongSettingsForm: SongSettingsForm = {
+  enabled: false,
+  credential_id: "",
+  region: "",
+  container_id: "",
+  destination_cos_storage_profile_id: "",
+  songs_prefix: "songs",
+  boundary_padding_ms: 0,
+  algorithm_version: "v1"
+};
+
 const defaultManagerPolicy: ManagerPolicy = {
   can_edit_recording_profile: true,
   can_edit_bilibili_module: true,
@@ -617,10 +681,33 @@ const uiCopy = {
       profiles: "录制配置",
       recordings: "录像文件",
       uploads: "上传设置",
+      songs: "歌曲识别",
       jobs: "任务",
       accounts: "账号管理",
       system: "系统设置"
     },
+    songsTitle: "歌曲识别与切分",
+    songsSettings: "识别设置",
+    songsEnabled: "启用歌曲识别",
+    acrCredential: "ACRCloud 凭证",
+    acrCredentialName: "凭证名称",
+    acrSecret: "Access Token JSON",
+    saveAcrCredential: "保存 ACRCloud 凭证",
+    providerRegion: "ACRCloud 区域",
+    providerContainer: "File Scanning Container ID",
+    destinationCosProfile: "音频目标 COS 配置 ID",
+    songsPrefix: "音频对象前缀",
+    boundaryPadding: "边界扩展（毫秒）",
+    saveSongsSettings: "保存识别设置",
+    songsSettingsFailed: "保存识别设置失败，请检查凭证和 COS 配置。",
+    songsCredentialFailed: "保存 ACRCloud 凭证失败。",
+    analysisSource: "选择 COS 视频",
+    startAnalysis: "开始识别",
+    startAnalysisFailed: "无法创建识别任务，请确认模块已启用且来源仍可用。",
+    noSongSources: "暂无可分析的 COS 视频。",
+    analysisRuns: "识别任务",
+    analysisCreated: "创建时间",
+    noAnalysisRuns: "暂无识别任务。",
     statusRows: [
       { label: "录制核心", value: "配置已就绪", icon: Activity },
       { label: "SQLite", value: "部署时自动迁移", icon: Database },
@@ -958,10 +1045,33 @@ const uiCopy = {
       profiles: "Profiles",
       recordings: "Recordings",
       uploads: "Upload Settings",
+      songs: "Song Recognition",
       jobs: "Jobs",
       accounts: "Accounts",
       system: "System Settings"
     },
+    songsTitle: "Song Recognition and Clips",
+    songsSettings: "Recognition Settings",
+    songsEnabled: "Enable song recognition",
+    acrCredential: "ACRCloud Credential",
+    acrCredentialName: "Credential Name",
+    acrSecret: "Access Token JSON",
+    saveAcrCredential: "Save ACRCloud Credential",
+    providerRegion: "ACRCloud Region",
+    providerContainer: "File Scanning Container ID",
+    destinationCosProfile: "Audio Destination COS Profile ID",
+    songsPrefix: "Audio Object Prefix",
+    boundaryPadding: "Boundary Padding (ms)",
+    saveSongsSettings: "Save Recognition Settings",
+    songsSettingsFailed: "Could not save recognition settings. Check the credential and COS profile.",
+    songsCredentialFailed: "Could not save the ACRCloud credential.",
+    analysisSource: "Select COS Video",
+    startAnalysis: "Start Recognition",
+    startAnalysisFailed: "Could not create the analysis job. Check settings and source availability.",
+    noSongSources: "No COS videos are available for analysis.",
+    analysisRuns: "Recognition Jobs",
+    analysisCreated: "Created",
+    noAnalysisRuns: "No recognition jobs yet.",
     statusRows: [
       { label: "Recording Core", value: "Profiles ready", icon: Activity },
       { label: "SQLite", value: "Migrated on deploy", icon: Database },
@@ -1611,6 +1721,10 @@ export function AdminDashboard() {
   const [siteTLSForm, setSiteTLSForm] = useState<SiteTLSForm>(emptySiteTLSForm);
   const [tlsCredentialLabel, setTLSCredentialLabel] = useState("7g.chat SSL sync");
   const [tlsCredentialSecret, setTLSCredentialSecret] = useState('{"secret_id":"","secret_key":""}');
+  const [songSettingsForm, setSongSettingsForm] = useState<SongSettingsForm>(emptySongSettingsForm);
+  const [acrCredentialLabel, setAcrCredentialLabel] = useState("ACRCloud song recognition");
+  const [acrCredentialSecret, setAcrCredentialSecret] = useState('{"access_token":""}');
+  const [selectedSongSourceID, setSelectedSongSourceID] = useState("");
   const [uploadSettingsForm, setUploadSettingsForm] = useState<UploadSettingsForm>(emptyUploadSettingsForm);
   const [accountForm, setAccountForm] = useState<AccountForm>({
     ...emptyAccountForm,
@@ -1713,6 +1827,29 @@ export function AdminDashboard() {
     refetchInterval: 10000
   });
 
+  const songSettingsQuery = useQuery({
+    queryKey: ["song-settings"],
+    queryFn: () => requestJson<SongSettings>("/api/v1/song-settings"),
+    enabled: Boolean(canManageSystemSettings && activePage === "songs"),
+    retry: false
+  });
+
+  const songSourcesQuery = useQuery({
+    queryKey: ["song-analysis-sources"],
+    queryFn: () => requestJson<SongSourceListResponse>("/api/v1/song-analysis/sources"),
+    enabled: Boolean(canManageSystemSettings && activePage === "songs"),
+    retry: false,
+    refetchInterval: 15000
+  });
+
+  const songRunsQuery = useQuery({
+    queryKey: ["song-analysis-runs"],
+    queryFn: () => requestJson<SongRunListResponse>("/api/v1/song-analysis/runs"),
+    enabled: Boolean(canManageSystemSettings && activePage === "songs"),
+    retry: false,
+    refetchInterval: 5000
+  });
+
   const profiles = useMemo(() => profilesQuery.data?.items ?? [], [profilesQuery.data?.items]);
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
@@ -1767,10 +1904,40 @@ export function AdminDashboard() {
     if (activePage === "accounts" && user && !canManageSystemSettings) {
       setActivePage("overview");
     }
+    if (activePage === "songs" && user && !canManageSystemSettings) {
+      setActivePage("overview");
+    }
     if (activePage === "uploads" && user && !canManageUploadSettings) {
       setActivePage("overview");
     }
   }, [activePage, canManageSystemSettings, canManageUploadSettings, user]);
+
+  useEffect(() => {
+    const settings = songSettingsQuery.data;
+    if (!settings) return;
+    setSongSettingsForm({
+      enabled: settings.enabled,
+      credential_id: settings.credential_id ? String(settings.credential_id) : "",
+      region: settings.region,
+      container_id: settings.container_id,
+      destination_cos_storage_profile_id: settings.destination_cos_storage_profile_id
+        ? String(settings.destination_cos_storage_profile_id)
+        : "",
+      songs_prefix: settings.songs_prefix,
+      boundary_padding_ms: settings.boundary_padding_ms,
+      algorithm_version: settings.algorithm_version
+    });
+  }, [songSettingsQuery.data]);
+
+  useEffect(() => {
+    const sources = songSourcesQuery.data?.items ?? [];
+    if (!selectedSongSourceID && sources.length > 0) {
+      setSelectedSongSourceID(String(sources[0].cos_object_id));
+      if (!songSettingsForm.destination_cos_storage_profile_id) {
+        setSongSettingsForm((form) => ({ ...form, destination_cos_storage_profile_id: String(sources[0].cos_storage_profile_id) }));
+      }
+    }
+  }, [selectedSongSourceID, songSettingsForm.destination_cos_storage_profile_id, songSourcesQuery.data?.items]);
 
   useEffect(() => {
     if (uploadSettingsForm.profile_id || profiles.length === 0) {
@@ -2174,6 +2341,52 @@ export function AdminDashboard() {
       setSiteTLSForm((form) => ({ ...form, credential_id: String(credential.id) }));
       setTLSCredentialSecret('{"secret_id":"","secret_key":""}');
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    }
+  });
+
+  const createAcrCredentialMutation = useMutation({
+    mutationFn: () => requestJson<Credential>("/api/v1/credentials", {
+      method: "POST",
+      body: JSON.stringify({
+        scope: "SYSTEM",
+        platform: "acrcloud",
+        purpose: "SONG_RECOGNITION",
+        account_label: acrCredentialLabel,
+        secret: parseConfigJSON(acrCredentialSecret)
+      })
+    }),
+    onSuccess: (credential) => {
+      setSongSettingsForm((form) => ({ ...form, credential_id: String(credential.id) }));
+      setAcrCredentialSecret('{"access_token":""}');
+      void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    }
+  });
+
+  const saveSongSettingsMutation = useMutation({
+    mutationFn: () => requestJson<SongSettings>("/api/v1/song-settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        enabled: songSettingsForm.enabled,
+        credential_id: Number(songSettingsForm.credential_id || 0),
+        region: songSettingsForm.region,
+        container_id: songSettingsForm.container_id,
+        destination_cos_storage_profile_id: Number(songSettingsForm.destination_cos_storage_profile_id || 0),
+        songs_prefix: songSettingsForm.songs_prefix,
+        boundary_padding_ms: songSettingsForm.boundary_padding_ms,
+        algorithm_version: songSettingsForm.algorithm_version
+      })
+    }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["song-settings"] })
+  });
+
+  const createSongRunMutation = useMutation({
+    mutationFn: () => requestJson<SongAnalysisRun>("/api/v1/song-analysis/runs", {
+      method: "POST",
+      body: JSON.stringify({ cos_object_id: Number(selectedSongSourceID) })
+    }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["song-analysis-runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     }
   });
 
@@ -2592,6 +2805,32 @@ export function AdminDashboard() {
               />
             ) : null}
 
+            {activePage === "songs" && canManageSystemSettings ? (
+              <SongsPanel
+                acrCredentials={credentials.filter((item) => item.scope === "SYSTEM" && item.platform === "acrcloud" && item.purpose === "SONG_RECOGNITION")}
+                credentialCreateError={createAcrCredentialMutation.isError}
+                credentialCreatePending={createAcrCredentialMutation.isPending}
+                credentialLabel={acrCredentialLabel}
+                credentialSecret={acrCredentialSecret}
+                form={songSettingsForm}
+                labels={ui}
+                runs={songRunsQuery.data?.items ?? []}
+                saveError={saveSongSettingsMutation.isError}
+                savePending={saveSongSettingsMutation.isPending}
+                selectedSourceID={selectedSongSourceID}
+                sources={songSourcesQuery.data?.items ?? []}
+                startError={createSongRunMutation.isError}
+                startPending={createSongRunMutation.isPending}
+                onCreateCredential={(event) => { event.preventDefault(); createAcrCredentialMutation.mutate(); }}
+                onCredentialLabelChange={setAcrCredentialLabel}
+                onCredentialSecretChange={setAcrCredentialSecret}
+                onFormChange={setSongSettingsForm}
+                onSave={() => saveSongSettingsMutation.mutate()}
+                onSelectedSourceChange={setSelectedSongSourceID}
+                onStart={() => createSongRunMutation.mutate()}
+              />
+            ) : null}
+
             {activePage === "recordings" ? (
               <RecordingsPanel
                 isLoading={recordingsQuery.isLoading || rawRecordingsQuery.isLoading}
@@ -2723,6 +2962,10 @@ function AdminNav(props: {
 
   if (props.canManageUploadSettings) {
     items.push({ page: "uploads", label: props.labels.nav.uploads, icon: CloudUpload });
+  }
+
+  if (props.canManageSystemSettings) {
+    items.push({ page: "songs", label: props.labels.nav.songs, icon: Music2 });
   }
 
   items.push({ page: "jobs", label: props.labels.nav.jobs, icon: RefreshCw });
@@ -3534,6 +3777,107 @@ function ProfileListPanel(props: {
             ) : null}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+function SongsPanel(props: {
+  acrCredentials: Credential[];
+  credentialCreateError: boolean;
+  credentialCreatePending: boolean;
+  credentialLabel: string;
+  credentialSecret: string;
+  form: SongSettingsForm;
+  labels: AdminCopy;
+  runs: SongAnalysisRun[];
+  saveError: boolean;
+  savePending: boolean;
+  selectedSourceID: string;
+  sources: SongAnalysisSource[];
+  startError: boolean;
+  startPending: boolean;
+  onCreateCredential: (event: FormEvent<HTMLFormElement>) => void;
+  onCredentialLabelChange: (value: string) => void;
+  onCredentialSecretChange: (value: string) => void;
+  onFormChange: (form: SongSettingsForm) => void;
+  onSave: () => void;
+  onSelectedSourceChange: (value: string) => void;
+  onStart: () => void;
+}) {
+  const update = <K extends keyof SongSettingsForm>(key: K, value: SongSettingsForm[K]) => {
+    props.onFormChange({ ...props.form, [key]: value });
+  };
+  return (
+    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <Music2 className="h-5 w-5 text-accent" aria-hidden="true" />
+        <h2 className="text-sm font-semibold">{props.labels.songsTitle}</h2>
+      </div>
+
+      <div className="mt-4 grid gap-5 lg:grid-cols-2">
+        <div className="grid content-start gap-3">
+          <h3 className="text-sm font-semibold">{props.labels.songsSettings}</h3>
+          <ToggleField checked={props.form.enabled} label={props.labels.songsEnabled} onChange={(value) => update("enabled", value)} />
+          <label className="grid gap-1 text-sm font-medium">
+            {props.labels.acrCredential}
+            <select className="h-10 rounded-md border border-border bg-white px-3" value={props.form.credential_id} onChange={(event) => update("credential_id", event.target.value)}>
+              <option value="">{props.labels.noCredentialSelected}</option>
+              {props.acrCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.account_label}</option>)}
+            </select>
+          </label>
+          <TextField label={props.labels.providerRegion} value={props.form.region} onChange={(value) => update("region", value)} />
+          <TextField label={props.labels.providerContainer} value={props.form.container_id} onChange={(value) => update("container_id", value)} />
+          <TextField label={props.labels.destinationCosProfile} type="number" value={props.form.destination_cos_storage_profile_id} onChange={(value) => update("destination_cos_storage_profile_id", value)} />
+          <TextField label={props.labels.songsPrefix} value={props.form.songs_prefix} onChange={(value) => update("songs_prefix", value)} />
+          <TextField label={props.labels.boundaryPadding} type="number" value={String(props.form.boundary_padding_ms)} onChange={(value) => update("boundary_padding_ms", Number(value))} />
+          {props.saveError ? <p className="text-sm text-red-700">{props.labels.songsSettingsFailed}</p> : null}
+          <button className="inline-flex h-9 w-fit items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60" disabled={props.savePending} type="button" onClick={props.onSave}>
+            <Save className="h-4 w-4" aria-hidden="true" />{props.labels.saveSongsSettings}
+          </button>
+        </div>
+
+        <form className="grid content-start gap-3 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0" onSubmit={props.onCreateCredential}>
+          <h3 className="text-sm font-semibold">{props.labels.acrCredential}</h3>
+          <TextField label={props.labels.acrCredentialName} value={props.credentialLabel} onChange={props.onCredentialLabelChange} />
+          <label className="grid gap-1 text-sm font-medium">
+            {props.labels.acrSecret}
+            <textarea className="min-h-28 rounded-md border border-border bg-white p-3 font-mono text-xs" value={props.credentialSecret} onChange={(event) => props.onCredentialSecretChange(event.target.value)} />
+          </label>
+          {props.credentialCreateError ? <p className="text-sm text-red-700">{props.labels.songsCredentialFailed}</p> : null}
+          <button className="inline-flex h-9 w-fit items-center gap-2 rounded-md border border-border px-3 text-sm font-medium disabled:opacity-60" disabled={props.credentialCreatePending} type="submit">
+            <Lock className="h-4 w-4" aria-hidden="true" />{props.labels.saveAcrCredential}
+          </button>
+        </form>
+      </div>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="grid min-w-0 flex-1 gap-1 text-sm font-medium">
+            {props.labels.analysisSource}
+            <select className="h-10 min-w-0 rounded-md border border-border bg-white px-3" value={props.selectedSourceID} onChange={(event) => props.onSelectedSourceChange(event.target.value)}>
+              {props.sources.length === 0 ? <option value="">{props.labels.noSongSources}</option> : null}
+              {props.sources.map((source) => <option key={source.cos_object_id} value={source.cos_object_id}>{source.profile_name} · {source.object_key} · {formatBytes(source.size_bytes)}</option>)}
+            </select>
+          </label>
+          <button className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60" disabled={!props.selectedSourceID || props.startPending} type="button" onClick={props.onStart}>
+            <Music2 className="h-4 w-4" aria-hidden="true" />{props.labels.startAnalysis}
+          </button>
+        </div>
+        {props.startError ? <p className="mt-2 text-sm text-red-700">{props.labels.startAnalysisFailed}</p> : null}
+      </div>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <h3 className="text-sm font-semibold">{props.labels.analysisRuns}</h3>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-[#eef1eb] text-xs text-muted"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">COS</th><th className="px-3 py-2">{props.labels.status}</th><th className="px-3 py-2">{props.labels.analysisCreated}</th></tr></thead>
+            <tbody>
+              {props.runs.map((run) => <tr key={run.id} className="border-b border-border last:border-0"><td className="px-3 py-3">{run.id}</td><td className="max-w-xl break-all px-3 py-3"><p>{run.source_object_key}</p><p className="text-xs text-muted">{formatBytes(run.source_size_bytes)}</p></td><td className="px-3 py-3"><p>{run.status}</p>{run.progress_message ? <p className="text-xs text-muted">{run.progress_message}</p> : null}{run.last_error ? <p className="text-xs text-red-700">{run.last_error}</p> : null}</td><td className="px-3 py-3 text-muted">{formatChinaDateParts(run.created_at).date} {formatChinaDateParts(run.created_at).time}</td></tr>)}
+              {props.runs.length === 0 ? <tr><td className="px-3 py-8 text-center text-muted" colSpan={4}>{props.labels.noAnalysisRuns}</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );

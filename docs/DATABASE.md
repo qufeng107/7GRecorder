@@ -265,7 +265,7 @@ updated_by_user_id
 
 说明：
 
-- `max_recording_bytes`：所有 Profile 原始录播合计最大预算；
+- `max_recording_bytes`：兼容字段名；语义为所有 Recording、受管派生文件、Songs 缓存和工作文件的本地总预算；
 - `min_system_free_bytes`：给 OS/其他服务预留；
 - `cleanup_target_ratio`：触发滚动清理后清到该比例；
 - `absolute_emergency_free_bytes`：真正硬安全线。
@@ -524,23 +524,50 @@ COS 对新发布分片不再生成压缩派生文件。`source_size_bytes` 是 `
 
 ## 10. Songs
 
+### song_settings
+
+单例配置保存启用状态、ACRCloud Credential、region/container、目标 COS Storage Profile、Songs Prefix、边界
+padding 和算法版本。Secret 仍只保存在 `credentials.encrypted_secret`。
+
+### song_analysis_runs
+
+一次人工分析绑定一个 AVAILABLE `upload_source_cos_objects` 和对应 output。保存来源 Object Key/ETag/大小、
+父时间轴、Provider 配置与算法版本快照、状态、进度、空间预留和错误。活动 Run 为源 COS 对象提供删除租约，
+但不改变源对象状态。
+
+### song_analysis_chunks
+
+保存 Core/Guard 区间、分析文件状态、确定性 Provider 文件名、Provider File ID、轮询状态/时间/次数、原始结果
+和错误。Provider ID 不得只放在 Job payload。
+
+### song_recognition_matches
+
+不可变标准化证据：run/chunk、engine、ACRID/ISRC、title/artist、原始/全局区间、score 和脱敏 Evidence JSON。
+
 ### songs
 
 ```text
 id
 recording_profile_id
-recording_id
+recording_id nullable
+upload_source_id
+analysis_run_id
 title nullable
 artist nullable
+detected_start_ms
+detected_end_ms
 start_ms
 end_ms
 confidence nullable
-status
-local_audio_status        NONE | AVAILABLE | DELETED
-audio_relative_path nullable
+status                    DRAFT | CONFIRMED | REJECTED
+clip_revision
+audio_artifact_status     NONE | PENDING | PROCESSING | AVAILABLE | FAILED
 created_at
 updated_at
 ```
+
+`start_ms/end_ms` 使用父 Upload Source 时间轴。只有完整区间可无歧义映射到一个 Recording 时才填写
+`recording_id`。
 
 ### song_candidates
 
@@ -554,6 +581,30 @@ score
 evidence_json nullable
 created_at
 ```
+
+### song_artifacts
+
+每行表示一个 Song/revision 的正式 COS M4A：COS Storage Profile、Object Key、size、ETag、状态、替代关系和时间。
+它不与可删除的本地缓存混表。
+
+### media_cache_entries
+
+```text
+kind                      SONG_AUDIO | SONG_VIDEO_EXPORT | SONG_SOURCE_WORK
+cache_key                 UNIQUE
+relative_path
+size_bytes
+status                    DOWNLOADING | GENERATING | AVAILABLE | FAILED
+last_accessed_at
+grace_until nullable
+lease_job_id nullable
+lease_until nullable
+```
+
+### storage_reservations
+
+保存重媒体 Job 的峰值字节预留、owner Job、heartbeat 和 expiry。全局托管使用量加活动预留超过上限或系统空闲
+保护线时不得开始新下载/切片。
 
 ---
 

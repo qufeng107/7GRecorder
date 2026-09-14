@@ -139,6 +139,23 @@ song processing FAILED
 → Recording remains COMPLETED
 ```
 
+### Manual COS Songs V1
+
+- 只有 AVAILABLE upload-source COS 视频可选，弹幕、失败、删除、替换和越权对象必须拒绝；
+- 同一点击只创建一个 Run，所有阶段使用确定性 business key；
+- COS 下载覆盖取消、进度、大小/ETag 校验和 `.part` 原子提升；
+- ACRCloud fixture 覆盖 processing/ready/no-result/auth/malformed/conflict，恢复不得重复付费提交；
+- Core/Guard 去重、output-local 到 parent timeline 转换和边界 clamp 必须有测试；
+- M4A 从原视频生成并验证后上传 COS，不能从低码率分析 MP3 生成；
+- 边界修改递增 revision、生成新版 M4A，并使旧音频与视频缓存失效；
+- 播放 miss 合并为一个 Job，命中刷新 LRU，internal redirect 不泄露路径或 COS Secret；
+- 视频只在手工请求后准确重编码，相同 revision 重用缓存且不自动上传 COS；
+- 音频缓存不超过总上限 5%，视频导出缓存不超过 5GB；
+- 并发空间预留不能超卖；租约、播放 grace、活动/受保护/最新录像不能被清理；
+- 无安全空间时 Job 延后等待，不占用 Worker slot 忙等；
+- 活动 Run/Export 的源 COS lease 阻止受控删除，外部删除转换为 SOURCE_MISSING；
+- Songs 失败不得改变 Recording、Bilibili 和源 COS 成功状态。
+
 ---
 
 ## 6. Recording 高优先级场景

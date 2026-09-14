@@ -268,18 +268,22 @@ local/bilibili unchanged
 
 ---
 
-## 9. Phase 6 — Songs Manual MVP
+## 9. Phase 6 — Manual COS Songs V1
 
-- Song CRUD；
-- manual start/end；
-- FFmpeg Adapter；
-- CUT_SONG_AUDIO；
-- M4A；
-- Confirm/Reject/Re-cut；
-- HTML5 Audio；
-- SOURCE_MISSING handling。
+实现顺序：
 
-Songs 关闭或失败不影响其他模块。
+1. 使用真实 ACRCloud test container 固定脱敏 request/result fixture；
+2. analysis/evidence/artifact/cache/reservation schema；
+3. 全局托管空间统计、事务性空间预留、租约和 LRU cache safety；
+4. AVAILABLE upload-source COS 视频选择器与可取消流式下载；
+5. ACRCloud Traverse + Fingerprint/Cover durable polling；
+6. 时间聚合、Song Draft、边界版本；
+7. 从原视频自动切 M4A、上传 COS、缓存播放；
+8. Songs 管理列表、试听、编辑、Confirm/Reject；
+9. 人工触发准确 MP4 导出和 5GB LRU 下载缓存；
+10. 小文件生产验收后再允许大文件 Run。
+
+V1 一次只分析一个 COS output，不自动扫描 Recording，不跨 output 聚合。Songs 失败不影响其他模块。
 
 ---
 
@@ -307,7 +311,7 @@ Songs 关闭或失败不影响其他模块。
 
 ---
 
-## 11. Phase 8 — AI Songs
+## 11. Phase 8 — Songs Evidence Enhancements
 
 - singing region detection；
 - selective extraction；

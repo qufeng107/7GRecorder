@@ -284,15 +284,23 @@ COS 对象被滚动删除不影响 Bilibili、本地 Recording metadata 或 Song
 
 ### 6.5 Songs Module
 
-只在启用时扫描 Recording，并在本地源文件仍可用时处理。
+Songs 是可选边界。V1 不自动扫描 Recording；SUPER_ADMIN 人工选择一个
+`upload_source_cos_objects.status = AVAILABLE` 的视频分片开始分析。
 
-如果源录像已被 Local Storage 滚动删除：
+处理链为：
 
 ```text
-song_processing_status = SOURCE_MISSING / SKIPPED
+COS source download → analysis audio → ACRCloud evidence → Song drafts
+→ automatic COS M4A artifacts → cached playback
+→ on-demand local MP4 export cache
 ```
 
-第一版 Songs 只使用 Local Source，不自动从 COS/Bilibili 回源；不阻塞其他模块。
+M4A 是 COS 中的正式 Artifact；本地音频只是 5% 配额的 LRU 缓存。MP4 仅在用户请求下载时准确重编码，
+只保留在最多 5GB 的本地 LRU 缓存。完整源视频属于短期工作区，通过全局空间预留控制，不受 5GB 导出缓存
+上限误伤，任务完成后立即删除。
+
+人工 COS 来源是显式输入，不构成自动 Pipeline。Songs 的任务、缓存、租约和失败状态不改变 Recording、
+Bilibili 或源 COS 的成功状态。
 
 ### 6.6 External Publisher Module
 
@@ -602,7 +610,7 @@ locked_by
 
 ### 11.1 配置层级
 
-第一版 Local Recording Quota 是**服务器全局配置**，只由 SUPER_ADMIN 设置，因为所有 Profile 共用同一物理磁盘。
+本地托管空间是**服务器全局配置**，只由 SUPER_ADMIN 设置，因为所有 Profile 和派生缓存共用同一物理磁盘。
 
 核心配置：
 
@@ -624,16 +632,18 @@ cleanup_target_ratio = 0.85
 
 ### 11.2 计入配额
 
-只统计 7GRecorder 管理的原始 Recording 视频/弹幕等录播资产。
+`max_recording_bytes` 是兼容字段名，Domain/UI 语义为 `max_managed_local_bytes`。统计 7GRecorder 管理的原始
+Recording、Upload Source 派生文件、Songs 缓存和 Songs 工作文件。SQLite、日志和未知文件不纳入可删除资产。
 
-`temp/` 单独即时清理；Songs 文件较小，第一版不需要单独滚动配额，但仍受系统最小空闲空间保护。
+Songs 工作文件由事务性 reservation 控制并在阶段完成后即时清理；音频播放缓存另受总预算 5% 子上限，视频
+导出缓存另受 5GB 子上限。所有子上限仍受全局预算和系统最小空闲空间约束。
 
 ### 11.3 滚动删除规则
 
 当：
 
 ```text
-recording usage > max_recording_bytes
+managed local usage + active reservations > max_recording_bytes
 ```
 
 或预测下一次写入会逼近：

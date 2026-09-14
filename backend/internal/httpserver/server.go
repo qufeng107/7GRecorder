@@ -34,6 +34,7 @@ func Run(ctx context.Context, cfg config.Config) {
 	bindJobHandlers(cfg, s)
 	bindUploadHandlers(cfg, s)
 	bindSiteTLSHandlers(cfg, s)
+	bindSongHandlers(cfg, s)
 	startWorker(ctx, cfg)
 
 	s.BindHandler("/health/live", func(r *ghttp.Request) {

@@ -129,11 +129,13 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 
 ## Future Design Documents
 
-- `docs/7GRecorder_Songs_V1_Technical_Design.md` defines the future evidence-driven Songs V1 pipeline.
-- Current development replaces the future-only Tencent SSL draft with the implemented `7g.chat`/`www.7g.chat` Site
-  TLS increment: SUPER_ADMIN-managed encrypted Tencent SSL credentials, durable certificate sync, validated staging,
-  and a root-owned Nginx deployment timer. It is not production-active until CI passes, the release is deployed, DNS
-  is confirmed, the host installer runs, and Site TLS reports `ACTIVE`.
-- These are design inputs only; neither feature is implemented by release `96dcc61`.
+- `docs/7GRecorder_Songs_V1_Technical_Design.md` is the approved next increment: manually select one AVAILABLE COS
+  video output, run ACRCloud recognition, automatically create permanent COS M4A artifacts with a 5% local playback
+  cache, and create accurate MP4 exports on demand with a 5GB local cache.
+- Songs V1 is design-approved but is not implemented by the current production release.
+
+The current development worktree has started Phase 6 without changing production: migration 11, Songs settings/source/run
+APIs, the admin Songs entry, managed-space reservation, and verified COS source download are implemented locally. The
+ACRCloud adapter and all recognition/artifact/playback/video-export stages remain pending real sanitized provider fixtures.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.

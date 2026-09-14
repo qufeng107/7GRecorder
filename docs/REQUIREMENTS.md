@@ -230,19 +230,19 @@ DELETED
 SUPER_ADMIN 在管理后台设置：
 
 ```text
-Local recording max size
+7GRecorder local storage limit
 Minimum system free space
 Cleanup target
 Emergency free-space floor
 ```
 
-例如 70GB 系统盘可以只给录播原文件 35–45GB 的预算，并额外保留系统安全空间。
+例如 70GB 系统盘可以只给 7GRecorder 管理的录像、派生文件与缓存 35–45GB，并额外保留系统安全空间。
 
 ### 7.2 滚动规则
 
 录制文件先落本地。
 
-当本地 Recording 文件总量达到上限或系统空闲空间不足：
+当 7GRecorder 本地托管文件与活动空间预留达到上限，或系统空闲空间不足：
 
 ```text
 按 completed_at 从旧到新
@@ -459,15 +459,25 @@ Songs 是独立可选模块。
 song_processing_status = DISABLED
 ```
 
-人工 MVP：
+V1 由 SUPER_ADMIN 人工选择一个已成功上传的 COS 视频分片并触发：
 
 ```text
-Recording
-→ 人工 start/end
-→ FFmpeg M4A
-→ 浏览器播放
-→ Confirm/Reject
+AVAILABLE COS video output
+→ 下载到受空间预留保护的临时工作区
+→ ACRCloud 遍历识别歌曲与时间区间
+→ 自动从原始视频切 M4A 并上传 COS
+→ 管理后台列表播放、修改边界、Confirm/Reject
 ```
+
+在线播放只使用自动生成的 M4A。M4A 在 COS 中是正式 Artifact，本地副本只是占总托管空间上限 5% 的
+LRU 播放缓存；缓存未命中时先创建下载任务，完成后由鉴权接口和 Nginx internal redirect 播放。
+
+歌曲视频不在识别完成时自动生成。用户点击“下载歌曲视频”后才创建任务，从同一 COS 原始视频按当前
+`clip_revision` 的边界准确重编码 H.264/AAC MP4。视频导出只保留在最多 5GB 的本地 LRU 缓存，不自动上传 COS。
+
+V1 一次只分析一个 COS output，不跨 output 合并歌曲。所有 Songs Job、缓存、临时源文件和空间预留都必须受
+7GRecorder 全局托管空间上限、系统最低空闲空间与 Resource Guard 控制。没有安全可回收空间时任务等待，不能
+删除正在使用、受保护、最新或活跃录像。
 
 AI 后续增强：
 
@@ -479,13 +489,14 @@ AI 后续增强：
 → 人工确认
 ```
 
-如果原始 Recording 已被本地滚动删除且没有适用源文件：
+如果选择的 COS 对象在处理前或处理中被外部删除：
 
 ```text
 SOURCE_MISSING / SKIPPED
 ```
 
-不影响其他模块。第一版 Songs 只使用 Local Source，不自动依赖 COS/Bilibili 回源。
+Songs 失败不影响其他模块。人工选择 COS 文件是一项显式用户操作，不建立 Recording → COS → Songs 的自动
+成功依赖。活动分析/导出可临时租赁源 COS 对象，避免 7GRecorder 自己的 COS 清理在任务中删除它。
 
 ---
 

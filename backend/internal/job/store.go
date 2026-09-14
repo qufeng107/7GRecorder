@@ -189,6 +189,20 @@ func (s Store) Retry(ctx context.Context, actor account.User, id int64, req Retr
 			return Job{}, ErrValidation
 		}
 	}
+	if current.Type == "DOWNLOAD_SONG_SOURCE" {
+		result, err := tx.ExecContext(ctx, `UPDATE song_analysis_runs
+			SET status = 'PENDING', progress_message = 'Waiting to download source', last_error_class = NULL,
+				last_error = NULL, cancelled_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = (SELECT json_extract(payload_json, '$.analysis_run_id') FROM jobs WHERE id = ?)
+				AND status IN ('FAILED', 'CANCELLED')`, id)
+		if err != nil {
+			return Job{}, fmt.Errorf("reset song analysis run: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			return Job{}, ErrValidation
+		}
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE jobs
 		SET status = 'PENDING',
@@ -233,7 +247,22 @@ func (s Store) Cancel(ctx context.Context, actor account.User, id int64) (Job, e
 	if current.Status == "SUCCEEDED" || current.Status == "CANCELLED" || current.Status == "RUNNING" {
 		return Job{}, ErrValidation
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Job{}, fmt.Errorf("begin cancel job: %w", err)
+	}
+	defer tx.Rollback()
+	if current.Type == "DOWNLOAD_SONG_SOURCE" {
+		if _, err := tx.ExecContext(ctx, `UPDATE song_analysis_runs SET status = 'CANCELLED', cancelled_at = CURRENT_TIMESTAMP,
+			progress_message = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = (SELECT json_extract(payload_json, '$.analysis_run_id') FROM jobs WHERE id = ?)`, id); err != nil {
+			return Job{}, fmt.Errorf("cancel song analysis run: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM storage_reservations WHERE job_id = ?`, id); err != nil {
+			return Job{}, fmt.Errorf("release cancelled song reservation: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE jobs
 		SET status = 'CANCELLED',
 			locked_at = NULL,
@@ -243,6 +272,9 @@ func (s Store) Cancel(ctx context.Context, actor account.User, id int64) (Job, e
 		WHERE id = ?
 	`, id); err != nil {
 		return Job{}, fmt.Errorf("cancel job: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Job{}, fmt.Errorf("commit cancel job: %w", err)
 	}
 	return s.Get(ctx, actor, id)
 }
