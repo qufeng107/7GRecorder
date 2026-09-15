@@ -1025,7 +1025,7 @@ func TestRunOnceCompletesSongRecognitionAndAudioUpload(t *testing.T) {
 	}}}}
 	uploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "audio-etag", SizeBytes: 3}}
 	worker := NewWithSongProcessors(database, &fakeRecorder{}, cfg, recognizer, fakeSongAudioCutter{}, uploader)
-	if err := worker.RunOnce(ctx); err != nil {
+	if err := worker.runOnceForResource(ctx, "AI"); err != nil {
 		t.Fatal(err)
 	}
 	var runStatus, artifactStatus, jobStatus string
