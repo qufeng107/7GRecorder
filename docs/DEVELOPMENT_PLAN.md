@@ -439,6 +439,10 @@ Completed scope:
 This increment changes only future Bilibili submissions started after deployment. It does not rewrite an existing
 submission or alter COS archive naming.
 
+The next media compatibility fix keeps those names and manifest rules but partitions consecutive source segments at
+FFprobe stream-signature changes. This prevents live PK resolution changes from being stream-copied into one malformed
+part without introducing full-session re-encoding.
+
 ---
 
 ## 18. Current Increment: Production Domain And TLS (2026-09-13)

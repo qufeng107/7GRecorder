@@ -3,6 +3,7 @@ package media
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -105,6 +106,21 @@ type FFmpegMerger struct {
 	TempRoot    string
 	FFmpegPath  string
 	FFprobePath string
+}
+
+type mediaStreamSignature struct {
+	VideoCodec      string
+	VideoProfile    string
+	VideoLevel      int
+	VideoWidth      int
+	VideoHeight     int
+	VideoPixelFmt   string
+	VideoFrameRate  string
+	HasAudio        bool
+	AudioCodec      string
+	AudioSampleRate string
+	AudioChannels   int
+	AudioLayout     string
 }
 
 func NewFFmpegMerger(dataRoot string, tempRoot string, ffmpegPath string) FFmpegMerger {
@@ -410,6 +426,10 @@ func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageReq
 			TimelineEndMs:   segments[0].TimelineStartMs + totalDuration,
 		}}}, nil
 	}
+	groups, err := m.compatibleSegmentGroups(ctx, segments)
+	if err != nil {
+		return PackageResult{}, err
+	}
 
 	tempRoot := m.TempRoot
 	if tempRoot == "" {
@@ -424,52 +444,149 @@ func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageReq
 	}
 	defer os.RemoveAll(workDir)
 
-	segmentSeconds := packageSegmentSeconds(totalSize, totalDuration, maxBytes, maxSeconds)
-	if err := m.segmentConcat(ctx, workDir, segments, segmentSeconds); err != nil {
-		return PackageResult{}, err
-	}
-
-	matches, err := filepath.Glob(filepath.Join(workDir, "part-*.tmp.flv"))
-	if err != nil {
-		return PackageResult{}, fmt.Errorf("list segment package outputs: %w", err)
-	}
-	sort.Strings(matches)
-	if len(matches) == 0 {
-		return PackageResult{}, errors.New("ffmpeg segment package produced no outputs")
-	}
-	results := make([]PackageOutput, 0, len(matches))
+	results := make([]PackageOutput, 0, len(segments))
 	var timeline int64
 	sourceStart := segments[0].TimelineStartMs
-	for index, path := range matches {
-		outputRelativePath := filepath.ToSlash(filepath.Join(outputDir, fmt.Sprintf("%s-p%02d.flv", outputBaseName, index+1)))
-		outputPath, err := resolveWithinRoot(m.DataRoot, outputRelativePath)
+	for groupIndex, group := range groups {
+		groupSize, groupDuration := segmentTotals(group)
+		segmentSeconds := packageSegmentSeconds(groupSize, groupDuration, maxBytes, maxSeconds)
+		groupDir := filepath.Join(workDir, fmt.Sprintf("group-%03d", groupIndex))
+		if err := os.MkdirAll(groupDir, 0o755); err != nil {
+			return PackageResult{}, fmt.Errorf("create segment compatibility group: %w", err)
+		}
+		if err := m.segmentConcat(ctx, groupDir, group, segmentSeconds); err != nil {
+			return PackageResult{}, err
+		}
+		matches, err := filepath.Glob(filepath.Join(groupDir, "part-*.tmp.flv"))
 		if err != nil {
-			return PackageResult{}, fmt.Errorf("resolve segment package output: %w", err)
+			return PackageResult{}, fmt.Errorf("list segment package outputs: %w", err)
 		}
-		if err := os.Rename(path, outputPath); err != nil {
-			return PackageResult{}, fmt.Errorf("rename segment package output: %w", err)
+		sort.Strings(matches)
+		if len(matches) == 0 {
+			return PackageResult{}, errors.New("ffmpeg segment package produced no outputs")
 		}
-		info, err := os.Stat(outputPath)
-		if err != nil {
-			return PackageResult{}, fmt.Errorf("stat segment package output: %w", err)
+		var groupTimeline int64
+		for index, path := range matches {
+			outputRelativePath := filepath.ToSlash(filepath.Join(outputDir, fmt.Sprintf("%s-p%02d.flv", outputBaseName, len(results)+1)))
+			outputPath, err := resolveWithinRoot(m.DataRoot, outputRelativePath)
+			if err != nil {
+				return PackageResult{}, fmt.Errorf("resolve segment package output: %w", err)
+			}
+			if err := os.Rename(path, outputPath); err != nil {
+				return PackageResult{}, fmt.Errorf("rename segment package output: %w", err)
+			}
+			info, err := os.Stat(outputPath)
+			if err != nil {
+				return PackageResult{}, fmt.Errorf("stat segment package output: %w", err)
+			}
+			partDuration := segmentSeconds * 1000
+			if index == len(matches)-1 && groupDuration > groupTimeline {
+				partDuration = groupDuration - groupTimeline
+			}
+			if partDuration <= 0 {
+				partDuration = segmentSeconds * 1000
+			}
+			results = append(results, PackageOutput{
+				RelativePath:    outputRelativePath,
+				SizeBytes:       info.Size(),
+				DurationMs:      partDuration,
+				TimelineStartMs: sourceStart + timeline,
+				TimelineEndMs:   sourceStart + timeline + partDuration,
+			})
+			groupTimeline += partDuration
+			timeline += partDuration
 		}
-		partDuration := segmentSeconds * 1000
-		if index == len(matches)-1 && totalDuration > timeline {
-			partDuration = totalDuration - timeline
-		}
-		if partDuration <= 0 {
-			partDuration = segmentSeconds * 1000
-		}
-		results = append(results, PackageOutput{
-			RelativePath:    outputRelativePath,
-			SizeBytes:       info.Size(),
-			DurationMs:      partDuration,
-			TimelineStartMs: sourceStart + timeline,
-			TimelineEndMs:   sourceStart + timeline + partDuration,
-		})
-		timeline += partDuration
 	}
 	return PackageResult{Outputs: results}, nil
+}
+
+func (m FFmpegMerger) compatibleSegmentGroups(ctx context.Context, segments []Segment) ([][]Segment, error) {
+	groups := make([][]Segment, 0, len(segments))
+	var previous mediaStreamSignature
+	for index, segment := range segments {
+		path, err := resolveWithinRoot(m.DataRoot, segment.RelativePath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve segment probe input: %w", err)
+		}
+		signature, err := m.probeMediaSignature(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("probe segment %q: %w", segment.RelativePath, err)
+		}
+		if index == 0 || signature != previous {
+			groups = append(groups, []Segment{segment})
+		} else {
+			groups[len(groups)-1] = append(groups[len(groups)-1], segment)
+		}
+		previous = signature
+	}
+	return groups, nil
+}
+
+func (m FFmpegMerger) probeMediaSignature(ctx context.Context, path string) (mediaStreamSignature, error) {
+	ffprobePath := m.FFprobePath
+	if ffprobePath == "" {
+		ffprobePath = "ffprobe"
+	}
+	cmd := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-show_entries",
+		"stream=codec_type,codec_name,profile,level,width,height,pix_fmt,r_frame_rate,sample_rate,channels,channel_layout",
+		"-of", "json", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return mediaStreamSignature{}, fmt.Errorf("ffprobe media signature failed: %s", message)
+	}
+	var response struct {
+		Streams []struct {
+			CodecType     string `json:"codec_type"`
+			CodecName     string `json:"codec_name"`
+			Profile       string `json:"profile"`
+			Level         int    `json:"level"`
+			Width         int    `json:"width"`
+			Height        int    `json:"height"`
+			PixelFormat   string `json:"pix_fmt"`
+			FrameRate     string `json:"r_frame_rate"`
+			SampleRate    string `json:"sample_rate"`
+			Channels      int    `json:"channels"`
+			ChannelLayout string `json:"channel_layout"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		return mediaStreamSignature{}, fmt.Errorf("decode ffprobe media signature: %w", err)
+	}
+	var signature mediaStreamSignature
+	videoFound := false
+	for _, stream := range response.Streams {
+		switch stream.CodecType {
+		case "video":
+			if videoFound {
+				continue
+			}
+			videoFound = true
+			signature.VideoCodec = stream.CodecName
+			signature.VideoProfile = stream.Profile
+			signature.VideoLevel = stream.Level
+			signature.VideoWidth = stream.Width
+			signature.VideoHeight = stream.Height
+			signature.VideoPixelFmt = stream.PixelFormat
+			signature.VideoFrameRate = stream.FrameRate
+		case "audio":
+			if signature.HasAudio {
+				continue
+			}
+			signature.HasAudio = true
+			signature.AudioCodec = stream.CodecName
+			signature.AudioSampleRate = stream.SampleRate
+			signature.AudioChannels = stream.Channels
+			signature.AudioLayout = stream.ChannelLayout
+		}
+	}
+	if !videoFound || signature.VideoWidth <= 0 || signature.VideoHeight <= 0 || signature.VideoCodec == "" {
+		return mediaStreamSignature{}, errors.New("ffprobe media signature has no usable video stream")
+	}
+	return signature, nil
 }
 
 func (m FFmpegMerger) ApplyCuts(ctx context.Context, req EditRequest) (PackageResult, error) {

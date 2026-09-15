@@ -231,6 +231,18 @@ Adapter 输出：
 COS Adapter 直接读取当前 `upload_source_outputs` 的原始发布分片，不调用 FFmpeg，也不创建 ZIP、7z 或其他派生
 压缩文件。Bilibili 可以同时读取同一源文件，但两个模块各自维护任务、进度和结果。
 
+### Resolution-changing recordings
+
+Before `PackageSegments` uses the concat demuxer with `-c copy`, FFprobe reads a normalized stream signature for each
+input. Consecutive inputs are concatenated only while video resolution/codec/profile/level/pixel format/frame rate and
+audio codec/sample-rate/channel layout remain compatible. A PK layout or other stream-parameter change starts a new
+publish part. The adapter does not scale or stretch either input and does not re-encode the full session merely to
+force one file.
+
+The first implementation detects changes at recording-file boundaries. If a single source file itself contains an
+undetected mid-file codec reconfiguration, it remains a separate diagnostic case and must not be solved by silently
+applying a lossy fallback.
+
 新对象使用 `videos/YYYY-MM-DD/session-NN/pNN.<source-format>`。日期和当天场次来自父 Upload Source，分片序号
 来自当前 output manifest。历史 `h264_crf23_medium_mp4` 对象保留其已登记 key、格式和下载能力，不做批量迁移；
 服务器环境中遗留的 COS 压缩变量不再控制新对象行为。

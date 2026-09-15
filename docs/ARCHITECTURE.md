@@ -1035,3 +1035,9 @@ the worker must not misclassify this configuration state as a missing upload res
 `upload_source_outputs` is the only current publish-part manifest. Editing may change its paths from `parts/...` to
 `edited/...`; downstream adapters must resolve the rows again when a job starts and must never retain an older path
 snapshot as the source of truth.
+
+Before stream-copy concatenation, the media adapter probes every source segment and partitions consecutive inputs by
+compatible stream signature. Video resolution, codec/profile/level, pixel format and frame rate, plus audio codec,
+sample rate, channels and channel layout, must match inside one concat group. A signature change creates a new output
+part and never triggers cross-resolution stream-copy concatenation. This check is an adapter concern and adds no
+cross-module workflow state.

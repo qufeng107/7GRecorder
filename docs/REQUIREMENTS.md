@@ -332,6 +332,14 @@ SOURCE_MISSING
 
 Bilibili 是长期观看归档，不视为原始文件 bit-for-bit 备份。
 
+### 8.1 Resolution-safe publish parts
+
+When adjacent recording files use incompatible video or audio stream parameters, including a resolution change caused
+by a live PK layout, they must not be stream-copied into the same publish part. The media packager must start a new
+ordered `upload_source_output` at that boundary. Compatible adjacent files may still use concat demuxing and stream
+copy. This preserves source quality and aspect ratio without requiring full-session re-encoding; all outputs remain
+parts of the same Bilibili publication and COS upload source.
+
 ---
 
 ## 9. COS Storage Module — 独立可选

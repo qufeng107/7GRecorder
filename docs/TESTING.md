@@ -244,6 +244,9 @@ song processing FAILED
   files whose parsed start time is inside the merge gap, and ignore derived files under upload/processing directories.
 - Upload source merge jobs cover worker dispatch, direct segment-to-output packaging, source transition to
   `READY_TO_UPLOAD`, upload-facing part names, timeline metadata, and terminal failure visibility.
+- Segment packaging must prove that incompatible adjacent FFprobe signatures, especially different video dimensions,
+  are sent to separate concat invocations and become ordered output parts; compatible signatures must remain eligible
+  for one stream-copy concat group.
 - Upload source package jobs cover worker dispatch, output part persistence, source transition to `READY_TO_UPLOAD`,
   post-package timeline metadata, upload-facing part names, and China-time live ordinals.
 - Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`
