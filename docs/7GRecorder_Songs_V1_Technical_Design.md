@@ -284,14 +284,15 @@ V1 mutations are SUPER_ADMIN-only. Broader read/play/download access requires a 
 8. Add editable boundaries and multi-chunk analysis.
 9. Implement on-demand accurate MP4 export/download.
 
-Current development checkpoint:
+Current deployed checkpoint (`6356f1910d1b0e3ecac856336233053ded963251`, 2026-09-15):
 
 - schema, SUPER_ADMIN settings API, encrypted ACRCloud credential entry, AVAILABLE COS source selection, and Run creation are implemented;
 - `DOWNLOAD_SONG_SOURCE` streams from COS into `.part`, verifies the snapshotted ETag/size, atomically promotes the file,
   reports progress, and participates in managed-local-space reservation;
 - the admin Songs page can configure the module, select a COS source, start a Run, and observe its current state;
-- the single-file MVP is implemented locally through ACRCloud submission/polling, durable provider state and evidence,
+- the single-file MVP is deployed through ACRCloud submission/polling, durable provider state and evidence,
   Song draft creation, automatic M4A generation/upload, list, and cache-hit playback;
+- dev/main CI and the production health check passed for this revision;
 - production acceptance and provider-payload calibration must start with one small COS source before larger recordings;
 - cache-miss playback refill from COS is not part of this checkpoint, so a locally evicted audio artifact remains
   authoritative in COS but is not playable until the refill endpoint is implemented;

@@ -132,15 +132,15 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - `docs/7GRecorder_Songs_V1_Technical_Design.md` is the approved next increment: manually select one AVAILABLE COS
   video output, run ACRCloud recognition, automatically create permanent COS M4A artifacts with a 5% local playback
   cache, and create accurate MP4 exports on demand with a 5GB local cache.
-- The current production release contains the first Songs checkpoint: schema, settings/source/run APIs, admin entry,
-  managed-space reservation, and verified COS source download. It intentionally stops before provider recognition.
+- Production `6356f1910d1b0e3ecac856336233053ded963251` contains the minimum end-to-end Songs MVP. A dedicated `AI`
+  worker extracts one low-bitrate analysis MP3, streams it to the documented ACRCloud File Scanning API, polls and
+  persists the result, creates Song drafts, cuts M4A from the original video, uploads versioned artifacts to COS,
+  keeps playback copies under the 5% managed-local cache budget, and lists/plays cached audio in the admin UI.
+- Dev and main CI passed on 2026-09-15, including the Linux Worker end-to-end fake-adapter test; production deployment
+  and `https://7g.chat/health/ready` both reported the same commit SHA.
 
-The current development worktree extends Phase 6 to a minimum end-to-end MVP: a dedicated `AI` worker extracts one
-low-bitrate analysis MP3, streams it to the documented ACRCloud File Scanning API, polls and persists the result,
-creates Song drafts, cuts M4A from the original video, uploads versioned artifacts to COS, keeps playback copies under
-the 5% managed-local cache budget, and lists/plays cached audio in the admin UI. Provider request/response fixtures,
-workflow persistence, Linux compilation, frontend typecheck/tests/lint/build are covered locally; the new worker test
-still requires Linux CI execution. Cache-miss COS refill, editable boundaries, multi-chunk analysis, confirmation, and
-on-demand MP4 export remain pending. The first production acceptance must use one small COS video.
+Cache-miss COS refill, editable boundaries, multi-chunk analysis, confirmation, and on-demand MP4 export remain
+pending. The first real provider acceptance must use one small COS video, and its provider response must be sanitized
+before being retained as an integration fixture.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
