@@ -16,6 +16,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/media"
 	"github.com/7grecorder/7grecorder/backend/internal/profile"
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
+	"github.com/7grecorder/7grecorder/backend/internal/songs"
 	"github.com/7grecorder/7grecorder/backend/internal/upload"
 )
 
@@ -49,6 +50,34 @@ type fakeCOSUploader struct {
 	request upload.COSUploadRequest
 	result  upload.COSUploadResult
 	err     error
+}
+
+type fakeSongRecognizer struct {
+	result songs.RecognitionResult
+	err    error
+}
+
+func (f *fakeSongRecognizer) Recognize(_ context.Context, _ songs.RecognitionRequest, _ songs.RecognitionReporter) (songs.RecognitionResult, error) {
+	return f.result, f.err
+}
+
+type fakeSongAudioCutter struct{}
+
+func (fakeSongAudioCutter) ExtractAnalysisAudio(_ context.Context, _, destination string) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(destination, []byte("analysis"), 0o600)
+}
+
+func (fakeSongAudioCutter) CutM4A(_ context.Context, _, destination string, _, _ int64) (int64, error) {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(destination, []byte("m4a"), 0o600); err != nil {
+		return 0, err
+	}
+	return 3, nil
 }
 
 type fakeBilibiliUploader struct {
@@ -901,6 +930,119 @@ func TestRunOnceUploadsBilibiliPublication(t *testing.T) {
 	}
 	if jobStatus != "SUCCEEDED" {
 		t.Fatalf("unexpected job status: %s", jobStatus)
+	}
+}
+
+func TestRunOnceCompletesSongRecognitionAndAudioUpload(t *testing.T) {
+	ctx := context.Background()
+	cfg, database := openTestDBWithConfig(t, ctx)
+	actor := bootstrapTestAdmin(t, ctx, database)
+	created, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{Name: "7G", RoomID: "1", StreamerName: "Singer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadStore := upload.NewStore(database, cfg)
+	cosCredential, err := uploadStore.CreateCredential(ctx, actor, upload.CredentialCreate{
+		Scope: "SYSTEM", Platform: "tencent_cos", Purpose: "STORAGE", AccountLabel: "cos",
+		Secret: []byte(`{"secret_id":"id","secret_key":"key"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acrCredential, err := uploadStore.CreateCredential(ctx, actor, upload.CredentialCreate{
+		Scope: "SYSTEM", Platform: "acrcloud", Purpose: "SONG_RECOGNITION", AccountLabel: "acr",
+		Secret: []byte(`{"access_token":"token"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uploadStore.UpsertCOSConfig(ctx, actor, created.ID, upload.COSConfigUpsert{
+		CredentialID: cosCredential.ID, Enabled: true, Region: "ap-shanghai", Bucket: "bucket-1250000000",
+		Prefix: "archive/", MaxManagedBytes: 1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO local_storage_settings
+		(id, max_recording_bytes, min_system_free_bytes, cleanup_target_ratio, absolute_emergency_free_bytes, updated_by_user_id)
+		VALUES (1, ?, 1, 0.85, 1, ?)`, int64(1<<30), actor.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO upload_sources
+		(id, recording_profile_id, source_key, source_room_id, streamer_name_snapshot, started_at, completed_at,
+		duration_ms, status, total_bytes, recording_count, file_count, max_gap_seconds, merge_gap_threshold_seconds)
+		VALUES (1, ?, 'song-source', '1', 'Singer', '2026-09-13T10:00:00Z', '2026-09-13T10:30:00Z',
+		1800000, 'READY_TO_UPLOAD', 50, 1, 1, 0, 600)`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO upload_source_outputs
+		(id, upload_source_id, sort_order, relative_path, size_bytes, duration_ms, timeline_start_ms, timeline_end_ms, status)
+		VALUES (1, 1, 0, 'upload-sources/1/source.flv', 50, 1800000, 0, 1800000, 'READY_TO_UPLOAD')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO upload_source_cos_objects
+		(id, cos_storage_profile_id, recording_profile_id, upload_source_id, upload_source_output_id, object_key,
+		size_bytes, source_size_bytes, compression_status, etag, status)
+		VALUES (1, 1, ?, 1, 1, 'archive/source.flv', 50, 50, 'DISABLED', 'etag', 'AVAILABLE')`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	songStore := songs.NewStore(database, cfg)
+	if _, err := songStore.UpsertSettings(ctx, actor, songs.SettingsUpsert{
+		Enabled: true, CredentialID: acrCredential.ID, Region: "eu-west-1", ContainerID: "100",
+		DestinationCOSStorageProfileID: 1, SongsPrefix: "songs", AlgorithmVersion: "mvp1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := songStore.CreateRun(ctx, actor, songs.CreateRunRequest{COSObjectID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	download, err := songStore.DownloadRequest(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(download.Destination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(download.Destination, make([]byte, 50), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var downloadJobID int64
+	if err := database.QueryRowContext(ctx, `SELECT id FROM jobs WHERE type = 'DOWNLOAD_SONG_SOURCE'`).Scan(&downloadJobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := songStore.MarkDownloading(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := songStore.MarkDownloaded(ctx, downloadJobID, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE jobs SET status = 'SUCCEEDED' WHERE id = ?`, downloadJobID); err != nil {
+		t.Fatal(err)
+	}
+	recognizer := &fakeSongRecognizer{result: songs.RecognitionResult{ProviderFileID: "file-1", RawJSON: `{"data":{}}`, Matches: []songs.RecognitionMatch{{
+		Engine: "ACRCLOUD_FINGERPRINT", ACRID: "acr-1", Title: "Test Song", Artist: "Singer",
+		StartMs: 10000, EndMs: 40000, Score: 98, EvidenceJSON: `{}`,
+	}}}}
+	uploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "audio-etag", SizeBytes: 3}}
+	worker := NewWithSongProcessors(database, &fakeRecorder{}, cfg, recognizer, fakeSongAudioCutter{}, uploader)
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var runStatus, artifactStatus, jobStatus string
+	if err := database.QueryRowContext(ctx, `SELECT status FROM song_analysis_runs WHERE id = ?`, run.ID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT audio_artifact_status FROM songs WHERE analysis_run_id = ?`, run.ID).Scan(&artifactStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE type = 'PROCESS_SONG_ANALYSIS'`).Scan(&jobStatus); err != nil {
+		t.Fatal(err)
+	}
+	if runStatus != "REVIEW_REQUIRED" || artifactStatus != "AVAILABLE" || jobStatus != "SUCCEEDED" {
+		t.Fatalf("unexpected run=%s artifact=%s job=%s", runStatus, artifactStatus, jobStatus)
+	}
+	if uploader.request.ObjectKey != "songs/1/1/audio-r1.m4a" {
+		t.Fatalf("unexpected audio object key: %s", uploader.request.ObjectKey)
 	}
 }
 

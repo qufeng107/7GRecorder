@@ -170,15 +170,35 @@ describe("AdminDashboard", () => {
       if (path.endsWith("/api/v1/song-analysis/runs")) {
         return { ok: true, json: async () => ({ items: [], total: 0 }) } as Response;
       }
+      if (path.endsWith("/api/v1/songs")) {
+        return { ok: true, json: async () => ({
+          items: [{
+            id: 11,
+            analysis_run_id: 5,
+            title: "Test Song",
+            artist: "Test Artist",
+            start_ms: 12500,
+            end_ms: 54500,
+            confidence: 98,
+            status: "DRAFT",
+            audio_artifact_status: "AVAILABLE",
+            audio_url: "/api/v1/songs/11/audio",
+            created_at: "2026-09-13T10:00:00Z"
+          }],
+          total: 1
+        }) } as Response;
+      }
       return undefined;
     });
 
-    renderWithClient();
+    const view = renderWithClient();
     await switchToEnglish();
     fireEvent.click(await screen.findByRole("button", { name: /song recognition/i }));
     expect(await screen.findByRole("heading", { name: "Song Recognition and Clips" })).toBeInTheDocument();
     expect(await screen.findByText(/archive\/videos\/show\.mp4/)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Start Recognition" })).toBeEnabled();
+    expect(await screen.findByText("Test Song")).toBeInTheDocument();
+    expect(view.container.querySelector("audio")?.getAttribute("src")).toBe("/api/v1/songs/11/audio");
   });
 
   it("opens account editor for super admins", async () => {

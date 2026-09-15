@@ -515,6 +515,22 @@ type SongAnalysisRun = {
 type SongSourceListResponse = { items: SongAnalysisSource[] | null; total?: number };
 type SongRunListResponse = { items: SongAnalysisRun[] | null; total?: number };
 
+type RecognizedSong = {
+  id: number;
+  analysis_run_id: number;
+  title: string;
+  artist: string;
+  start_ms: number;
+  end_ms: number;
+  confidence?: number;
+  status: string;
+  audio_artifact_status: string;
+  audio_url?: string;
+  created_at: string;
+};
+
+type RecognizedSongListResponse = { items: RecognizedSong[] | null; total?: number };
+
 type UploadModuleReconcileResult = {
   publications_created: number;
   bilibili_jobs_created: number;
@@ -708,6 +724,10 @@ const uiCopy = {
     analysisRuns: "识别任务",
     analysisCreated: "创建时间",
     noAnalysisRuns: "暂无识别任务。",
+    recognizedSongs: "识别结果",
+    songTimeRange: "时间范围",
+    songAudio: "音频",
+    noRecognizedSongs: "暂无识别结果。",
     statusRows: [
       { label: "录制核心", value: "配置已就绪", icon: Activity },
       { label: "SQLite", value: "部署时自动迁移", icon: Database },
@@ -1072,6 +1092,10 @@ const uiCopy = {
     analysisRuns: "Recognition Jobs",
     analysisCreated: "Created",
     noAnalysisRuns: "No recognition jobs yet.",
+    recognizedSongs: "Recognized Songs",
+    songTimeRange: "Time Range",
+    songAudio: "Audio",
+    noRecognizedSongs: "No recognized songs yet.",
     statusRows: [
       { label: "Recording Core", value: "Profiles ready", icon: Activity },
       { label: "SQLite", value: "Migrated on deploy", icon: Database },
@@ -1845,6 +1869,14 @@ export function AdminDashboard() {
   const songRunsQuery = useQuery({
     queryKey: ["song-analysis-runs"],
     queryFn: () => requestJson<SongRunListResponse>("/api/v1/song-analysis/runs"),
+    enabled: Boolean(canManageSystemSettings && activePage === "songs"),
+    retry: false,
+    refetchInterval: 5000
+  });
+
+  const recognizedSongsQuery = useQuery({
+    queryKey: ["recognized-songs"],
+    queryFn: () => requestJson<RecognizedSongListResponse>("/api/v1/songs"),
     enabled: Boolean(canManageSystemSettings && activePage === "songs"),
     retry: false,
     refetchInterval: 5000
@@ -2815,6 +2847,7 @@ export function AdminDashboard() {
                 form={songSettingsForm}
                 labels={ui}
                 runs={songRunsQuery.data?.items ?? []}
+                songs={recognizedSongsQuery.data?.items ?? []}
                 saveError={saveSongSettingsMutation.isError}
                 savePending={saveSongSettingsMutation.isPending}
                 selectedSourceID={selectedSongSourceID}
@@ -3791,6 +3824,7 @@ function SongsPanel(props: {
   form: SongSettingsForm;
   labels: AdminCopy;
   runs: SongAnalysisRun[];
+  songs: RecognizedSong[];
   saveError: boolean;
   savePending: boolean;
   selectedSourceID: string;
@@ -3879,8 +3913,38 @@ function SongsPanel(props: {
           </table>
         </div>
       </div>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <h3 className="text-sm font-semibold">{props.labels.recognizedSongs}</h3>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-[#eef1eb] text-xs text-muted"><tr><th className="px-3 py-2">{props.labels.songAudio}</th><th className="px-3 py-2">{props.labels.title}</th><th className="px-3 py-2">{props.labels.songTimeRange}</th><th className="px-3 py-2">{props.labels.status}</th></tr></thead>
+            <tbody>
+              {props.songs.map((song) => (
+                <tr key={song.id} className="border-b border-border last:border-0">
+                  <td className="px-3 py-3">{song.audio_url ? <audio className="h-9 w-72 max-w-full" controls preload="none" src={song.audio_url} /> : <span className="text-xs text-muted">{song.audio_artifact_status}</span>}</td>
+                  <td className="px-3 py-3"><p className="font-medium">{song.title}</p><p className="text-xs text-muted">{song.artist || "-"}</p></td>
+                  <td className="px-3 py-3 text-muted">{formatSongOffset(song.start_ms)} - {formatSongOffset(song.end_ms)}</td>
+                  <td className="px-3 py-3">{song.status}</td>
+                </tr>
+              ))}
+              {props.songs.length === 0 ? <tr><td className="px-3 py-8 text-center text-muted" colSpan={4}>{props.labels.noRecognizedSongs}</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   );
+}
+
+function formatSongOffset(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function UploadSettingsPanel(props: {

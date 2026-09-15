@@ -132,10 +132,15 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - `docs/7GRecorder_Songs_V1_Technical_Design.md` is the approved next increment: manually select one AVAILABLE COS
   video output, run ACRCloud recognition, automatically create permanent COS M4A artifacts with a 5% local playback
   cache, and create accurate MP4 exports on demand with a 5GB local cache.
-- Songs V1 is design-approved but is not implemented by the current production release.
+- The current production release contains the first Songs checkpoint: schema, settings/source/run APIs, admin entry,
+  managed-space reservation, and verified COS source download. It intentionally stops before provider recognition.
 
-The current development worktree has started Phase 6 without changing production: migration 11, Songs settings/source/run
-APIs, the admin Songs entry, managed-space reservation, and verified COS source download are implemented locally. The
-ACRCloud adapter and all recognition/artifact/playback/video-export stages remain pending real sanitized provider fixtures.
+The current development worktree extends Phase 6 to a minimum end-to-end MVP: a dedicated `AI` worker extracts one
+low-bitrate analysis MP3, streams it to the documented ACRCloud File Scanning API, polls and persists the result,
+creates Song drafts, cuts M4A from the original video, uploads versioned artifacts to COS, keeps playback copies under
+the 5% managed-local cache budget, and lists/plays cached audio in the admin UI. Provider request/response fixtures,
+workflow persistence, Linux compilation, frontend typecheck/tests/lint/build are covered locally; the new worker test
+still requires Linux CI execution. Cache-miss COS refill, editable boundaries, multi-chunk analysis, confirmation, and
+on-demand MP4 export remain pending. The first production acceptance must use one small COS video.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.

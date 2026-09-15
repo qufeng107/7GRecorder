@@ -156,6 +156,10 @@ song processing FAILED
 - 活动 Run/Export 的源 COS lease 阻止受控删除，外部删除转换为 SOURCE_MISSING；
 - Songs 失败不得改变 Recording、Bilibili 和源 COS 成功状态。
 
+当前 MVP 自动化覆盖：ACRCloud multipart 流式提交、Bearer 鉴权、ready/auth 响应、music 区间解析与相邻
+同曲合并；COS 下载到独立 AI Job 的交接；result/evidence/Song/Artifact/cache 持久化；版本化 COS Key；
+后台歌曲列表与音频元素。Worker 全链路使用 fake Recognizer/AudioCutter/COSUploader，在 Linux CI 执行。
+
 ---
 
 ## 6. Recording 高优先级场景

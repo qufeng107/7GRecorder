@@ -427,9 +427,11 @@ accepts exactly one source COS object ID. Playback preparation returns `200` wit
 coalesced Job ID on a miss. Audio/video responses are authenticated internal redirects and never expose COS credentials,
 signed source URLs, or local paths.
 
-Implementation checkpoint: `song-settings`, `song-analysis/sources`, and create/list/get `song-analysis/runs` are wired
-in the current development branch. Creating a Run queues `DOWNLOAD_SONG_SOURCE`; later endpoints in this section remain
-design contracts until the fixture-gated recognition and artifact stages are implemented.
+Implementation checkpoint: settings, source selection, create/list/get Run, `GET /songs`, and authenticated
+`GET /songs/{id}/audio` are wired in the current development branch. Creating a Run queues a verified COS source
+download followed by one independent `AI` processing Job. The Job extracts a streamed-upload analysis MP3, polls
+ACRCloud, persists evidence and drafts, cuts M4A from the original video, uploads each M4A to COS, and registers its
+local playback cache. Cache-miss preparation, editing/confirmation, and MP4 export endpoints remain design contracts.
 
 ### Jobs
 

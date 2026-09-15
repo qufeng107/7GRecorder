@@ -538,7 +538,8 @@ padding 和算法版本。Secret 仍只保存在 `credentials.encrypted_secret`�
 ### song_analysis_chunks
 
 保存 Core/Guard 区间、分析文件状态、确定性 Provider 文件名、Provider File ID、轮询状态/时间/次数、原始结果
-和错误。Provider ID 不得只放在 Job payload。
+和错误。Provider ID 不得只放在 Job payload。最小 MVP 对一个 output 建立一个覆盖全长的 chunk；多 chunk
+仍复用同一结构。
 
 ### song_recognition_matches
 
@@ -594,7 +595,7 @@ kind                      SONG_AUDIO | SONG_VIDEO_EXPORT | SONG_SOURCE_WORK
 cache_key                 UNIQUE
 relative_path
 size_bytes
-status                    DOWNLOADING | GENERATING | AVAILABLE | FAILED
+status                    DOWNLOADING | GENERATING | AVAILABLE | EVICTING | FAILED
 last_accessed_at
 grace_until nullable
 lease_job_id nullable

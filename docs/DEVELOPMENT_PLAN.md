@@ -285,6 +285,10 @@ local/bilibili unchanged
 
 V1 一次只分析一个 COS output，不自动扫描 Recording，不跨 output 聚合。Songs 失败不影响其他模块。
 
+当前 MVP checkpoint 已完成步骤 2、4，并以单分析文件实现步骤 5-7 的最短闭环，同时提供步骤 8 的列表与
+本地缓存试听。首次小文件生产验收后，再继续 cache-miss COS 回填、可编辑边界、多 chunk、Confirm/Reject
+和步骤 9 的准确 MP4 导出。ACRCloud 长轮询运行在独立 `AI` worker slot，不占用录播合并的 `MEDIA` slot。
+
 ---
 
 ## 10. Phase 7 — Operations & Recovery

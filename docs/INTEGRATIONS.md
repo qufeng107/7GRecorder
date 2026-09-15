@@ -318,7 +318,36 @@ object key 由应用生成，用户不能提交任意删除 key。
 
 ---
 
-## 6. 网易云/其他 Publisher
+## 6. ACRCloud File Scanning
+
+Songs V1 uses ACRCloud File Scanning through its HTTPS API. It does not use the realtime SDK and does not expose the
+access token to the browser.
+
+Fixed contract for the first implementation:
+
+```text
+POST /api/fs-containers/{container_id}/files
+GET  /api/fs-containers/{container_id}/files
+GET  /api/fs-containers/{container_id}/files/{file_ids}
+```
+
+- API hosts are selected only from the configured regions `eu-west-1`, `us-west-2`, and `ap-southeast-1`.
+- Upload is `multipart/form-data` with `file`, `data_type=audio`, and a deterministic `name`.
+- The adapter searches that deterministic name before uploading, so a restart does not intentionally create a second
+  provider file.
+- The access token is stored as an encrypted SYSTEM credential with platform `acrcloud` and purpose
+  `SONG_RECOGNITION`.
+- Provider file ID and poll count are persisted as soon as submission succeeds. Poll states are normalized to
+  processing, ready, no-result, or provider error.
+- Analysis audio must remain below the provider's 500 MB upload limit. Songs V1 extracts mono 32 kHz MP3 at 64 kbps;
+  multi-chunk analysis is deferred until the single-file production acceptance run is complete.
+- Raw provider responses are retained only as recognition evidence. Credentials and request authorization data must
+  never be written to evidence or logs.
+
+The adapter parser is covered by sanitized fixtures in unit tests. The first real small-file response must be
+sanitized and used to harden optional provider fields before large recordings are accepted.
+
+## 7. 网易云/其他 Publisher
 
 第一版不假设平台一定存在长期稳定公开上传 API。
 
@@ -338,7 +367,7 @@ Publisher Port
 
 ---
 
-## 7. Adapter Error
+## 8. Adapter Error
 
 所有 Adapter 映射到内部错误类别：
 
@@ -356,7 +385,7 @@ AMBIGUOUS
 
 ---
 
-## 8. Fixture Policy
+## 9. Fixture Policy
 
 外部工具接口变化是 AI Coding 最容易误判的地方。
 

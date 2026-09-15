@@ -203,6 +203,22 @@ func (s Store) Retry(ctx context.Context, actor account.User, id int64, req Retr
 			return Job{}, ErrValidation
 		}
 	}
+	if current.Type == "PROCESS_SONG_ANALYSIS" {
+		result, err := tx.ExecContext(ctx, `UPDATE song_analysis_runs
+			SET status = CASE WHEN EXISTS (SELECT 1 FROM songs WHERE analysis_run_id = song_analysis_runs.id)
+				THEN 'GENERATING_AUDIO' ELSE 'ANALYZING' END,
+			progress_message = 'Waiting to resume song analysis', last_error_class = NULL, last_error = NULL,
+			cancelled_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = (SELECT json_extract(payload_json, '$.analysis_run_id') FROM jobs WHERE id = ?)
+				AND status IN ('FAILED', 'CANCELLED')`, id)
+		if err != nil {
+			return Job{}, fmt.Errorf("reset song processing run: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			return Job{}, ErrValidation
+		}
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE jobs
 		SET status = 'PENDING',
@@ -252,7 +268,7 @@ func (s Store) Cancel(ctx context.Context, actor account.User, id int64) (Job, e
 		return Job{}, fmt.Errorf("begin cancel job: %w", err)
 	}
 	defer tx.Rollback()
-	if current.Type == "DOWNLOAD_SONG_SOURCE" {
+	if current.Type == "DOWNLOAD_SONG_SOURCE" || current.Type == "PROCESS_SONG_ANALYSIS" {
 		if _, err := tx.ExecContext(ctx, `UPDATE song_analysis_runs SET status = 'CANCELLED', cancelled_at = CURRENT_TIMESTAMP,
 			progress_message = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE id = (SELECT json_extract(payload_json, '$.analysis_run_id') FROM jobs WHERE id = ?)`, id); err != nil {

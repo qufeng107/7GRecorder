@@ -412,9 +412,16 @@ func (s Store) MarkDownloaded(ctx context.Context, jobID, runID int64) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE song_analysis_runs SET status = 'ANALYZING',
-		progress_message = 'Source downloaded; analysis adapter is pending provider fixtures', updated_at = CURRENT_TIMESTAMP
+		progress_message = 'Waiting to extract analysis audio', updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status = 'DOWNLOADING'`, runID); err != nil {
 		return err
+	}
+	payload, _ := json.Marshal(ProcessJobPayload{AnalysisRunID: runID})
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO jobs
+		(recording_profile_id, upload_source_id, type, resource_class, business_key, payload_json, status, priority, max_attempts)
+		SELECT recording_profile_id, upload_source_id, 'PROCESS_SONG_ANALYSIS', 'AI', ?, ?, 'PENDING', 125, 3
+		FROM song_analysis_runs WHERE id = ?`, fmt.Sprintf("song-analysis:%d:process", runID), string(payload), runID); err != nil {
+		return fmt.Errorf("schedule song analysis: %w", err)
 	}
 	return tx.Commit()
 }

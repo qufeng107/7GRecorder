@@ -99,9 +99,12 @@ select AVAILABLE COS output
   -> show drafts with available audio or a visible failure
 ```
 
-Analysis audio defaults to MP3, mono, 32 kHz, 64 kbps, two-hour cores, and 30-second guards on both sides. Provider
-filenames contain run ID, chunk index, and algorithm version. Before retrying an ambiguous submission, the adapter
-searches for that deterministic name and reuses an existing provider file ID to avoid repeated paid scans.
+The first production MVP extracts one MP3, mono, 32 kHz, 64 kbps analysis file for the selected COS output. This keeps
+the first real acceptance path small while remaining below ACRCloud's documented 500 MB upload limit for normal
+recording parts. Multi-chunk analysis with two-hour cores and 30-second guards remains the V1 follow-up for unusually
+long outputs. The MVP fails visibly before submission if the extracted file reaches the provider's 500 MB limit.
+Provider filenames contain run ID and algorithm version. Before retrying an ambiguous submission, the
+adapter searches for that deterministic name and reuses an existing provider file ID to avoid repeated paid scans.
 
 Polling backoff is 30 seconds, one minute, two minutes, then five minutes. Provider IDs and poll state are persisted
 business state, not only Job payload data.
@@ -270,15 +273,16 @@ V1 mutations are SUPER_ADMIN-only. Broader read/play/download access requires a 
 
 ## 16. Delivery Order
 
-1. Capture sanitized ACRCloud fixtures from an operator-created test container.
+1. Fix the adapter to the documented ACRCloud File Scanning HTTP contract and keep sanitized response fixtures in the
+   repository; the first real small-file run is the acceptance fixture used to harden optional fields.
 2. Update schema and storage-budget semantics.
 3. Implement reservation/cache primitives and safety tests.
 4. Implement source selection and COS downloader.
-5. Implement ACRCloud adapter and durable analysis state machine.
-6. Implement aggregation and automatic M4A upload.
-7. Implement list/playback/editing UI.
-8. Implement on-demand accurate MP4 export/download.
-9. Run CI and accept one small production COS video before larger sources.
+5. Implement the single-analysis-file ACRCloud MVP and durable processing state.
+6. Implement aggregation, automatic M4A upload, list, and cached playback.
+7. Accept one small production COS video and retain its sanitized provider result as the real integration fixture.
+8. Add editable boundaries and multi-chunk analysis.
+9. Implement on-demand accurate MP4 export/download.
 
 Current development checkpoint:
 
@@ -286,5 +290,9 @@ Current development checkpoint:
 - `DOWNLOAD_SONG_SOURCE` streams from COS into `.part`, verifies the snapshotted ETag/size, atomically promotes the file,
   reports progress, and participates in managed-local-space reservation;
 - the admin Songs page can configure the module, select a COS source, start a Run, and observe its current state;
-- ACRCloud submission/polling remains blocked until sanitized fixtures are captured from the operator-created test
-  container; do not enable or deploy Songs to production before that adapter and all subsequent stages are complete.
+- the single-file MVP is implemented locally through ACRCloud submission/polling, durable provider state and evidence,
+  Song draft creation, automatic M4A generation/upload, list, and cache-hit playback;
+- production acceptance and provider-payload calibration must start with one small COS source before larger recordings;
+- cache-miss playback refill from COS is not part of this checkpoint, so a locally evicted audio artifact remains
+  authoritative in COS but is not playable until the refill endpoint is implemented;
+- editable boundaries, multi-chunk analysis, and on-demand MP4 export remain subsequent V1 checkpoints.

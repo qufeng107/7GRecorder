@@ -14,6 +14,37 @@ import (
 )
 
 func bindSongHandlers(cfg config.Config, s *ghttp.Server) {
+	s.BindHandler("/api/v1/songs", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withSongStore(r, cfg, func(actor account.User, store songs.Store) {
+			items, err := store.ListSongs(r.Context(), actor)
+			if err != nil {
+				writeSongError(r, err)
+				return
+			}
+			r.Response.WriteJson(g.Map{"items": items, "total": len(items)})
+		})
+	})
+
+	s.BindHandler("/api/v1/songs/{id}/audio", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withSongStore(r, cfg, func(actor account.User, store songs.Store) {
+			file, err := store.AudioForPlayback(r.Context(), actor, r.Get("id").Int64())
+			if err != nil {
+				writeSongError(r, err)
+				return
+			}
+			r.Response.Header().Set("Content-Type", "audio/mp4")
+			r.Response.Header().Set("Content-Disposition", "inline")
+			r.Response.Header().Set("Cache-Control", "private, max-age=600")
+			r.Response.ServeFile(file.AbsolutePath)
+		})
+	})
+
 	s.BindHandler("/api/v1/song-settings", func(r *ghttp.Request) {
 		switch r.Method {
 		case http.MethodGet:

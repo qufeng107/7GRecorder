@@ -33,6 +33,8 @@ type Worker struct {
 	bilibili             upload.BilibiliUploader
 	siteTLS              sitetls.Synchronizer
 	songSourceDownloader songs.SourceDownloader
+	songRecognizer       songs.Recognizer
+	songAudioCutter      songs.AudioCutter
 	lockID               string
 }
 
@@ -84,6 +86,8 @@ func New(database *sql.DB, recorderClient recorder.SyncClient, cfgs ...config.Co
 		bilibili:             upload.NewBiliupCLIUploader(cfg),
 		siteTLS:              sitetls.NewTencentSynchronizer(cfg.DataRoot),
 		songSourceDownloader: songs.TencentCOSDownloader{},
+		songRecognizer:       songs.NewACRCloudRecognizer(),
+		songAudioCutter:      songs.FFmpegAudioCutter{Path: cfg.FFmpegPath},
 		lockID:               fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano()),
 	}
 }
@@ -130,6 +134,14 @@ func NewWithSongSourceDownloader(database *sql.DB, recorderClient recorder.SyncC
 	return worker
 }
 
+func NewWithSongProcessors(database *sql.DB, recorderClient recorder.SyncClient, cfg config.Config, recognizer songs.Recognizer, cutter songs.AudioCutter, uploader upload.COSUploader) Worker {
+	worker := New(database, recorderClient, cfg)
+	worker.songRecognizer = recognizer
+	worker.songAudioCutter = cutter
+	worker.cos = uploader
+	return worker
+}
+
 func (w Worker) Run(ctx context.Context) {
 	recovery, err := w.RecoverAbandonedJobs(ctx)
 	if err != nil {
@@ -152,6 +164,7 @@ func (w Worker) Run(ctx context.Context) {
 	go w.runDiscoveryLoop(ctx)
 	go w.runResourceLoop(ctx, "LIGHT", 1)
 	go w.runResourceLoop(ctx, "MEDIA", 1)
+	go w.runResourceLoop(ctx, "AI", 1)
 	go w.runResourceLoop(ctx, "NETWORK", 1)
 	w.runResourceLoop(ctx, "NETWORK", 2)
 }
@@ -291,7 +304,7 @@ func (w Worker) RecoverAbandonedJobs(ctx context.Context) (RecoveryResult, error
 				return RecoveryResult{}, err
 			}
 			result.Retryable++
-		case "DOWNLOAD_SONG_SOURCE":
+		case "DOWNLOAD_SONG_SOURCE", "PROCESS_SONG_ANALYSIS":
 			var payload songs.DownloadJobPayload
 			if err := json.Unmarshal([]byte(item.PayloadJSON), &payload); err != nil || payload.AnalysisRunID <= 0 {
 				if err := recoverJobAsAmbiguous(ctx, tx, item.ID, "cannot safely recover song download job with invalid payload"); err != nil {
@@ -307,6 +320,21 @@ func (w Worker) RecoverAbandonedJobs(ctx context.Context) (RecoveryResult, error
 					return RecoveryResult{}, err
 				}
 				result.Ambiguous++
+				continue
+			}
+			if item.Type == "PROCESS_SONG_ANALYSIS" {
+				switch runStatus {
+				case "COMPLETED", "REVIEW_REQUIRED":
+					if err := recoverJobAsSucceeded(ctx, tx, item.ID); err != nil {
+						return RecoveryResult{}, err
+					}
+					result.Completed++
+				default:
+					if err := recoverJobAsPending(ctx, tx, item.ID); err != nil {
+						return RecoveryResult{}, err
+					}
+					result.Retryable++
+				}
 				continue
 			}
 			switch runStatus {
@@ -551,9 +579,110 @@ func (w Worker) executeClaimedJob(ctx context.Context, job workerJob) error {
 		return w.runSiteTLSSyncJob(ctx, job)
 	case "DOWNLOAD_SONG_SOURCE":
 		return w.runDownloadSongSourceJob(ctx, job)
+	case "PROCESS_SONG_ANALYSIS":
+		return w.runProcessSongAnalysisJob(ctx, job)
 	default:
 		return w.failJob(ctx, job, "PERMANENT", fmt.Errorf("unknown job type %q", job.Type))
 	}
+}
+
+func (w Worker) runProcessSongAnalysisJob(ctx context.Context, job workerJob) error {
+	var payload songs.ProcessJobPayload
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil || payload.AnalysisRunID <= 0 {
+		return w.failJob(ctx, job, "PERMANENT", errors.New("invalid song analysis payload"))
+	}
+	store := songs.NewStore(w.db, w.cfg)
+	request, err := store.ProcessRequest(ctx, payload.AnalysisRunID)
+	if err != nil {
+		class := classifySongError(err)
+		_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, class, truncateError(err))
+		return w.failJob(ctx, job, class, err)
+	}
+	if _, err := os.Stat(request.AnalysisPath); errors.Is(err, os.ErrNotExist) {
+		_ = w.updateJobProgress(ctx, job.ID, upload.UploadProgress{Message: "Extracting analysis audio"})
+		if err := w.songAudioCutter.ExtractAnalysisAudio(ctx, request.SourcePath, request.AnalysisPath); err != nil {
+			_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, "PERMANENT", truncateError(err))
+			return w.failJob(ctx, job, "PERMANENT", err)
+		}
+	} else if err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	analysisInfo, err := os.Stat(request.AnalysisPath)
+	if err != nil {
+		return w.failJob(ctx, job, "SOURCE_MISSING", err)
+	}
+	if analysisInfo.Size() >= 500_000_000 {
+		err := errors.New("analysis audio exceeds ACRCloud's 500 MB file limit; multi-chunk analysis is required")
+		_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, "PERMANENT", err.Error())
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	if err := store.MarkRecognizing(ctx, payload.AnalysisRunID); err != nil {
+		return w.failJob(ctx, job, classifySongError(err), err)
+	}
+	result, err := w.songRecognizer.Recognize(ctx, songs.RecognitionRequest{
+		Region: request.ProviderRegion, ContainerID: request.ContainerID, AccessToken: request.AccessToken,
+		AudioPath: request.AnalysisPath, ProviderFilename: request.ProviderName,
+	}, func(ctx context.Context, progress songs.RecognitionProgress) error {
+		if progress.ProviderFileID != "" {
+			if err := store.MarkProviderSubmitted(ctx, payload.AnalysisRunID, request.ProviderName, progress.ProviderFileID, progress.PollCount); err != nil {
+				return err
+			}
+		}
+		return w.updateJobProgress(ctx, job.ID, upload.UploadProgress{Message: progress.Message})
+	})
+	if err != nil {
+		class := songs.ProviderErrorClass(err)
+		_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, class, truncateError(err))
+		return w.failJob(ctx, job, class, err)
+	}
+	songIDs, err := store.PersistRecognition(ctx, payload.AnalysisRunID, result)
+	if err != nil {
+		_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, "PERMANENT", truncateError(err))
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	for index, songID := range songIDs {
+		artifact, err := store.AudioArtifactRequest(ctx, songID)
+		if errors.Is(err, songs.ErrNotReady) {
+			continue
+		}
+		if err != nil {
+			_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, classifySongError(err), truncateError(err))
+			return w.failJob(ctx, job, classifySongError(err), err)
+		}
+		_ = w.updateJobProgress(ctx, job.ID, upload.UploadProgress{CurrentBytes: int64(index), TotalBytes: int64(len(songIDs)), Message: fmt.Sprintf("Generating audio clip %d/%d", index+1, len(songIDs))})
+		if err := store.MarkAudioGenerating(ctx, artifact); err != nil {
+			return w.failJob(ctx, job, "PERMANENT", err)
+		}
+		estimatedBytes := (artifact.EndOffsetMs-artifact.StartOffsetMs)*24 + 1_048_576
+		if err := store.EnsureAudioCacheCapacity(ctx, estimatedBytes); err != nil {
+			if errors.Is(err, songs.ErrWaitingForSpace) {
+				return w.deferSongJobForSpace(ctx, job)
+			}
+			return w.failJob(ctx, job, classifySongError(err), err)
+		}
+		size, err := w.songAudioCutter.CutM4A(ctx, artifact.SourcePath, artifact.DestinationPath, artifact.StartOffsetMs, artifact.EndOffsetMs)
+		if err != nil {
+			_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, "PERMANENT", truncateError(err))
+			return w.failJob(ctx, job, "PERMANENT", err)
+		}
+		artifact.COSRequest.SourceSizeBytes = size
+		uploadResult, err := w.cos.Upload(ctx, artifact.COSRequest, w.progressReporter(job))
+		if err != nil {
+			class := classifyUploadError(err)
+			_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, class, truncateError(err))
+			return w.failJob(ctx, job, class, err)
+		}
+		if err := store.MarkAudioAvailable(ctx, artifact, uploadResult); err != nil {
+			return w.failJob(ctx, job, "PERMANENT", err)
+		}
+	}
+	if err := store.MarkRunCompleted(ctx, payload.AnalysisRunID); err != nil {
+		return w.failJob(ctx, job, "PERMANENT", err)
+	}
+	if err := store.CleanupRunWork(ctx, payload.AnalysisRunID, request.AnalysisPath); err != nil {
+		log.Printf("song analysis run %d cleanup deferred: %v", payload.AnalysisRunID, err)
+	}
+	return w.succeedJob(ctx, job, recorder.RuntimeStatus{})
 }
 
 func (w Worker) runDownloadSongSourceJob(ctx context.Context, job workerJob) error {
@@ -946,7 +1075,7 @@ func (w Worker) claimJobWhere(ctx context.Context, extraWhere string, extraArgs 
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, type, COALESCE(recording_profile_id, 0), COALESCE(payload_json, ''), attempts, max_attempts
 		FROM jobs
-		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI', 'SYNC_SITE_TLS', 'DOWNLOAD_SONG_SOURCE')
+		WHERE type IN ('SYNC_RECORDER_PROFILE', 'MERGE_UPLOAD_SOURCE', 'PACKAGE_UPLOAD_SOURCE', 'APPLY_UPLOAD_SOURCE_EDIT', 'UPLOAD_COS_OBJECT', 'UPLOAD_COS_RECORDING_FILE', 'UPLOAD_BILIBILI', 'SYNC_SITE_TLS', 'DOWNLOAD_SONG_SOURCE', 'PROCESS_SONG_ANALYSIS')
 			AND status = 'PENDING'
 			AND run_after <= CURRENT_TIMESTAMP
 			AND NOT EXISTS (
