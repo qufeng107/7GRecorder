@@ -143,4 +143,10 @@ Cache-miss COS refill, editable boundaries, multi-chunk analysis, confirmation, 
 pending. The first real provider acceptance must use one small COS video, and its provider response must be sanitized
 before being retained as an integration fixture.
 
+Production `c443494614a3b3a570e9d436326a90a890b489ea` also includes resolution-safe upload-source packaging. Multiple
+recording files are FFprobe-grouped by compatible video/audio stream signature before concat stream copy. A live PK
+resolution change therefore starts a new ordered Bilibili/COS publish part instead of stretching a later segment inside
+an incompatible FLV stream. This applies to newly packaged or explicitly rebuilt Upload Sources; existing Bilibili
+submissions are not rewritten automatically.
+
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
