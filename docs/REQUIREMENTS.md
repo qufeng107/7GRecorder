@@ -334,11 +334,17 @@ Bilibili 是长期观看归档，不视为原始文件 bit-for-bit 备份。
 
 ### 8.1 Resolution-safe publish parts
 
-When adjacent recording files use incompatible video or audio stream parameters, including a resolution change caused
-by a live PK layout, they must not be stream-copied into the same publish part. The media packager must start a new
-ordered `upload_source_output` at that boundary. Compatible adjacent files may still use concat demuxing and stream
-copy. This preserves source quality and aspect ratio without requiring full-session re-encoding; all outputs remain
-parts of the same Bilibili publication and COS upload source.
+When adjacent recording files differ only in video dimensions (and the derived H.264 level), including a resolution
+change caused by a live PK layout, the media packager should keep the normal duration/size part policy instead of
+creating a part at every PK boundary. It must choose one existing resolution as the canvas, preserve every input's
+aspect ratio, avoid enlarging smaller inputs, center the image, and fill unused canvas area with black. The selected
+canvas is the resolution with the greatest cumulative source duration; ties prefer the larger area.
+
+This normalization is a MEDIA job and may re-encode video and audio. If any other codec, profile, pixel format, frame
+rate, audio-presence, sample-rate, channel-count, or channel-layout parameter differs, the packager must retain the
+safe compatibility-boundary split. A normalization failure must also fall back to that safe split and must never
+produce a stretched or partially published result. All outputs remain parts of the same Bilibili publication and COS
+upload source.
 
 ---
 
@@ -472,10 +478,17 @@ V1 由 SUPER_ADMIN 人工选择一个已成功上传的 COS 视频分片并触�
 ```text
 AVAILABLE COS video output
 → 下载到受空间预留保护的临时工作区
-→ ACRCloud 遍历识别歌曲与时间区间
+→ 免费本地检测器高召回标记疑似唱歌时间区间
+→ 聚合为允许歌名/歌手为空的待审核候选
 → 自动从原始视频切 M4A 并上传 COS
-→ 管理后台列表播放、修改边界、Confirm/Reject
+→ 管理后台列表播放、填写元数据、修改边界、Confirm/Reject
 ```
+
+V1 的自动化目标是减少人工拖动整场录播寻找优质演唱的时间，不要求自动识别准确歌名，也不要求区分原曲播放
+和现场翻唱。系统偏向高召回，允许产生可快速 Reject 的误报；人工负责挑选优质片段、修正边界并填写最终歌名。
+V1 不依赖付费识别 API、全球歌曲曲库或外部识别凭证。
+本地检测优先采用 CPU-only 轻量模型并限制单任务推理；模型/runtime 是固定程序资产，临时分析音频属于受全局
+空间预留和及时清理约束的 Songs 工作数据。直播期间不启动新的检测任务。
 
 在线播放只使用自动生成的 M4A。M4A 在 COS 中是正式 Artifact，本地副本只是占总托管空间上限 5% 的
 LRU 播放缓存；缓存未命中时先创建下载任务，完成后由鉴权接口和 Nginx internal redirect 播放。
@@ -487,12 +500,11 @@ V1 一次只分析一个 COS output，不跨 output 合并歌曲。所有 Songs 
 7GRecorder 全局托管空间上限、系统最低空闲空间与 Resource Guard 控制。没有安全可回收空间时任务等待，不能
 删除正在使用、受保护、最新或活跃录像。
 
-AI 后续增强：
+后续可选证据增强：
 
 ```text
-歌曲区间检测
-→ Unknown Song Draft
-→ selective ASR / 弹幕 / 歌词证据
+Unknown Song Draft
+→ selective ASR / 弹幕 / 歌词 / 本地参考库证据
 → Candidates
 → 人工确认
 ```

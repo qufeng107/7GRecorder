@@ -427,11 +427,17 @@ accepts exactly one source COS object ID. Playback preparation returns `200` wit
 coalesced Job ID on a miss. Audio/video responses are authenticated internal redirects and never expose COS credentials,
 signed source URLs, or local paths.
 
+New V1 Runs use a free local singing-candidate detector and do not require a provider credential. Returned Song drafts
+may have null `title` and `artist`; confirm requires the reviewer to provide the metadata required by the eventual
+publishing policy. The API does not claim that a candidate is an original recording or a cover.
+
 Implementation checkpoint: settings, source selection, create/list/get Run, `GET /songs`, and authenticated
 `GET /songs/{id}/audio` are wired in the current development branch. Creating a Run queues a verified COS source
 download followed by one independent `AI` processing Job. The Job extracts a streamed-upload analysis MP3, polls
 ACRCloud, persists evidence and drafts, cuts M4A from the original video, uploads each M4A to COS, and registers its
 local playback cache. Cache-miss preparation, editing/confirmation, and MP4 export endpoints remain design contracts.
+This paragraph describes the deployed legacy checkpoint. The next implementation replaces ACRCloud submission and
+polling for newly created Runs with local windowed detection while preserving the public API shape.
 
 ### Jobs
 

@@ -526,24 +526,29 @@ COS 对新发布分片不再生成压缩派生文件。`source_size_bytes` 是 `
 
 ### song_settings
 
-单例配置保存启用状态、ACRCloud Credential、region/container、目标 COS Storage Profile、Songs Prefix、边界
-padding 和算法版本。Secret 仍只保存在 `credentials.encrypted_secret`。
+单例配置保存启用状态、目标 COS Storage Profile、Songs Prefix、本地检测窗口/步长/阈值、最短候选、合并间隔、
+边界 padding 和算法版本。已部署的 ACRCloud Credential、region/container 字段在本地检测验收前保留为 nullable
+兼容字段；新 Run 不要求这些字段，Secret 仍只允许存在于 `credentials.encrypted_secret`。
 
 ### song_analysis_runs
 
 一次人工分析绑定一个 AVAILABLE `upload_source_cos_objects` 和对应 output。保存来源 Object Key/ETag/大小、
-父时间轴、Provider 配置与算法版本快照、状态、进度、空间预留和错误。活动 Run 为源 COS 对象提供删除租约，
+父时间轴、检测器配置/模型与算法版本快照、状态、进度、空间预留和错误。活动 Run 为源 COS 对象提供删除租约，
 但不改变源对象状态。
+
+新本地 Run 在推理阶段使用 `DETECTING`。旧 ACRCloud Run 的 `RECOGNIZING` 状态继续可读和可恢复，不要求迁移
+历史状态值。
 
 ### song_analysis_chunks
 
-保存 Core/Guard 区间、分析文件状态、确定性 Provider 文件名、Provider File ID、轮询状态/时间/次数、原始结果
-和错误。Provider ID 不得只放在 Job payload。最小 MVP 对一个 output 建立一个覆盖全长的 chunk；多 chunk
-仍复用同一结构。
+保存本地 chunk/window 区间、分析文件状态、检测器版本、标准化分数、执行状态/次数、原始脱敏结果和错误。
+已存在的 Provider 文件名、File ID 和轮询字段只用于读取旧 ACRCloud Run；本地 Run 不写入这些字段。最小
+实现允许一个 output 对应一个或多个确定性 chunk，并在重叠窗口聚合时去重。
 
 ### song_recognition_matches
 
-不可变标准化证据：run/chunk、engine、ACRID/ISRC、title/artist、原始/全局区间、score 和脱敏 Evidence JSON。
+不可变标准化证据：run/chunk、detector/label、原始/全局区间、singing/music/speech score、模型与算法版本和
+脱敏 Evidence JSON。旧 ACRCloud 行的 ACRID/ISRC/title/artist 保持可读，但本地检测证据不要求身份字段。
 
 ### songs
 

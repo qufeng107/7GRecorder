@@ -270,24 +270,30 @@ local/bilibili unchanged
 
 ## 9. Phase 6 — Manual COS Songs V1
 
+Status: design approved, implementation paused while operations work has priority. The existing deployed ACRCloud
+checkpoint remains legacy behavior; do not add local model dependencies or change production Runs until this phase is
+explicitly resumed.
+
 实现顺序：
 
-1. 使用真实 ACRCloud test container 固定脱敏 request/result fixture；
+1. 对 CPU-only PANNs MobileNetV2/Cnn6 做离线对比，固定候选模型版本、checksum、license、标准化输出、
+   脱敏 fixture 以及磁盘/内存/耗时实测；轻量模型未达标时才评估 Cnn14；
 2. analysis/evidence/artifact/cache/reservation schema；
 3. 全局托管空间统计、事务性空间预留、租约和 LRU cache safety；
 4. AVAILABLE upload-source COS 视频选择器与可取消流式下载；
-5. ACRCloud Traverse + Fingerprint/Cover durable polling；
-6. 时间聚合、Song Draft、边界版本；
+5. 本地窗口化推理、可恢复 chunk 状态与高召回时间聚合；
+6. 允许 title/artist 为空的 Song Draft、边界版本；
 7. 从原视频自动切 M4A、上传 COS、缓存播放；
-8. Songs 管理列表、试听、编辑、Confirm/Reject；
+8. Songs 管理列表、试听、填写元数据、编辑边界、Confirm/Reject；
 9. 人工触发准确 MP4 导出和 5GB LRU 下载缓存；
-10. 小文件生产验收后再允许大文件 Run。
+10. 小文件生产验收并调优阈值后再允许大文件 Run。
 
 V1 一次只分析一个 COS output，不自动扫描 Recording，不跨 output 聚合。Songs 失败不影响其他模块。
 
-当前 MVP checkpoint 已完成步骤 2、4，并以单分析文件实现步骤 5-7 的最短闭环，同时提供步骤 8 的列表与
-本地缓存试听。首次小文件生产验收后，再继续 cache-miss COS 回填、可编辑边界、多 chunk、Confirm/Reject
-和步骤 9 的准确 MP4 导出。ACRCloud 长轮询运行在独立 `AI` worker slot，不占用录播合并的 `MEDIA` slot。
+当前已部署 checkpoint 完成步骤 2、4，并曾以 ACRCloud 单分析文件实现旧版步骤 5-7 的最短闭环，同时提供
+列表与本地缓存试听。该外部付费路径不再是目标方案。下一 checkpoint 先完成步骤 1、5、6，使新 Run 默认使用
+无需凭证的本地候选检测；之后继续 cache-miss COS 回填、可编辑边界、Confirm/Reject 和步骤 9。检测推理运行
+在独立 `AI` worker slot，不占用录播合并的 `MEDIA` slot，直播期间不启动新任务。
 
 ---
 
@@ -317,8 +323,9 @@ V1 一次只分析一个 COS output，不自动扫描 Recording，不跨 output 
 
 ## 11. Phase 8 — Songs Evidence Enhancements
 
-- singing region detection；
-- selective extraction；
+- automatic title/artist suggestions；
+- original-versus-cover suggestions；
+- local reference catalog；
 - whisper.cpp Adapter；
 - danmaku/lyrics evidence；
 - Song Candidates；
@@ -439,9 +446,10 @@ Completed scope:
 This increment changes only future Bilibili submissions started after deployment. It does not rewrite an existing
 submission or alter COS archive naming.
 
-The deployed media compatibility fix keeps those names and manifest rules but partitions consecutive source segments
-at FFprobe stream-signature changes. This prevents live PK resolution changes from being stream-copied into one
-malformed part without introducing full-session re-encoding.
+The deployed media compatibility fix first partitioned consecutive source segments at FFprobe stream-signature
+changes. The next increment retains that behavior as a fallback but treats dimensions-only live PK changes specially:
+normalize onto the dominant source resolution with aspect-ratio-preserving black padding, then return to the normal
+two-hour/size-aware part policy. Other stream changes still create compatibility boundaries.
 
 ---
 

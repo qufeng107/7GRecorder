@@ -74,6 +74,8 @@ renderer, and assert non-zero aggregate byte progress.
 Upload Source discovery regression tests must prove that stale Profile runtime values (`LIVE`/`RECORDING`) cannot
 permanently hide completed closed recordings. Existing adjacent `ACTIVE` Recording and `WRITING`/recent recorder-file
 tests remain the safety boundary that prevents premature parent creation during an actual recording.
+The adjacent-recording guard must also wait when the next segment starts at the exact previous completion second or
+overlaps that completion by a small file-timestamp skew; both indexed and not-yet-indexed active files need coverage.
 Recorder adapter and worker tests also cover read-only runtime polling from stale `LIVE/RECORDING` to `OFFLINE/IDLE`.
 
 COS tests must verify that each object uploads the original publish-part path and bytes without invoking FFmpeg or
@@ -144,8 +146,12 @@ song processing FAILED
 - 只有 AVAILABLE upload-source COS 视频可选，弹幕、失败、删除、替换和越权对象必须拒绝；
 - 同一点击只创建一个 Run，所有阶段使用确定性 business key；
 - COS 下载覆盖取消、进度、大小/ETag 校验和 `.part` 原子提升；
-- ACRCloud fixture 覆盖 processing/ready/no-result/auth/malformed/conflict，恢复不得重复付费提交；
-- Core/Guard 去重、output-local 到 parent timeline 转换和边界 clamp 必须有测试；
+- 固定版本本地检测器 fixture 覆盖 speech/singing/music/silence、malformed output、timeout、cancel 和模型版本不匹配；
+- 窗口/chunk 重叠去重、阈值滞回、短间隔合并、最短时长、padding、output-local 到 parent timeline 转换和
+  边界 clamp 必须有测试；
+- 人工标注样本必须验证高召回目标与审核时间收益，不能只验证模型命令成功退出；
+- MobileNetV2/Cnn6 离线对比必须记录模型与完整 CPU runtime 磁盘占用、batch size 1 峰值内存和每小时音频
+  处理耗时；轻量候选未达标前不引入 Cnn14/CUDA；
 - M4A 从原视频生成并验证后上传 COS，不能从低码率分析 MP3 生成；
 - 边界修改递增 revision、生成新版 M4A，并使旧音频与视频缓存失效；
 - 播放 miss 合并为一个 Job，命中刷新 LRU，internal redirect 不泄露路径或 COS Secret；
@@ -159,6 +165,9 @@ song processing FAILED
 当前 MVP 自动化覆盖：ACRCloud multipart 流式提交、Bearer 鉴权、ready/auth 响应、music 区间解析与相邻
 同曲合并；COS 下载到独立 AI Job 的交接；result/evidence/Song/Artifact/cache 持久化；版本化 COS Key；
 后台歌曲列表与音频元素。Worker 全链路使用 fake Recognizer/AudioCutter/COSUploader，在 Linux CI 执行。
+
+上述 ACRCloud 覆盖属于已部署旧 checkpoint，保留为回归保护但不再是新 V1 验收门槛。下一 checkpoint 必须新增
+本地检测器与高召回区间聚合测试，且证明未配置任何外部识别凭证时仍可完成候选 M4A 闭环。
 
 ---
 
@@ -244,9 +253,9 @@ song processing FAILED
   files whose parsed start time is inside the merge gap, and ignore derived files under upload/processing directories.
 - Upload source merge jobs cover worker dispatch, direct segment-to-output packaging, source transition to
   `READY_TO_UPLOAD`, upload-facing part names, timeline metadata, and terminal failure visibility.
-- Segment packaging must prove that incompatible adjacent FFprobe signatures, especially different video dimensions,
-  are sent to separate concat invocations and become ordered output parts; compatible signatures must remain eligible
-  for one stream-copy concat group.
+- Segment packaging must prove that dimensions-only PK transitions use one normalized duration-based timeline with
+  aspect-ratio-preserving black padding and no enlargement of smaller inputs. Other incompatible FFprobe signatures
+  must remain separate stream-copy groups, and normalized FFmpeg failure must fall back to those ordered safe groups.
 - Upload source package jobs cover worker dispatch, output part persistence, source transition to `READY_TO_UPLOAD`,
   post-package timeline metadata, upload-facing part names, and China-time live ordinals.
 - Upload module reconciliation covers credential secret encryption, disabled-module no-op behavior, `READY_TO_UPLOAD`

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,6 +122,11 @@ type mediaStreamSignature struct {
 	AudioSampleRate string
 	AudioChannels   int
 	AudioLayout     string
+}
+
+type videoCanvas struct {
+	Width  int
+	Height int
 }
 
 func NewFFmpegMerger(dataRoot string, tempRoot string, ffmpegPath string) FFmpegMerger {
@@ -426,10 +432,11 @@ func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageReq
 			TimelineEndMs:   segments[0].TimelineStartMs + totalDuration,
 		}}}, nil
 	}
-	groups, err := m.compatibleSegmentGroups(ctx, segments)
+	signatures, err := m.probeSegmentSignatures(ctx, segments)
 	if err != nil {
 		return PackageResult{}, err
 	}
+	groups := compatibleSegmentGroups(segments, signatures)
 
 	tempRoot := m.TempRoot
 	if tempRoot == "" {
@@ -443,6 +450,22 @@ func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageReq
 		return PackageResult{}, fmt.Errorf("create segment package temp dir: %w", err)
 	}
 	defer os.RemoveAll(workDir)
+
+	if canvas, ok := resolutionNormalizationCanvas(segments, signatures); ok {
+		result, normalizeErr := m.packageNormalizedSegments(ctx, segments, signatures[0].HasAudio, canvas,
+			workDir, outputDir, outputBaseName, maxBytes, maxSeconds)
+		if normalizeErr == nil {
+			return result, nil
+		}
+		if ctx.Err() != nil {
+			return PackageResult{}, normalizeErr
+		}
+		log.Printf("media package upload source %d resolution normalization failed; using compatibility groups: %v",
+			req.UploadSourceID, normalizeErr)
+		if err := clearPackageOutputs(outputDirPath, outputBaseName); err != nil {
+			return PackageResult{}, fmt.Errorf("clear failed normalized package outputs: %w", err)
+		}
+	}
 
 	results := make([]PackageOutput, 0, len(segments))
 	var timeline int64
@@ -500,10 +523,9 @@ func (m FFmpegMerger) PackageSegments(ctx context.Context, req SegmentPackageReq
 	return PackageResult{Outputs: results}, nil
 }
 
-func (m FFmpegMerger) compatibleSegmentGroups(ctx context.Context, segments []Segment) ([][]Segment, error) {
-	groups := make([][]Segment, 0, len(segments))
-	var previous mediaStreamSignature
-	for index, segment := range segments {
+func (m FFmpegMerger) probeSegmentSignatures(ctx context.Context, segments []Segment) ([]mediaStreamSignature, error) {
+	signatures := make([]mediaStreamSignature, 0, len(segments))
+	for _, segment := range segments {
 		path, err := resolveWithinRoot(m.DataRoot, segment.RelativePath)
 		if err != nil {
 			return nil, fmt.Errorf("resolve segment probe input: %w", err)
@@ -512,6 +534,16 @@ func (m FFmpegMerger) compatibleSegmentGroups(ctx context.Context, segments []Se
 		if err != nil {
 			return nil, fmt.Errorf("probe segment %q: %w", segment.RelativePath, err)
 		}
+		signatures = append(signatures, signature)
+	}
+	return signatures, nil
+}
+
+func compatibleSegmentGroups(segments []Segment, signatures []mediaStreamSignature) [][]Segment {
+	groups := make([][]Segment, 0, len(segments))
+	var previous mediaStreamSignature
+	for index, segment := range segments {
+		signature := signatures[index]
 		if index == 0 || signature != previous {
 			groups = append(groups, []Segment{segment})
 		} else {
@@ -519,7 +551,62 @@ func (m FFmpegMerger) compatibleSegmentGroups(ctx context.Context, segments []Se
 		}
 		previous = signature
 	}
-	return groups, nil
+	return groups
+}
+
+func resolutionNormalizationCanvas(segments []Segment, signatures []mediaStreamSignature) (videoCanvas, bool) {
+	if len(segments) < 2 || len(segments) != len(signatures) {
+		return videoCanvas{}, false
+	}
+	baseline := signatures[0]
+	changed := false
+	durations := make(map[videoCanvas]int64)
+	order := make([]videoCanvas, 0, len(signatures))
+	for index, signature := range signatures {
+		if !normalizationCompatible(baseline, signature) {
+			return videoCanvas{}, false
+		}
+		if signature.VideoWidth != baseline.VideoWidth || signature.VideoHeight != baseline.VideoHeight {
+			changed = true
+		}
+		canvas := videoCanvas{Width: signature.VideoWidth, Height: signature.VideoHeight}
+		if _, exists := durations[canvas]; !exists {
+			order = append(order, canvas)
+		}
+		duration := segments[index].DurationMs
+		if duration <= 0 {
+			duration = 1
+		}
+		durations[canvas] += duration
+	}
+	if !changed {
+		return videoCanvas{}, false
+	}
+	selected := order[0]
+	for _, candidate := range order[1:] {
+		selectedDuration := durations[selected]
+		candidateDuration := durations[candidate]
+		if candidateDuration > selectedDuration ||
+			(candidateDuration == selectedDuration && candidate.Width*candidate.Height > selected.Width*selected.Height) {
+			selected = candidate
+		}
+	}
+	selected.Width -= selected.Width % 2
+	selected.Height -= selected.Height % 2
+	if selected.Width < 2 || selected.Height < 2 {
+		return videoCanvas{}, false
+	}
+	return selected, true
+}
+
+func normalizationCompatible(left mediaStreamSignature, right mediaStreamSignature) bool {
+	left.VideoLevel = 0
+	left.VideoWidth = 0
+	left.VideoHeight = 0
+	right.VideoLevel = 0
+	right.VideoWidth = 0
+	right.VideoHeight = 0
+	return left == right
 }
 
 func (m FFmpegMerger) probeMediaSignature(ctx context.Context, path string) (mediaStreamSignature, error) {
@@ -751,6 +838,143 @@ func (m FFmpegMerger) segmentConcat(ctx context.Context, workDir string, segment
 		return fmt.Errorf("ffmpeg segment package failed: %s", message)
 	}
 	return nil
+}
+
+func (m FFmpegMerger) packageNormalizedSegments(
+	ctx context.Context,
+	segments []Segment,
+	hasAudio bool,
+	canvas videoCanvas,
+	workDir string,
+	outputDir string,
+	outputBaseName string,
+	maxBytes int64,
+	maxSeconds int64,
+) (PackageResult, error) {
+	totalSize, totalDuration := segmentTotals(segments)
+	segmentSeconds := packageSegmentSeconds(totalSize, totalDuration, maxBytes, maxSeconds)
+	normalizedDir := filepath.Join(workDir, "normalized")
+	if err := os.MkdirAll(normalizedDir, 0o755); err != nil {
+		return PackageResult{}, fmt.Errorf("create normalized segment package dir: %w", err)
+	}
+	if err := m.normalizedSegmentConcat(ctx, normalizedDir, segments, hasAudio, canvas, segmentSeconds); err != nil {
+		return PackageResult{}, err
+	}
+	matches, err := filepath.Glob(filepath.Join(normalizedDir, "part-*.tmp.flv"))
+	if err != nil {
+		return PackageResult{}, fmt.Errorf("list normalized package outputs: %w", err)
+	}
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return PackageResult{}, errors.New("ffmpeg normalized package produced no outputs")
+	}
+
+	results := make([]PackageOutput, 0, len(matches))
+	timeline := int64(0)
+	sourceStart := segments[0].TimelineStartMs
+	for index, path := range matches {
+		outputRelativePath := filepath.ToSlash(filepath.Join(outputDir, fmt.Sprintf("%s-p%02d.flv", outputBaseName, index+1)))
+		outputPath, err := resolveWithinRoot(m.DataRoot, outputRelativePath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("resolve normalized package output: %w", err)
+		}
+		if err := os.Rename(path, outputPath); err != nil {
+			return PackageResult{}, fmt.Errorf("promote normalized package output: %w", err)
+		}
+		info, err := os.Stat(outputPath)
+		if err != nil {
+			return PackageResult{}, fmt.Errorf("stat normalized package output: %w", err)
+		}
+		partDuration := segmentSeconds * 1000
+		if index == len(matches)-1 && totalDuration > timeline {
+			partDuration = totalDuration - timeline
+		}
+		if partDuration <= 0 {
+			partDuration = segmentSeconds * 1000
+		}
+		results = append(results, PackageOutput{
+			RelativePath:    outputRelativePath,
+			SizeBytes:       info.Size(),
+			DurationMs:      partDuration,
+			TimelineStartMs: sourceStart + timeline,
+			TimelineEndMs:   sourceStart + timeline + partDuration,
+		})
+		timeline += partDuration
+	}
+	return PackageResult{Outputs: results}, nil
+}
+
+func (m FFmpegMerger) normalizedSegmentConcat(
+	ctx context.Context,
+	workDir string,
+	segments []Segment,
+	hasAudio bool,
+	canvas videoCanvas,
+	segmentSeconds int64,
+) error {
+	args := []string{"-hide_banner", "-loglevel", "error"}
+	for _, segment := range segments {
+		absolutePath, err := resolveWithinRoot(m.DataRoot, segment.RelativePath)
+		if err != nil {
+			return fmt.Errorf("resolve normalized segment input: %w", err)
+		}
+		args = append(args, "-i", absolutePath)
+	}
+	args = append(args, normalizedSegmentOutputArgs(len(segments), hasAudio, canvas, segmentSeconds)...)
+	args = append(args, filepath.Join(workDir, "part-%03d.tmp.flv"))
+	cmd := exec.CommandContext(ctx, m.FFmpegPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffmpeg resolution normalization failed: %s", message)
+	}
+	return nil
+}
+
+func normalizedSegmentOutputArgs(inputCount int, hasAudio bool, canvas videoCanvas, segmentSeconds int64) []string {
+	filters := make([]string, 0, inputCount*2+1)
+	concatInputs := strings.Builder{}
+	for index := 0; index < inputCount; index++ {
+		filters = append(filters, fmt.Sprintf(
+			"[%d:v:0]scale=w='min(iw,%d)':h='min(ih,%d)':force_original_aspect_ratio=decrease:force_divisible_by=2,"+
+				"pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[v%d]",
+			index, canvas.Width, canvas.Height, canvas.Width, canvas.Height, index,
+		))
+		concatInputs.WriteString(fmt.Sprintf("[v%d]", index))
+		if hasAudio {
+			filters = append(filters, fmt.Sprintf(
+				"[%d:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a%d]", index, index,
+			))
+			concatInputs.WriteString(fmt.Sprintf("[a%d]", index))
+		}
+	}
+	if hasAudio {
+		filters = append(filters, fmt.Sprintf("%sconcat=n=%d:v=1:a=1[vout][aout]", concatInputs.String(), inputCount))
+	} else {
+		filters = append(filters, fmt.Sprintf("%sconcat=n=%d:v=1:a=0[vout]", concatInputs.String(), inputCount))
+	}
+
+	args := []string{
+		"-filter_complex", strings.Join(filters, ";"),
+		"-map", "[vout]",
+	}
+	if hasAudio {
+		args = append(args, "-map", "[aout]")
+	}
+	args = append(args,
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+		"-flags", "+cgop", "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segmentSeconds),
+	)
+	if hasAudio {
+		args = append(args, "-c:a", "aac", "-b:a", "192k")
+	}
+	return append(args,
+		"-f", "segment", "-segment_time", fmt.Sprintf("%d", segmentSeconds),
+		"-reset_timestamps", "1", "-segment_format", "flv", "-y",
+	)
 }
 
 func runFFmpegTrim(ctx context.Context, ffmpegPath string, inputPath string, outputPath string, startMs int64, endMs int64) error {

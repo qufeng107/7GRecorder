@@ -290,10 +290,18 @@ Songs 是可选边界。V1 不自动扫描 Recording；SUPER_ADMIN 人工选择�
 处理链为：
 
 ```text
-COS source download → analysis audio → ACRCloud evidence → Song drafts
+COS source download → analysis audio → local singing-candidate evidence → untitled Song drafts
 → automatic COS M4A artifacts → cached playback
 → on-demand local MP4 export cache
 ```
+
+V1 的本地检测只负责高召回找出疑似唱歌区间，不识别歌名，也不区分原曲与现场翻唱。人工审核负责选择优质
+片段、修正边界并填写元数据。检测器通过可替换 Adapter 调用固定版本的本地批处理工具，不新增常驻服务，
+不要求外部 API 凭证或全球参考曲库。
+
+首轮只评估 CPU-only PANNs MobileNetV2/Cnn6，batch size 为 1；轻量模型未达到召回目标时才评估 Cnn14，且不在
+2C4G 生产机安装 CUDA 依赖。模型和 CPU runtime 是固定发布资产，不占 Songs 5% 播放缓存配额，但必须计入部署
+磁盘安全检查；临时分析音频仍属于受预留和清理约束的 Songs 工作数据。
 
 M4A 是 COS 中的正式 Artifact；本地音频只是 5% 配额的 LRU 缓存。MP4 仅在用户请求下载时准确重编码，
 只保留在最多 5GB 的本地 LRU 缓存。完整源视频属于短期工作区，通过全局空间预留控制，不受 5GB 导出缓存
@@ -1036,8 +1044,11 @@ the worker must not misclassify this configuration state as a missing upload res
 `edited/...`; downstream adapters must resolve the rows again when a job starts and must never retain an older path
 snapshot as the source of truth.
 
-Before stream-copy concatenation, the media adapter probes every source segment and partitions consecutive inputs by
-compatible stream signature. Video resolution, codec/profile/level, pixel format and frame rate, plus audio codec,
-sample rate, channels and channel layout, must match inside one concat group. A signature change creates a new output
-part and never triggers cross-resolution stream-copy concatenation. This check is an adapter concern and adds no
-cross-module workflow state.
+Before packaging, the media adapter probes every source segment. A dimensions-only transition (including the H.264
+level derived from the dimensions) is normalized inside the MEDIA boundary: choose the existing resolution with the
+greatest cumulative duration, preserve aspect ratio, scale down only when necessary, center on a black canvas, encode,
+then apply the normal part duration/size policy. This keeps PK transitions from becoming arbitrary publish boundaries.
+
+All other video or audio signature changes partition consecutive inputs into stream-copy compatibility groups. The
+same grouping is the failure fallback for normalization, and completed outputs are promoted from temporary storage
+only after FFmpeg succeeds. This remains an adapter concern and adds no cross-module workflow state.

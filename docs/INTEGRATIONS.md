@@ -234,14 +234,19 @@ COS Adapter 直接读取当前 `upload_source_outputs` 的原始发布分片，�
 ### Resolution-changing recordings
 
 Before `PackageSegments` uses the concat demuxer with `-c copy`, FFprobe reads a normalized stream signature for each
-input. Consecutive inputs are concatenated only while video resolution/codec/profile/level/pixel format/frame rate and
-audio codec/sample-rate/channel layout remain compatible. A PK layout or other stream-parameter change starts a new
-publish part. The adapter does not scale or stretch either input and does not re-encode the full session merely to
-force one file.
+input. If dimensions (and the H.264 level implied by those dimensions) are the only differences, the adapter selects
+the resolution with the greatest cumulative duration as a common canvas. Each input is scaled down only when needed,
+keeps its source aspect ratio, is centered with black padding, and is then concatenated and segmented using the normal
+duration/size policy. This path uses explicit H.264/AAC encoding because stream copy cannot safely bridge a dimension
+change.
 
-The first implementation detects changes at recording-file boundaries. If a single source file itself contains an
-undetected mid-file codec reconfiguration, it remains a separate diagnostic case and must not be solved by silently
-applying a lossy fallback.
+If codec, profile, pixel format, frame rate, audio presence, sample rate, channel count, or channel layout differs, the
+adapter partitions consecutive inputs by exact compatible stream signature and uses concat demuxing with `-c copy`.
+The same safe partitioning is the fallback when dimension normalization fails. Temporary normalized outputs are not
+published until FFmpeg succeeds, so a failed attempt cannot leave a mixed manifest.
+
+Detection remains at recording-file boundaries. If a single source file itself contains an undetected mid-file codec
+reconfiguration, it remains a separate diagnostic case and must not be solved by silently applying a lossy fallback.
 
 新对象使用 `videos/YYYY-MM-DD/session-NN/pNN.<source-format>`。日期和当天场次来自父 Upload Source，分片序号
 来自当前 output manifest。历史 `h264_crf23_medium_mp4` 对象保留其已登记 key、格式和下载能力，不做批量迁移；
@@ -330,12 +335,38 @@ object key 由应用生成，用户不能提交任意删除 key。
 
 ---
 
-## 6. ACRCloud File Scanning
+## 6. Local Singing Candidate Detection
 
-Songs V1 uses ACRCloud File Scanning through its HTTPS API. It does not use the realtime SDK and does not expose the
-access token to the browser.
+Songs V1 target path invokes a pinned local batch detector through an Adapter. It consumes controlled mono analysis
+audio and emits normalized timestamped `singing`, `music`, and `speech` scores. It does not identify title/artist and
+does not classify original recordings versus covers.
 
-Fixed contract for the first implementation:
+The initial benchmark candidates are the lightweight PANNs AudioSet-compatible MobileNetV2 and Cnn6 checkpoints. Full
+Cnn14 is not the default because its model artifact and inference memory are disproportionate for the production 2C4G
+host; it is evaluated only if both lightweight candidates fail the recall gate. Production inference is CPU-only with
+batch size one and must not pull CUDA libraries. Production packaging is blocked until the repository records the exact
+source version, model checksum, license, runtime dependencies, label mapping, measured disk/RAM/runtime limits, command
+contract, and sanitized output fixtures. The tool is not an always-on service. It runs in the `AI` resource class, is
+cancellable, and does not start new work while recording is active.
+
+Model weights and the CPU runtime are fixed application/release assets. They do not consume the Songs 5% playback-cache
+quota and are never subject to media-cache eviction, but deploy-time disk checks and old-release cleanup must account
+for them. Temporary decoded or analysis audio remains managed Songs working data and is removed after its owning stage.
+
+No external recognition credential is required. A model failure affects only its Songs Run. Application code consumes
+only normalized detector output and owns window aggregation, thresholds, padding, timeline conversion, and review
+state.
+
+This integration is approved but deferred. No detector package or model artifact is currently part of the production
+release.
+
+## 6.1 Legacy ACRCloud File Scanning
+
+The deployed checkpoint can use ACRCloud File Scanning through its HTTPS API. This integration is retained for
+compatibility and rollback, but it is not the approved V1 target because ongoing useful scanning is a paid external
+service. New local-detector Runs must neither require nor expose its access token.
+
+Deployed legacy contract:
 
 ```text
 POST /api/fs-containers/{container_id}/files
@@ -356,8 +387,9 @@ GET  /api/fs-containers/{container_id}/files/{file_ids}
 - Raw provider responses are retained only as recognition evidence. Credentials and request authorization data must
   never be written to evidence or logs.
 
-The adapter parser is covered by sanitized fixtures in unit tests. The first real small-file response must be
-sanitized and used to harden optional provider fields before large recordings are accepted.
+The legacy adapter parser remains covered by sanitized unit-test fixtures. Re-enabling or modifying this optional path
+requires an explicit design decision and a sanitized small-file acceptance response; it is not part of local-detector
+acceptance.
 
 ## 7. 网易云/其他 Publisher
 

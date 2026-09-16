@@ -1,14 +1,20 @@
 # 7GRecorder Songs V1 Technical Design
 
-> Version: V1.2
+> Version: V1.3
 > Status: approved design, implementation in progress
-> Scope: manual recognition of one available COS video output, automatic M4A artifacts, on-demand MP4 exports.
+> Scope: manual analysis of one available COS video output, local high-recall singing candidate detection, automatic
+> M4A artifacts, human curation, and on-demand MP4 exports.
 
 ## 1. Goal
 
 Songs is an optional business boundary. A SUPER_ADMIN manually selects one video part already available in Tencent COS
-and starts recognition. The system identifies songs and their time ranges, automatically creates an M4A for every
-draft, uploads those audio artifacts to COS, and presents them in an admin list.
+and starts analysis. The system uses a free local detector to find time ranges likely to contain singing, automatically
+creates an M4A for every candidate draft, uploads those audio artifacts to COS, and presents them in an efficient admin
+review list.
+
+The product objective is to reduce the time spent scrubbing full recordings. Automatic title identification and the
+distinction between an original recording and a live cover are not required: a human reviewer chooses worthwhile
+performances, adjusts their boundaries, and supplies final metadata.
 
 There are two distinct user actions:
 
@@ -19,7 +25,7 @@ Play
   -> otherwise cache the M4A from COS, then play it
 
 Download song video
-  -> do not pre-generate video during recognition
+  -> do not pre-generate video during analysis
   -> create an export job on demand
   -> obtain the original COS video source
   -> cut an accurate MP4 for the current boundary revision
@@ -32,6 +38,10 @@ V1 does not automatically scan recordings, use Local Source, analyze multiple CO
 COS output boundaries, publish to music platforms, pre-generate video exports, or keep video exports in COS. Songs
 failure never changes Recording, Bilibili, or source COS state. Browsers never receive COS credentials, permanent COS
 URLs, or local paths.
+
+V1 does not promise automatic song titles, artists, original-versus-cover classification, a global reference catalog,
+lyrics matching, or zero false positives. High recall is preferred over high precision because rejected candidates are
+cheap to review while a missed high-quality performance may require scrubbing the full recording again.
 
 ## 3. Source Identity And Timeline
 
@@ -46,42 +56,47 @@ upload_sources.status = READY_TO_UPLOAD
 Legacy `cos_objects` rows are excluded because they currently represent raw recording-file attachments, primarily
 danmaku files.
 
-A run snapshots the selected object ID/key/ETag/size, output timeline, storage profile, provider settings version, and
-algorithm version. Recognition offsets are relative to the selected output. Song boundaries use the parent Upload
+A run snapshots the selected object ID/key/ETag/size, output timeline, storage profile, detector settings/model
+version, and algorithm version. Detection offsets are relative to the selected output. Song boundaries use the parent Upload
 Source timeline:
 
 ```text
-song.start_ms = output.timeline_start_ms + recognized_start_ms
-song.end_ms   = output.timeline_start_ms + recognized_end_ms
+song.start_ms = output.timeline_start_ms + detected_local_start_ms
+song.end_ms   = output.timeline_start_ms + detected_local_end_ms
 ```
 
 This preserves future multi-output compatibility while keeping V1 single-file.
 
-## 4. Recognition Provider
+## 4. Local Candidate Detector
 
-V1 uses an operator-created ACRCloud File Scanning container configured for Audio Fingerprinting plus Cover Song
-Identification, Traverse Scanning, and Music Detection. 7GRecorder polls results and exposes no callback.
+V1 uses a local `SingingCandidateDetector` adapter. It accepts a controlled analysis-audio path plus window settings
+and returns timestamped scores for singing, music, and speech. It does not return or infer a song identity.
 
-Authoritative provider references:
+The first implementation target is a pinned lightweight PANNs AudioSet-compatible checkpoint executed locally as a
+batch tool, not as another always-on service. The offline benchmark compares MobileNetV2 and Cnn6 first; full Cnn14 is
+considered only when both lightweight models miss the acceptance target. Production uses CPU-only inference, batch
+size one, and does not install CUDA dependencies. Before production adoption, the exact code version, model artifact,
+checksum, license, runtime dependencies, labels, and normalized output schema must be fixed in `INTEGRATIONS.md`. A
+repository fixture set must include representative Chinese live-stream speech, singing, applause, silence, and
+speech-over-background-music.
 
-- `https://docs.acrcloud.com/reference/console-api/file-scanning`
-- `https://docs.acrcloud.com/reference/console-api/file-scanning/file-scanning`
-- `https://docs.acrcloud.com/reference/console-api/file-scanning/metadata/cover-songs`
+The acceptance gate is operational rather than benchmark-only: on a manually annotated local sample set, the detector
+must save meaningful review time and must not frequently omit complete high-quality singing sections. If the first
+model fails that gate, the adapter contract remains stable while the implementation can be replaced.
 
-The production adapter must be based on sanitized responses captured from the configured test container. Documentation
-examples alone are not accepted as fixtures, and implementation must not guess unobserved payload fields.
+The detector requires no API credential and incurs no per-file external-service fee. CPU, memory, disk, and processing
+time remain real local costs. New AI work does not start while recording is active and remains subordinate to Resource
+Guard and storage reservations.
 
-Encrypted credential:
+Model weights and the pinned CPU runtime are immutable application assets, not disposable Songs media and not part of
+the 5% audio playback cache. They still consume system disk and must be included in deploy-time free-space checks and
+release cleanup accounting. The selected lightweight checkpoint should be roughly 150 MB; the complete CPU inference
+environment is measured during packaging and recorded before deployment. Analysis audio is chunked and deleted after
+the owning Run stage so it cannot accumulate as an unbounded second media library.
 
-```text
-scope     SYSTEM
-platform  acrcloud
-purpose   SONG_RECOGNITION
-secret    {"access_token":"..."}
-```
-
-Non-secret settings contain region and container ID. V1 does not create or mutate the external container. Provider
-responses are immutable evidence; Song drafts remain editable and reviewable.
+The existing ACRCloud adapter and encrypted credentials are a deployed legacy checkpoint, not the V1 target. They stay
+disabled and are not required for new Runs. Removal of obsolete provider settings and evidence columns is deferred
+until the local path is accepted, so rollback does not require a destructive migration.
 
 ## 5. Durable Flow
 
@@ -89,34 +104,40 @@ responses are immutable evidence; Song drafts remain editable and reviewable.
 select AVAILABLE COS output
   -> create song_analysis_run and reserve working space
   -> DOWNLOAD_SONG_SOURCE                  NETWORK
-  -> EXTRACT_SONG_ANALYSIS_CHUNKS          MEDIA
-  -> SUBMIT_ACRCLOUD_SCAN                  AI
-  -> FETCH_ACRCLOUD_RESULT                 AI
-  -> FINALIZE_SONG_RECOGNITION             LIGHT
-  -> create evidence and Song drafts
+  -> EXTRACT_SONG_ANALYSIS_AUDIO           MEDIA
+  -> DETECT_SINGING_CANDIDATES             AI
+  -> AGGREGATE_SINGING_INTERVALS            LIGHT
+  -> create scored interval evidence and untitled Song drafts
   -> CUT_SONG_AUDIO                        MEDIA
   -> UPLOAD_SONG_AUDIO                     NETWORK
   -> show drafts with available audio or a visible failure
 ```
 
-The first production MVP extracts one MP3, mono, 32 kHz, 64 kbps analysis file for the selected COS output. This keeps
-the first real acceptance path small while remaining below ACRCloud's documented 500 MB upload limit for normal
-recording parts. Multi-chunk analysis with two-hour cores and 30-second guards remains the V1 follow-up for unusually
-long outputs. The MVP fails visibly before submission if the extracted file reaches the provider's 500 MB limit.
-Provider filenames contain run ID and algorithm version. Before retrying an ambiguous submission, the
-adapter searches for that deterministic name and reuses an existing provider file ID to avoid repeated paid scans.
-
-Polling backoff is 30 seconds, one minute, two minutes, then five minutes. Provider IDs and poll state are persisted
-business state, not only Job payload data.
+Analysis audio is mono 32 kHz and is divided into deterministic local chunks when necessary. The initial detector
+defaults are 10-second windows with a 5-second hop. Model inference may be retried from persisted chunk state without
+redownloading the COS source when the verified working file still exists. There is no external submission or polling.
 
 ## 6. Aggregation And Boundaries
 
-Fingerprint and cover matches normalize to one evidence type. Aggregation converts chunk offsets, deduplicates guard
-overlap, clusters by time before resolving identity, prefers ACRID/ISRC over normalized title/artist, and keeps
-conflicts as candidates.
+Each analysis window produces immutable scores and detector metadata. Aggregation applies configurable thresholds and
+hysteresis, merges overlapping/adjacent positive windows, bridges short gaps, filters implausibly short ranges, and
+adds bounded lead/tail padding. Initial tuning targets are:
 
 ```text
-detected_start_ms / detected_end_ms  provider-derived boundary
+window                     10 seconds
+hop                         5 seconds
+minimum candidate          30 seconds
+merge gap                  20 seconds
+lead padding               10 seconds
+tail padding               15 seconds
+```
+
+Thresholds are calibrated from local fixtures and stored with `algorithm_version`; the values above are starting
+points, not silent universal constants. Detection evidence never supplies title or artist. A draft remains useful with
+both fields null until human review.
+
+```text
+detected_start_ms / detected_end_ms  detector-derived boundary
 start_ms / end_ms                    current editable boundary
 clip_revision                        incremented after a boundary change
 ```
@@ -206,10 +227,13 @@ Song audio artifacts have registered object rows and are not inferred or deleted
 
 ## 12. Data Model
 
-- `song_settings`: provider credential, region/container, destination COS profile/prefix, padding and algorithm version.
-- `song_analysis_runs`: source/config snapshots, status/progress, reservation, error and timestamps.
-- `song_analysis_chunks`: core/guard ranges, provider file identity/state/result and polling state.
-- `song_recognition_matches`: immutable normalized evidence and raw provider fixture data.
+- `song_settings`: destination COS profile/prefix, detector thresholds/window/merge/padding settings and algorithm
+  version. Legacy provider fields remain nullable during migration.
+- `song_analysis_runs`: source/config/model snapshots, status/progress, reservation, error and timestamps.
+- `song_analysis_chunks`: local chunk ranges, analysis state, detector output and retry state. Legacy provider identity
+  fields remain unused by local Runs.
+- `song_recognition_matches`: immutable per-window or aggregated detector evidence. Existing rows from the legacy
+  ACRCloud checkpoint remain readable.
 - `songs`: Upload Source/run ownership, nullable Recording mapping, detected/current ranges, revision and review state.
 - `song_artifacts`: versioned authoritative COS M4A metadata, ETag, size, status and replacement relation.
 - `media_cache_entries`: disposable local cache identity, size/state, access time and grace/lease.
@@ -218,9 +242,12 @@ Song audio artifacts have registered object rows and are not inferred or deleted
 Run statuses:
 
 ```text
-PENDING | DOWNLOADING | ANALYZING | RECOGNIZING | FINALIZING
+PENDING | DOWNLOADING | ANALYZING | DETECTING | FINALIZING
 | GENERATING_AUDIO | REVIEW_REQUIRED | COMPLETED | FAILED | SOURCE_MISSING | CANCELLED
 ```
+
+Persisted legacy ACRCloud Runs may retain `RECOGNIZING`; read models and recovery code keep that value readable while
+new local Runs use `DETECTING`.
 
 `songs.recording_id` becomes nullable and is filled only when the entire interval maps unambiguously to one Recording.
 
@@ -262,8 +289,10 @@ V1 mutations are SUPER_ADMIN-only. Broader read/play/download access requires a 
 
 - settings/permission/source eligibility;
 - COS streaming download, cancellation, size/ETag verification and atomic promotion;
-- sanitized provider fixtures for processing, ready, no-result, auth, malformed and conflicting results;
-- duplicate-scan recovery; guard deduplication; timeline conversion and boundary clamp;
+- pinned local detector command/output fixtures, malformed output, cancellation, timeout and model-version mismatch;
+- window/chunk overlap deduplication, threshold hysteresis, short-gap merge, minimum duration, padding, timeline
+  conversion and boundary clamp;
+- annotated speech/singing/music fixtures measuring candidate recall and review-time usefulness;
 - revision/recut/artifact upload/stale-cache invalidation;
 - M4A and accurate MP4 generation from original media;
 - playback hit/miss/coalescing and authenticated internal redirect;
@@ -273,15 +302,19 @@ V1 mutations are SUPER_ADMIN-only. Broader read/play/download access requires a 
 
 ## 16. Delivery Order
 
-1. Fix the adapter to the documented ACRCloud File Scanning HTTP contract and keep sanitized response fixtures in the
-   repository; the first real small-file run is the acceptance fixture used to harden optional fields.
-2. Update schema and storage-budget semantics.
-3. Implement reservation/cache primitives and safety tests.
-4. Implement source selection and COS downloader.
-5. Implement the single-analysis-file ACRCloud MVP and durable processing state.
-6. Implement aggregation, automatic M4A upload, list, and cached playback.
-7. Accept one small production COS video and retain its sanitized provider result as the real integration fixture.
-8. Add editable boundaries and multi-chunk analysis.
+Implementation of this section is intentionally deferred while operations features are developed. Resume only through
+the benchmark-first sequence below; do not install a model or change production Run behavior merely because this design
+is approved.
+
+1. Pin and benchmark CPU-only PANNs MobileNetV2 and Cnn6 on manually annotated short live-stream samples without
+   modifying production behavior; capture normalized fixtures and measured disk/RAM/runtime costs.
+2. Change settings and Run creation so local detection is the default and requires no external credential.
+3. Implement deterministic analysis windows/chunks and durable local detector execution.
+4. Implement high-recall interval aggregation and create untitled Song drafts.
+5. Reuse the existing automatic M4A/COS/list/playback path for those drafts.
+6. Implement fast review actions: play, confirm, reject, edit title/artist and adjust boundaries.
+7. Validate one small production COS source, tune thresholds, and record review-time/recall observations.
+8. Implement cache-miss COS playback refill and revision-aware recut.
 9. Implement on-demand accurate MP4 export/download.
 
 Current deployed checkpoint (`6356f1910d1b0e3ecac856336233053ded963251`, 2026-09-15):
@@ -293,7 +326,18 @@ Current deployed checkpoint (`6356f1910d1b0e3ecac856336233053ded963251`, 2026-09
 - the single-file MVP is deployed through ACRCloud submission/polling, durable provider state and evidence,
   Song draft creation, automatic M4A generation/upload, list, and cache-hit playback;
 - dev/main CI and the production health check passed for this revision;
-- production acceptance and provider-payload calibration must start with one small COS source before larger recordings;
+- the previously planned ACRCloud production-acceptance run was not completed and is no longer required;
 - cache-miss playback refill from COS is not part of this checkpoint, so a locally evicted audio artifact remains
   authoritative in COS but is not playable until the refill endpoint is implemented;
 - editable boundaries, multi-chunk analysis, and on-demand MP4 export remain subsequent V1 checkpoints.
+
+Design decision after this checkpoint:
+
+- ACRCloud is not acceptable as the required production path because its useful File Scanning capability is a paid
+  external service after a limited trial;
+- automatic identity and original-versus-cover classification are removed from V1 success criteria;
+- the next implementation checkpoint replaces external recognition with free local high-recall singing candidate
+  detection while preserving source download, M4A artifacts, playback, review, caching, and video export semantics;
+- this local detector path is approved design but is not yet deployed.
+- Songs local-detector development is paused while operations work takes priority; no model/runtime should be added to
+  production until that work is explicitly resumed.

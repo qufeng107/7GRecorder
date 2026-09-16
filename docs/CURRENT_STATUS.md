@@ -129,9 +129,10 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 
 ## Future Design Documents
 
-- `docs/7GRecorder_Songs_V1_Technical_Design.md` is the approved next increment: manually select one AVAILABLE COS
-  video output, run ACRCloud recognition, automatically create permanent COS M4A artifacts with a 5% local playback
-  cache, and create accurate MP4 exports on demand with a 5GB local cache.
+- `docs/7GRecorder_Songs_V1_Technical_Design.md` now targets manually selecting one AVAILABLE COS video output, running
+  a free local high-recall singing candidate detector, automatically creating permanent COS M4A artifacts with a 5%
+  local playback cache, reviewing/labeling worthwhile performances, and creating accurate MP4 exports on demand with
+  a 5GB local cache. Automatic title identification and original-versus-cover classification are not V1 requirements.
 - Production `6356f1910d1b0e3ecac856336233053ded963251` contains the minimum end-to-end Songs MVP. A dedicated `AI`
   worker extracts one low-bitrate analysis MP3, streams it to the documented ACRCloud File Scanning API, polls and
   persists the result, creates Song drafts, cuts M4A from the original video, uploads versioned artifacts to COS,
@@ -140,8 +141,11 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
   and `https://7g.chat/health/ready` both reported the same commit SHA.
 
 Cache-miss COS refill, editable boundaries, multi-chunk analysis, confirmation, and on-demand MP4 export remain
-pending. The first real provider acceptance must use one small COS video, and its provider response must be sanitized
-before being retained as an integration fixture.
+pending. ACRCloud is no longer the target provider because its useful ongoing service is paid after a limited trial.
+The next checkpoint must pin and benchmark the local detector, then replace external submission/polling for new Runs;
+that replacement is approved design but is not deployed yet. Songs development is now paused while operations features
+take priority. When resumed, benchmark CPU-only PANNs MobileNetV2 and Cnn6 first, record actual disk/RAM/runtime costs,
+and consider Cnn14 only if both lightweight candidates miss the recall target.
 
 Production `c443494614a3b3a570e9d436326a90a890b489ea` also includes resolution-safe upload-source packaging. Multiple
 recording files are FFprobe-grouped by compatible video/audio stream signature before concat stream copy. A live PK
