@@ -1,6 +1,6 @@
 # 7GRecorder Current Status
 
-Last updated: 2026-09-13
+Last updated: 2026-09-17
 
 This file is the handoff entry point for a new coding chat. Read it before reconstructing context from screenshots or
 server commands.
@@ -13,12 +13,12 @@ Recommended first-read order:
 
 ## Production
 
-- Current deployed production commit: `d4ba421513f3be894ed060b2bd03f757db6668f9`.
+- Current deployed production commit: `06f27e3e2e0f112bebe4a8b0bd2b3e2589fc11d1`.
 - `main` runs the reusable CI gate before the release job; `dev` runs CI only.
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
-- CI runs `34778144266` (dev) and `34778284487` (main) passed the complete repository gate. Production Deploy run
-  `34778284588` completed successfully.
+- CI runs `35161716643` (dev) and `35161858719` (main) passed the complete repository gate. Production Deploy run
+  `35161859027` completed successfully, and `https://7g.chat/health/ready` reported the deployed SHA.
 - Production includes safe delivered-source cleanup, review/module resume guards, Bilibili/COS progress reporting,
   direct original-part COS upload, safe interrupted-job recovery, and verified BililiveRecorder room-config sync.
 - Normal backend deployment recreates only `7grecorder`. It must not use `docker compose down` or restart the
@@ -147,10 +147,11 @@ that replacement is approved design but is not deployed yet. Songs development i
 take priority. When resumed, benchmark CPU-only PANNs MobileNetV2 and Cnn6 first, record actual disk/RAM/runtime costs,
 and consider Cnn14 only if both lightweight candidates miss the recall target.
 
-Production `c443494614a3b3a570e9d436326a90a890b489ea` also includes resolution-safe upload-source packaging. Multiple
-recording files are FFprobe-grouped by compatible video/audio stream signature before concat stream copy. A live PK
-resolution change therefore starts a new ordered Bilibili/COS publish part instead of stretching a later segment inside
-an incompatible FLV stream. This applies to newly packaged or explicitly rebuilt Upload Sources; existing Bilibili
-submissions are not rewritten automatically.
+Production `06f27e3e2e0f112bebe4a8b0bd2b3e2589fc11d1` includes PK resolution normalization for future upload-source
+packaging. When dimensions and their derived H.264 level are the only stream differences, FFmpeg chooses the existing
+resolution with the greatest cumulative duration, keeps each source aspect ratio, avoids enlarging smaller inputs,
+centers them on black padding, and returns to the normal two-hour/size-aware part policy. Other stream differences and
+normalization failures still use ordered compatibility-boundary parts. Existing Bilibili/COS submissions are not
+rewritten automatically.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.

@@ -447,9 +447,9 @@ This increment changes only future Bilibili submissions started after deployment
 submission or alter COS archive naming.
 
 The deployed media compatibility fix first partitioned consecutive source segments at FFprobe stream-signature
-changes. The next increment retains that behavior as a fallback but treats dimensions-only live PK changes specially:
-normalize onto the dominant source resolution with aspect-ratio-preserving black padding, then return to the normal
-two-hour/size-aware part policy. Other stream changes still create compatibility boundaries.
+changes. Production `06f27e3e` retains that behavior as a fallback but treats dimensions-only live PK changes
+specially: normalize onto the dominant source resolution with aspect-ratio-preserving black padding, then return to
+the normal two-hour/size-aware part policy. Other stream changes still create compatibility boundaries.
 
 ---
 
