@@ -1199,6 +1199,52 @@ func TestDiscoverUploadSourcesWaitsForAdjacentUnfinishedRecording(t *testing.T) 
 	}
 }
 
+func TestDiscoverUploadSourcesWaitsForOverlappingUnfinishedRecording(t *testing.T) {
+	for _, nextStart := range []string{"2026-09-05T10:03:00Z", "2026-09-05T10:02:59Z"} {
+		t.Run(nextStart, func(t *testing.T) {
+			ctx := context.Background()
+			cfg, database := openTestDB(t, ctx)
+			actor := bootstrapTestAdmin(t, ctx, database)
+			if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+				Name: "7G", RoomID: "1741048619", StreamerName: "Streamer",
+			}); err != nil {
+				t.Fatalf("Create returned error: %v", err)
+			}
+			insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+				Title: "part 1", StartedAt: "2026-09-05T10:00:00Z",
+				CompletedAt: "2026-09-05T10:03:00Z", DurationMs: 180000, SizeBytes: 20,
+			})
+			result, err := database.ExecContext(ctx, `
+				INSERT INTO recordings
+					(recording_profile_id, title, started_at, recording_status, local_storage_status,
+					 source_room_id, streamer_name_snapshot)
+				VALUES (1, 'part 2', ?, 'ACTIVE', 'AVAILABLE', '1741048619', 'Streamer')
+			`, nextStart)
+			if err != nil {
+				t.Fatalf("insert active recording: %v", err)
+			}
+			recordingID, err := result.LastInsertId()
+			if err != nil {
+				t.Fatalf("LastInsertId: %v", err)
+			}
+			if _, err := database.ExecContext(ctx, `
+				INSERT INTO recording_files
+					(recording_id, relative_path, original_name, kind, file_status, size_bytes)
+				VALUES (?, 'recordings/1741048619-Streamer/part 2.flv', 'part 2.flv', 'video', 'WRITING', 30)
+			`, recordingID); err != nil {
+				t.Fatalf("insert writing file: %v", err)
+			}
+			discover, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+			if err != nil {
+				t.Fatalf("DiscoverUploadSources: %v", err)
+			}
+			if discover.Created != 0 || discover.Delayed != 1 {
+				t.Fatalf("expected unfinished adjacent recording to delay source: %#v", discover)
+			}
+		})
+	}
+}
+
 func TestDiscoverUploadSourcesWaitsForAdjacentActiveFile(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
@@ -1240,6 +1286,40 @@ func TestDiscoverUploadSourcesWaitsForAdjacentActiveFile(t *testing.T) {
 	}
 	if discover.Created != 0 || discover.Delayed != 1 {
 		t.Fatalf("expected active filesystem recording to delay upload source, got %#v", discover)
+	}
+}
+
+func TestDiscoverUploadSourcesWaitsForOverlappingActiveFile(t *testing.T) {
+	for _, nextStart := range []string{"180300", "180259"} {
+		t.Run(nextStart, func(t *testing.T) {
+			ctx := context.Background()
+			cfg, database := openTestDB(t, ctx)
+			actor := bootstrapTestAdmin(t, ctx, database)
+			if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{
+				Name: "7G", RoomID: "1741048619", StreamerName: "Streamer",
+			}); err != nil {
+				t.Fatalf("Create returned error: %v", err)
+			}
+			insertRecordingMetadata(t, ctx, database, insertRecordingRequest{
+				Title: "part 1", StartedAt: "2026-09-05T10:00:00Z",
+				CompletedAt: "2026-09-05T10:03:00Z", DurationMs: 180000, SizeBytes: 20,
+			})
+			recordingDir := filepath.Join(cfg.DataRoot, "recordings", "1741048619-Streamer")
+			if err := os.MkdirAll(recordingDir, 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			activePath := filepath.Join(recordingDir, "record-1741048619-20260905-"+nextStart+"-001-part 2.flv")
+			if err := os.WriteFile(activePath, []byte("active video"), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			discover, err := NewStore(database, cfg).DiscoverUploadSources(ctx, 600)
+			if err != nil {
+				t.Fatalf("DiscoverUploadSources: %v", err)
+			}
+			if discover.Created != 0 || discover.Delayed != 1 {
+				t.Fatalf("expected active adjacent file to delay source: %#v", discover)
+			}
+		})
 	}
 }
 

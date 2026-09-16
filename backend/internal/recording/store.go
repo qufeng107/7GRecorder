@@ -1823,6 +1823,7 @@ func (s Store) hasAdjacentUnfinishedRecording(ctx context.Context, item Recordin
 	if completed.IsZero() {
 		return true, nil
 	}
+	earliestAdjacentStart := completed.Add(-2 * time.Minute).UTC().Format(time.RFC3339)
 	latestAdjacentStart := completed.Add(time.Duration(thresholdSeconds) * time.Second).UTC().Format(time.RFC3339)
 	var count int
 	if err := s.db.QueryRowContext(ctx, `
@@ -1831,7 +1832,8 @@ func (s Store) hasAdjacentUnfinishedRecording(ctx context.Context, item Recordin
 		WHERE next.recording_profile_id = ?
 			AND next.local_storage_status != 'DELETED'
 			AND next.local_deleted_at IS NULL
-			AND next.started_at > ?
+			AND next.id != ?
+			AND next.started_at >= ?
 			AND next.started_at <= ?
 			AND (
 				next.recording_status = 'ACTIVE'
@@ -1844,7 +1846,7 @@ func (s Store) hasAdjacentUnfinishedRecording(ctx context.Context, item Recordin
 						AND f.deleted_at IS NULL
 				)
 			)
-	`, item.RecordingProfileID, completed.UTC().Format(time.RFC3339), latestAdjacentStart).Scan(&count); err != nil {
+	`, item.RecordingProfileID, item.ID, earliestAdjacentStart, latestAdjacentStart).Scan(&count); err != nil {
 		return false, fmt.Errorf("check adjacent unfinished recording: %w", err)
 	}
 	return count > 0, nil
@@ -1856,6 +1858,7 @@ func (s Store) hasAdjacentActiveRecordingFile(item Recording, thresholdSeconds i
 		return true, nil
 	}
 	root := filepath.Join(s.cfg.DataRoot, "recordings")
+	windowStart := completed.Add(-2 * time.Minute)
 	windowEnd := completed.Add(time.Duration(thresholdSeconds) * time.Second)
 	activeThreshold := time.Now().Add(-2 * time.Minute)
 	found := false
@@ -1884,7 +1887,7 @@ func (s Store) hasAdjacentActiveRecordingFile(item Recording, thresholdSeconds i
 			return nil
 		}
 		started := recordingStartTimeFromName(entry.Name())
-		if started.IsZero() || !started.After(completed) || started.After(windowEnd) {
+		if started.IsZero() || started.Before(windowStart) || started.After(windowEnd) {
 			return nil
 		}
 		found = true
