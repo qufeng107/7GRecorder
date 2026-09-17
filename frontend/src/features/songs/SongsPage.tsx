@@ -1,6 +1,10 @@
+import { RefreshWarning } from "../../shared/ui/RefreshWarning";
+import { useServerDraft } from "../../shared/forms/useServerDraft";
+import { UnsavedChangesGuard } from "../../shared/forms/UnsavedChangesGuard";
+import { DraftFeedback } from "../../shared/forms/DraftFeedback";
 import { PageStatus } from "../../shared/ui/PageStatus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type SongSettingsForm,
   type MeResponse,
@@ -24,16 +28,13 @@ export default function SongsPage() {
   const language = useLanguage();
   const activePage: string = "songs";
   const queryClient = useQueryClient();
-  const [songSettingsForm, setSongSettingsForm] = useState<SongSettingsForm>(
-    emptySongSettingsForm,
-  );
   const [acrCredentialLabel, setAcrCredentialLabel] = useState(
     "ACRCloud song recognition",
   );
   const [acrCredentialSecret, setAcrCredentialSecret] = useState(
     '{"access_token":""}',
   );
-  const [selectedSongSourceID, setSelectedSongSourceID] = useState("");
+  const [sourceChoice, setSelectedSongSourceID] = useState("");
   const meQuery = useQuery({
     queryKey: ["me"],
     queryFn: () => requestJson<MeResponse>("/api/v1/me"),
@@ -97,83 +98,78 @@ export default function SongsPage() {
     () => credentialsQuery.data?.items ?? [],
     [credentialsQuery.data?.items],
   );
-  useEffect(() => {
-    const settings = songSettingsQuery.data;
-    if (!settings) return;
-    setSongSettingsForm({
-      enabled: settings.enabled,
-      credential_id: settings.credential_id
-        ? String(settings.credential_id)
-        : "",
-      region: settings.region,
-      container_id: settings.container_id,
-      destination_cos_storage_profile_id:
-        settings.destination_cos_storage_profile_id
-          ? String(settings.destination_cos_storage_profile_id)
-          : "",
-      songs_prefix: settings.songs_prefix,
-      boundary_padding_ms: settings.boundary_padding_ms,
-      algorithm_version: settings.algorithm_version,
-    });
-  }, [songSettingsQuery.data]);
-  useEffect(() => {
-    const sources = songSourcesQuery.data?.items ?? [];
-    if (!selectedSongSourceID && sources.length > 0) {
-      setSelectedSongSourceID(String(sources[0].cos_object_id));
-      if (!songSettingsForm.destination_cos_storage_profile_id) {
-        setSongSettingsForm((form) => ({
-          ...form,
-          destination_cos_storage_profile_id: String(
-            sources[0].cos_storage_profile_id,
-          ),
-        }));
-      }
-    }
-  }, [
-    selectedSongSourceID,
-    songSettingsForm.destination_cos_storage_profile_id,
-    songSourcesQuery.data?.items,
-  ]);
+  const settings = songSettingsQuery.data;
+  const firstSource = songSourcesQuery.data?.items?.[0];
+  const selectedSongSourceID =
+    sourceChoice || (firstSource ? String(firstSource.cos_object_id) : "");
+  const songDraft = useServerDraft<SongSettingsForm>(
+    settings
+      ? {
+          enabled: settings.enabled,
+          credential_id: settings.credential_id
+            ? String(settings.credential_id)
+            : "",
+          region: settings.region,
+          container_id: settings.container_id,
+          destination_cos_storage_profile_id:
+            settings.destination_cos_storage_profile_id
+              ? String(settings.destination_cos_storage_profile_id)
+              : firstSource
+                ? String(firstSource.cos_storage_profile_id)
+                : "",
+          songs_prefix: settings.songs_prefix,
+          boundary_padding_ms: settings.boundary_padding_ms,
+          algorithm_version: settings.algorithm_version,
+        }
+      : emptySongSettingsForm,
+  );
+  const songSettingsForm = songDraft.form;
+  const setSongSettingsForm = songDraft.change;
   const createAcrCredentialMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: { label: string; secret: string }) =>
       requestJson<Credential>("/api/v1/credentials", {
         method: "POST",
         body: JSON.stringify({
           scope: "SYSTEM",
           platform: "acrcloud",
           purpose: "SONG_RECOGNITION",
-          account_label: acrCredentialLabel,
-          secret: parseConfigJSON(acrCredentialSecret),
+          account_label: submitted.label,
+          secret: parseConfigJSON(submitted.secret),
         }),
       }),
-    onSuccess: (credential) => {
+    onSuccess: (credential, submitted) => {
       setSongSettingsForm((form) => ({
         ...form,
         credential_id: String(credential.id),
       }));
-      setAcrCredentialSecret('{"access_token":""}');
+      setAcrCredentialSecret((current) =>
+        current === submitted.secret ? '{"access_token":""}' : current,
+      );
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
     },
   });
   const saveSongSettingsMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: SongSettingsForm) =>
       requestJson<SongSettings>("/api/v1/song-settings", {
         method: "PUT",
         body: JSON.stringify({
-          enabled: songSettingsForm.enabled,
-          credential_id: Number(songSettingsForm.credential_id || 0),
-          region: songSettingsForm.region,
-          container_id: songSettingsForm.container_id,
+          enabled: submitted.enabled,
+          credential_id: Number(submitted.credential_id || 0),
+          region: submitted.region,
+          container_id: submitted.container_id,
           destination_cos_storage_profile_id: Number(
-            songSettingsForm.destination_cos_storage_profile_id || 0,
+            submitted.destination_cos_storage_profile_id || 0,
           ),
-          songs_prefix: songSettingsForm.songs_prefix,
-          boundary_padding_ms: songSettingsForm.boundary_padding_ms,
-          algorithm_version: songSettingsForm.algorithm_version,
+          songs_prefix: submitted.songs_prefix,
+          boundary_padding_ms: submitted.boundary_padding_ms,
+          algorithm_version: submitted.algorithm_version,
         }),
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: ["song-settings"] }),
+    onSuccess: (saved, submitted) => {
+      queryClient.setQueryData(["song-settings"], saved);
+      songDraft.saved(submitted);
+      void queryClient.invalidateQueries({ queryKey: ["song-settings"] });
+    },
   });
   const createSongRunMutation = useMutation({
     mutationFn: () =>
@@ -188,11 +184,11 @@ export default function SongsPage() {
   });
   if (!user) return null;
   if (
-    credentialsQuery.isError ||
-    songSettingsQuery.isError ||
-    songSourcesQuery.isError ||
-    songRunsQuery.isError ||
-    recognizedSongsQuery.isError
+    (credentialsQuery.isError && !credentialsQuery.data) ||
+    (songSettingsQuery.isError && !songSettingsQuery.data) ||
+    (songSourcesQuery.isError && !songSourcesQuery.data) ||
+    (songRunsQuery.isError && !songRunsQuery.data) ||
+    (recognizedSongsQuery.isError && !recognizedSongsQuery.data)
   )
     return (
       <PageStatus
@@ -215,6 +211,41 @@ export default function SongsPage() {
     return <PageStatus loading />;
   return (
     <div className="feature-page space-y-6">
+      <RefreshWarning
+        failed={[
+          credentialsQuery,
+          songSettingsQuery,
+          songSourcesQuery,
+          songRunsQuery,
+          recognizedSongsQuery,
+        ].some((query) => query.isError)}
+        retry={() =>
+          [
+            credentialsQuery,
+            songSettingsQuery,
+            songSourcesQuery,
+            songRunsQuery,
+            recognizedSongsQuery,
+          ]
+            .filter((query) => query.isError)
+            .forEach((query) => {
+              void query.refetch();
+            })
+        }
+      />
+      <UnsavedChangesGuard
+        dirty={songDraft.dirty || acrCredentialSecret !== '{"access_token":""}'}
+      />
+      <DraftFeedback
+        title={ui.nav.songs}
+        dirty={songDraft.dirty}
+        saved={saveSongSettingsMutation.isSuccess}
+        pending={saveSongSettingsMutation.isPending}
+        onDiscard={() => {
+          songDraft.discard();
+          saveSongSettingsMutation.reset();
+        }}
+      />
       <SongsPanel
         acrCredentials={credentials.filter(
           (item) =>
@@ -238,12 +269,15 @@ export default function SongsPage() {
         startPending={createSongRunMutation.isPending}
         onCreateCredential={(event) => {
           event.preventDefault();
-          createAcrCredentialMutation.mutate();
+          createAcrCredentialMutation.mutate({
+            label: acrCredentialLabel,
+            secret: acrCredentialSecret,
+          });
         }}
         onCredentialLabelChange={setAcrCredentialLabel}
         onCredentialSecretChange={setAcrCredentialSecret}
         onFormChange={setSongSettingsForm}
-        onSave={() => saveSongSettingsMutation.mutate()}
+        onSave={() => saveSongSettingsMutation.mutate(songSettingsForm)}
         onSelectedSourceChange={setSelectedSongSourceID}
         onStart={() => createSongRunMutation.mutate()}
       />

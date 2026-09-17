@@ -1,3 +1,7 @@
+import { RefreshWarning } from "../../shared/ui/RefreshWarning";
+import { useServerDraft } from "../../shared/forms/useServerDraft";
+import { UnsavedChangesGuard } from "../../shared/forms/UnsavedChangesGuard";
+import { DraftFeedback } from "../../shared/forms/DraftFeedback";
 import { PageStatus } from "../../shared/ui/PageStatus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -18,13 +22,10 @@ import {
   bilibiliSettingsFromConfig,
   parseConfigJSON,
   bilibiliSettingsPayload,
+  cosSettingsFromConfig,
 } from "./model";
 import { requestJson } from "../../shared/api/client";
-import {
-  hasManagerPermission,
-  bytesToGB,
-  gbToBytes,
-} from "../../shared/console/format";
+import { hasManagerPermission, gbToBytes } from "../../shared/console/format";
 import { uiCopy } from "../../shared/console/copy";
 import { UploadSettingsPanel } from "./views";
 import { useLanguage } from "../../app/preferences";
@@ -34,8 +35,7 @@ export default function UploadsPage() {
   const queryClient = useQueryClient();
   const [credentialForm, setCredentialForm] =
     useState<CredentialForm>(emptyCredentialForm);
-  const [uploadSettingsForm, setUploadSettingsForm] =
-    useState<UploadSettingsForm>(emptyUploadSettingsForm);
+  const [selectedProfileId, setSelectedProfileId] = useState("");
   const meQuery = useQuery({
     queryKey: ["me"],
     queryFn: () => requestJson<MeResponse>("/api/v1/me"),
@@ -78,7 +78,11 @@ export default function UploadsPage() {
     () => profilesQuery.data?.items ?? [],
     [profilesQuery.data?.items],
   );
-  const uploadProfileId = Number(uploadSettingsForm.profile_id);
+  const uploadProfileId = Number(
+    selectedProfileId ||
+      (profiles.find((p) => !p.archived_at) ?? profiles[0])?.id ||
+      0,
+  );
   const uploadProfile = profiles.find(
     (profile) => profile.id === uploadProfileId,
   );
@@ -104,117 +108,122 @@ export default function UploadsPage() {
     enabled: Boolean(uploadProfileId && canEditCosModule),
     retry: false,
   });
+  const bilibiliConfig = bilibiliConfigQuery.data;
+  const bilibiliSettings = bilibiliSettingsFromConfig(
+    bilibiliConfig?.settings ?? {},
+  );
+  const bilibiliDraft = useServerDraft({
+    bilibili_enabled: bilibiliConfig?.enabled ?? false,
+    bilibili_credential_id: bilibiliConfig?.credential_id
+      ? String(bilibiliConfig.credential_id)
+      : "",
+    bilibili_title_template: bilibiliSettings.title_template,
+    bilibili_description_template: bilibiliSettings.description_template,
+    bilibili_tags: bilibiliSettings.tags,
+    bilibili_copyright: bilibiliSettings.copyright,
+    bilibili_source: bilibiliSettings.source,
+    bilibili_upload_limit: bilibiliSettings.upload_limit,
+  });
+  const cosDraft = useServerDraft(cosSettingsFromConfig(cosConfigQuery.data));
   useEffect(() => {
-    if (uploadSettingsForm.profile_id || profiles.length === 0) {
-      return;
-    }
-    const firstAvailableProfile =
-      profiles.find((profile) => !profile.archived_at) ?? profiles[0];
-    setUploadSettingsForm((form) => ({
-      ...form,
-      profile_id: String(firstAvailableProfile.id),
-    }));
-  }, [profiles, uploadSettingsForm.profile_id]);
-  useEffect(() => {
-    const config = bilibiliConfigQuery.data;
-    if (!config) {
-      return;
-    }
-    const settings = bilibiliSettingsFromConfig(config.settings ?? {});
-    setUploadSettingsForm((form) => ({
-      ...form,
-      bilibili_enabled: config.enabled,
-      bilibili_credential_id: config.credential_id
-        ? String(config.credential_id)
-        : "",
-      bilibili_title_template: settings.title_template,
-      bilibili_description_template: settings.description_template,
-      bilibili_tags: settings.tags,
-      bilibili_copyright: settings.copyright,
-      bilibili_source: settings.source,
-      bilibili_upload_limit: settings.upload_limit,
-    }));
-  }, [bilibiliConfigQuery.data]);
-  useEffect(() => {
-    const config = cosConfigQuery.data;
-    if (!config) {
-      return;
-    }
-    setUploadSettingsForm((form) => ({
-      ...form,
-      cos_enabled: config.enabled,
-      cos_credential_id: config.credential_id
-        ? String(config.credential_id)
-        : "",
-      cos_region: config.region ?? "",
-      cos_bucket: config.bucket ?? "",
-      cos_prefix: config.prefix ?? "",
-      cos_max_managed_gb:
-        bytesToGB(config.max_managed_bytes) || form.cos_max_managed_gb,
-    }));
-  }, [cosConfigQuery.data]);
+    if (!selectedProfileId && uploadProfileId)
+      setSelectedProfileId(String(uploadProfileId));
+  }, [selectedProfileId, uploadProfileId]);
+  const uploadSettingsForm: UploadSettingsForm = {
+    ...emptyUploadSettingsForm,
+    profile_id: String(uploadProfileId || ""),
+    ...bilibiliDraft.form,
+    ...cosDraft.form,
+  };
+  const credentialDirty =
+    JSON.stringify(credentialForm) !== JSON.stringify(emptyCredentialForm);
+  const settingsDirty = bilibiliDraft.dirty || cosDraft.dirty;
   const createCredentialMutation = useMutation({
-    mutationFn: () => {
-      const secret = parseConfigJSON(credentialForm.secret);
+    mutationFn: (submitted: CredentialForm) => {
+      const secret = parseConfigJSON(submitted.secret);
       return requestJson<Credential>("/api/v1/credentials", {
         method: "POST",
         body: JSON.stringify({
           scope: "USER",
-          platform: credentialForm.platform,
-          purpose:
-            credentialForm.platform === "bilibili" ? "PUBLISHER" : "STORAGE",
-          account_label: credentialForm.account_label,
-          external_uid: credentialForm.external_uid,
+          platform: submitted.platform,
+          purpose: submitted.platform === "bilibili" ? "PUBLISHER" : "STORAGE",
+          account_label: submitted.account_label,
+          external_uid: submitted.external_uid,
           secret,
         }),
       });
     },
-    onSuccess: () => {
-      setCredentialForm(emptyCredentialForm);
+    onSuccess: (_saved, submitted) => {
+      setCredentialForm((current) =>
+        current === submitted ? emptyCredentialForm : current,
+      );
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
     },
   });
   const saveBilibiliConfigMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: {
+      profileId: number;
+      form: typeof bilibiliDraft.form;
+    }) =>
       requestJson<BilibiliPublishingConfig>(
-        `/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`,
+        `/api/v1/recording-profiles/${submitted.profileId}/publishing/bilibili`,
         {
           method: "PUT",
           body: JSON.stringify({
-            enabled: uploadSettingsForm.bilibili_enabled,
-            credential_id: Number(
-              uploadSettingsForm.bilibili_credential_id || 0,
-            ),
-            settings: bilibiliSettingsPayload(uploadSettingsForm),
+            enabled: submitted.form.bilibili_enabled,
+            credential_id: Number(submitted.form.bilibili_credential_id || 0),
+            settings: bilibiliSettingsPayload({
+              ...emptyUploadSettingsForm,
+              ...submitted.form,
+            }),
           }),
         },
       ),
-    onSuccess: () => {
+    onSuccess: (saved, submitted) => {
+      queryClient.setQueryData(
+        ["upload-config", "bilibili", submitted.profileId],
+        saved,
+      );
+      bilibiliDraft.saved(submitted.form);
       void queryClient.invalidateQueries({
-        queryKey: ["upload-config", "bilibili", uploadProfileId],
+        queryKey: ["upload-config", "bilibili", submitted.profileId],
       });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
   const saveCosConfigMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: {
+      profileId: number;
+      form: typeof cosDraft.form;
+    }) =>
       requestJson<COSStorageConfig>(
-        `/api/v1/recording-profiles/${uploadProfileId}/storage/cos`,
+        `/api/v1/recording-profiles/${submitted.profileId}/storage/cos`,
         {
           method: "PUT",
           body: JSON.stringify({
-            enabled: uploadSettingsForm.cos_enabled,
-            credential_id: Number(uploadSettingsForm.cos_credential_id || 0),
-            region: uploadSettingsForm.cos_region,
-            bucket: uploadSettingsForm.cos_bucket,
-            prefix: uploadSettingsForm.cos_prefix,
-            max_managed_bytes: gbToBytes(uploadSettingsForm.cos_max_managed_gb),
+            enabled: submitted.form.cos_enabled,
+            credential_id: Number(submitted.form.cos_credential_id || 0),
+            region: submitted.form.cos_region,
+            bucket: submitted.form.cos_bucket,
+            prefix: submitted.form.cos_prefix,
+            max_managed_bytes: gbToBytes(submitted.form.cos_max_managed_gb),
           }),
         },
       ),
-    onSuccess: () => {
+    onSuccess: (saved, submitted) => {
+      queryClient.setQueryData(
+        ["upload-config", "cos", submitted.profileId],
+        saved,
+      );
+      if (
+        saved.enabled ||
+        JSON.stringify(submitted.form) ===
+          JSON.stringify(cosSettingsFromConfig(saved))
+      ) {
+        cosDraft.saved(submitted.form);
+      }
       void queryClient.invalidateQueries({
-        queryKey: ["upload-config", "cos", uploadProfileId],
+        queryKey: ["upload-config", "cos", submitted.profileId],
       });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
@@ -233,12 +242,52 @@ export default function UploadsPage() {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
     },
   });
+  const setUploadSettingsForm = (next: UploadSettingsForm) => {
+    if (next.profile_id !== uploadSettingsForm.profile_id) {
+      if (
+        saveBilibiliConfigMutation.isPending ||
+        saveCosConfigMutation.isPending
+      )
+        return;
+      if (
+        settingsDirty &&
+        !window.confirm(
+          language === "zh"
+            ? "切换配置将放弃未保存的上传设置，继续？"
+            : "Discard unsaved upload settings and switch profile?",
+        )
+      )
+        return;
+      bilibiliDraft.discard();
+      cosDraft.discard();
+      saveBilibiliConfigMutation.reset();
+      saveCosConfigMutation.reset();
+      setSelectedProfileId(next.profile_id);
+      return;
+    }
+    const bili = Object.fromEntries(
+      Object.keys(bilibiliDraft.form).map((key) => [
+        key,
+        next[key as keyof UploadSettingsForm],
+      ]),
+    ) as typeof bilibiliDraft.form;
+    const cos = Object.fromEntries(
+      Object.keys(cosDraft.form).map((key) => [
+        key,
+        next[key as keyof UploadSettingsForm],
+      ]),
+    ) as typeof cosDraft.form;
+    if (JSON.stringify(bili) !== JSON.stringify(bilibiliDraft.form))
+      bilibiliDraft.change(bili);
+    if (JSON.stringify(cos) !== JSON.stringify(cosDraft.form))
+      cosDraft.change(cos);
+  };
   if (!user) return null;
   if (
-    profilesQuery.isError ||
-    credentialsQuery.isError ||
-    bilibiliConfigQuery.isError ||
-    cosConfigQuery.isError
+    (profilesQuery.isError && !profilesQuery.data) ||
+    (credentialsQuery.isError && !credentialsQuery.data) ||
+    (bilibiliConfigQuery.isError && !bilibiliConfigQuery.data) ||
+    (cosConfigQuery.isError && !cosConfigQuery.data)
   )
     return (
       <PageStatus
@@ -259,6 +308,50 @@ export default function UploadsPage() {
     return <PageStatus loading />;
   return (
     <div className="feature-page space-y-6">
+      <RefreshWarning
+        failed={[
+          profilesQuery,
+          credentialsQuery,
+          bilibiliConfigQuery,
+          cosConfigQuery,
+        ].some((query) => query.isError)}
+        retry={() =>
+          [profilesQuery, credentialsQuery, bilibiliConfigQuery, cosConfigQuery]
+            .filter((query) => query.isError)
+            .forEach((query) => {
+              void query.refetch();
+            })
+        }
+      />
+      <UnsavedChangesGuard dirty={settingsDirty || credentialDirty} />
+      <DraftFeedback
+        title={ui.bilibiliPublishing}
+        dirty={bilibiliDraft.dirty}
+        saved={saveBilibiliConfigMutation.isSuccess}
+        pending={saveBilibiliConfigMutation.isPending}
+        onDiscard={() => {
+          bilibiliDraft.discard();
+          saveBilibiliConfigMutation.reset();
+        }}
+      />
+      <DraftFeedback
+        title={ui.cosStorage}
+        dirty={cosDraft.dirty}
+        saved={saveCosConfigMutation.isSuccess}
+        pending={saveCosConfigMutation.isPending}
+        onDiscard={() => {
+          cosDraft.discard();
+          saveCosConfigMutation.reset();
+        }}
+      />
+      {saveCosConfigMutation.isSuccess &&
+        !saveCosConfigMutation.data.enabled && (
+          <p role="status" className="text-sm text-muted">
+            {language === "zh"
+              ? "COS 已禁用。禁用操作不保存其他配置字段；这些修改仍保留为草稿。"
+              : "COS is disabled. Disabling does not save other fields; those edits remain a draft."}
+          </p>
+        )}
       <UploadSettingsPanel
         bilibiliConfigError={saveBilibiliConfigMutation.isError}
         bilibiliConfigPending={saveBilibiliConfigMutation.isPending}
@@ -281,11 +374,21 @@ export default function UploadsPage() {
         onCredentialFormChange={setCredentialForm}
         onCreateCredential={(event) => {
           event.preventDefault();
-          createCredentialMutation.mutate();
+          createCredentialMutation.mutate(credentialForm);
         }}
         onReconcile={() => reconcileUploadModulesMutation.mutate()}
-        onSaveBilibiliConfig={() => saveBilibiliConfigMutation.mutate()}
-        onSaveCosConfig={() => saveCosConfigMutation.mutate()}
+        onSaveBilibiliConfig={() =>
+          saveBilibiliConfigMutation.mutate({
+            profileId: uploadProfileId,
+            form: bilibiliDraft.form,
+          })
+        }
+        onSaveCosConfig={() =>
+          saveCosConfigMutation.mutate({
+            profileId: uploadProfileId,
+            form: cosDraft.form,
+          })
+        }
         onSettingsFormChange={setUploadSettingsForm}
       />
     </div>

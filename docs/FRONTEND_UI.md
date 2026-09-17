@@ -202,14 +202,14 @@ built application against a fresh database. The isolated preview is local, not a
 
 Recording/account editor drafts survive background refresh. Failed review/protection/download requests produce an
 error message without changing the displayed resource state. No new business pipeline or database schema is introduced.
-Full UI interaction polish and public creative content remain later checkpoints.
+Further visual refinement and public creative content remain later checkpoints.
 
 For this batch, local isolated preview is the default test deployment. A remote host/domain or production release
 requires the user's destination choice; do not infer that test deployment authorizes production data access.
 
 ### Settings draft protection
 
-System storage and TLS settings are the first settings forms to use an in-memory draft separate from server state.
+System storage/TLS, Bilibili/COS and song settings use an in-memory draft separate from server state.
 Polling refreshes untouched fields only when there is no local draft. Saving submits a snapshot; success updates
 the query cache and clears only that exact submitted draft, preserving edits made while the request was pending.
 Failed saves retain the draft. Each form shows unsaved/saved feedback and an explicit discard action.
@@ -218,3 +218,13 @@ uses the browser's native beforeunload warning. Session expiry/logout still clea
 Credential secrets remain memory-only; no localStorage/sessionStorage draft persistence is introduced.
 The guard also covers typed TLS credential material. No endpoint, payload, database or deployment behavior changes.
 This iteration is local-only at the user's request; do not rerun production deployment.
+
+The completion batch extends draft protection to upload module settings, song settings, profile/account editors,
+credential creation and review cut inputs. Bilibili and COS save/discard independently; changing the selected profile
+confirms discarding drafts and is disallowed during a save. Snapshots include the target profile ID. Create/editor
+forms disable their controls while submitting; close actions confirm discarding changed fields. Background fetch
+failures retain previously loaded pages and drafts. Existing review, cleanup, role and empty-password rules remain.
+This completes migration of the existing console, not development of new public creative pages or live analytics.
+
+COS disabling preserves the existing API contract: only the enabled state is saved. Other edited fields stay dirty
+until explicitly discarded or saved with COS enabled; the UI must not report those fields as saved.

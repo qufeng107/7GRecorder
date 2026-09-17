@@ -92,3 +92,20 @@ export function bilibiliSettingsPayload(form: UploadSettingsForm) {
     ),
   };
 }
+
+export function cosSettingsFromConfig(
+  config?: import("../../shared/api/contracts.generated").COSStorageConfig,
+) {
+  return {
+    cos_enabled: config?.enabled ?? false,
+    cos_credential_id: config?.credential_id
+      ? String(config.credential_id)
+      : "",
+    cos_region: config?.region ?? "",
+    cos_bucket: config?.bucket ?? "",
+    cos_prefix: config?.prefix ?? "",
+    cos_max_managed_gb: config
+      ? Math.max(0, Math.round(config.max_managed_bytes / 1024 ** 3))
+      : emptyUploadSettingsForm.cos_max_managed_gb,
+  };
+}

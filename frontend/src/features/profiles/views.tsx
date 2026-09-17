@@ -1,3 +1,4 @@
+import { Modal } from "../../shared/ui/Modal";
 import {
   type ProfileForm,
   type AdminCopy,
@@ -48,210 +49,217 @@ export function ProfileEditorDialog(props: {
     );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
+    <Modal
+      title={
+        props.isEditing ? props.labels.editProfile : props.labels.newProfile
+      }
+      onClose={props.onCancel}
+    >
       <form
-        role="dialog"
-        aria-modal="true"
-        aria-label={
-          props.isEditing ? props.labels.editProfile : props.labels.newProfile
-        }
         className="w-full max-w-xl rounded-md border border-border bg-panel p-4 shadow-xl"
         onSubmit={props.onSubmit}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
-          <div>
-            <h2 className="text-base font-semibold">
-              {props.isEditing
-                ? props.labels.editProfile
-                : props.labels.newProfile}
-            </h2>
-            {isArchived ? (
-              <p className="mt-1 text-xs font-medium text-muted">
-                {props.labels.archivedProfile}
-              </p>
-            ) : null}
-          </div>
-          <button
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
-            type="button"
-            onClick={props.onCancel}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">{props.labels.close}</span>
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3">
-          {props.showOwner ? (
-            <label className="flex flex-col gap-1 text-sm font-medium">
-              {props.labels.owner}
-              <select
-                className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-                value={props.form.owner_user_id}
-                onChange={(event) =>
-                  update("owner_user_id", event.target.value)
-                }
-              >
-                {selectedOwnerMissing ? (
-                  <option value={props.form.owner_user_id}>
-                    {props.labels.currentOwner}
-                  </option>
-                ) : null}
-                {ownerOptions.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.username} ({account.role})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <TextField
-            label={props.labels.name}
-            value={props.form.name}
-            onChange={(value) => update("name", value)}
-          />
-          <TextField
-            label={props.labels.roomId}
-            value={props.form.room_id}
-            onChange={(value) => update("room_id", value)}
-          />
-          <TextField
-            label={props.labels.streamer}
-            value={props.form.streamer_name}
-            onChange={(value) => update("streamer_name", value)}
-          />
-          <TextField
-            label={props.labels.streamerUid}
-            value={props.form.streamer_uid}
-            onChange={(value) => update("streamer_uid", value)}
-          />
-          <TextField
-            label={props.labels.timezone}
-            value={props.form.timezone}
-            onChange={(value) => update("timezone", value)}
-          />
-          <TextField
-            label={props.labels.publicSlug}
-            value={props.form.public_slug}
-            onChange={(value) => update("public_slug", value)}
-          />
-          <SelectField
-            label={props.labels.quality}
-            value={props.form.quality}
-            onChange={(value) => update("quality", value)}
-          />
-          <NumberField
-            label={props.labels.segmentSeconds}
-            min={60}
-            value={props.form.segment_duration_sec}
-            onChange={(value) => update("segment_duration_sec", value)}
-          />
-          <NumberField
-            label={props.labels.finalizeGraceSeconds}
-            min={0}
-            value={props.form.finalize_grace_period_sec}
-            onChange={(value) => update("finalize_grace_period_sec", value)}
-          />
-          <ToggleField
-            label={props.labels.enabled}
-            checked={props.form.enabled}
-            onChange={(value) => update("enabled", value)}
-          />
-          <ToggleField
-            label={props.labels.autoRecord}
-            checked={props.form.auto_record}
-            onChange={(value) => update("auto_record", value)}
-          />
-          <ToggleField
-            label={props.labels.recordDanmaku}
-            checked={props.form.record_danmaku}
-            onChange={(value) => update("record_danmaku", value)}
-          />
-          <ToggleField
-            label={props.labels.publicPage}
-            checked={props.form.public_enabled}
-            onChange={(value) => update("public_enabled", value)}
-          />
-        </div>
-
-        {props.saveError ? (
-          <p className="mt-3 text-sm text-red-700">
-            {props.labels.profileSaveFailed}
-          </p>
-        ) : null}
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <div>
-            {props.profile && isArchived ? (
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.restorePending}
-                type="button"
-                onClick={() => props.onRestore(props.profile!.id)}
-              >
-                <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
-                {props.labels.restoreProfile}
-              </button>
-            ) : null}
-            {props.profile && !isArchived ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {confirmArchive ? (
-                  <>
-                    <button
-                      className="inline-flex h-9 items-center justify-center rounded-md bg-red-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
-                      disabled={props.archivePending}
-                      type="button"
-                      onClick={() => props.onArchive(props.profile!.id)}
-                    >
-                      {props.labels.confirmArchive}
-                    </button>
-                    <button
-                      className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
-                      type="button"
-                      onClick={() => setConfirmArchive(false)}
-                    >
-                      {props.labels.cancel}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:border-red-700 disabled:opacity-60"
-                    disabled={props.archivePending}
-                    type="button"
-                    onClick={() => setConfirmArchive(true)}
-                  >
-                    <Archive className="h-4 w-4" aria-hidden="true" />
-                    {props.labels.archiveProfile}
-                  </button>
-                )}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-2">
+        <fieldset
+          className="min-w-0"
+          disabled={
+            props.isSaving || props.archivePending || props.restorePending
+          }
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
+            <div>
+              <h2 className="text-base font-semibold">
+                {props.isEditing
+                  ? props.labels.editProfile
+                  : props.labels.newProfile}
+              </h2>
+              {isArchived ? (
+                <p className="mt-1 text-xs font-medium text-muted">
+                  {props.labels.archivedProfile}
+                </p>
+              ) : null}
+            </div>
             <button
-              className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
               type="button"
               onClick={props.onCancel}
             >
-              {props.labels.cancel}
-            </button>
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-              disabled={props.isSaving}
-              type="submit"
-            >
-              {props.isEditing ? (
-                <Save className="h-4 w-4" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              {props.isEditing ? props.labels.save : props.labels.create}
+              <X className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only">{props.labels.close}</span>
             </button>
           </div>
-        </div>
+
+          <div className="mt-4 grid gap-3">
+            {props.showOwner ? (
+              <label className="flex flex-col gap-1 text-sm font-medium">
+                {props.labels.owner}
+                <select
+                  className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+                  value={props.form.owner_user_id}
+                  onChange={(event) =>
+                    update("owner_user_id", event.target.value)
+                  }
+                >
+                  {selectedOwnerMissing ? (
+                    <option value={props.form.owner_user_id}>
+                      {props.labels.currentOwner}
+                    </option>
+                  ) : null}
+                  {ownerOptions.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.username} ({account.role})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <TextField
+              label={props.labels.name}
+              value={props.form.name}
+              onChange={(value) => update("name", value)}
+            />
+            <TextField
+              label={props.labels.roomId}
+              value={props.form.room_id}
+              onChange={(value) => update("room_id", value)}
+            />
+            <TextField
+              label={props.labels.streamer}
+              value={props.form.streamer_name}
+              onChange={(value) => update("streamer_name", value)}
+            />
+            <TextField
+              label={props.labels.streamerUid}
+              value={props.form.streamer_uid}
+              onChange={(value) => update("streamer_uid", value)}
+            />
+            <TextField
+              label={props.labels.timezone}
+              value={props.form.timezone}
+              onChange={(value) => update("timezone", value)}
+            />
+            <TextField
+              label={props.labels.publicSlug}
+              value={props.form.public_slug}
+              onChange={(value) => update("public_slug", value)}
+            />
+            <SelectField
+              label={props.labels.quality}
+              value={props.form.quality}
+              onChange={(value) => update("quality", value)}
+            />
+            <NumberField
+              label={props.labels.segmentSeconds}
+              min={60}
+              value={props.form.segment_duration_sec}
+              onChange={(value) => update("segment_duration_sec", value)}
+            />
+            <NumberField
+              label={props.labels.finalizeGraceSeconds}
+              min={0}
+              value={props.form.finalize_grace_period_sec}
+              onChange={(value) => update("finalize_grace_period_sec", value)}
+            />
+            <ToggleField
+              label={props.labels.enabled}
+              checked={props.form.enabled}
+              onChange={(value) => update("enabled", value)}
+            />
+            <ToggleField
+              label={props.labels.autoRecord}
+              checked={props.form.auto_record}
+              onChange={(value) => update("auto_record", value)}
+            />
+            <ToggleField
+              label={props.labels.recordDanmaku}
+              checked={props.form.record_danmaku}
+              onChange={(value) => update("record_danmaku", value)}
+            />
+            <ToggleField
+              label={props.labels.publicPage}
+              checked={props.form.public_enabled}
+              onChange={(value) => update("public_enabled", value)}
+            />
+          </div>
+
+          {props.saveError ? (
+            <p className="mt-3 text-sm text-red-700">
+              {props.labels.profileSaveFailed}
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <div>
+              {props.profile && isArchived ? (
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
+                  disabled={props.restorePending}
+                  type="button"
+                  onClick={() => props.onRestore(props.profile!.id)}
+                >
+                  <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
+                  {props.labels.restoreProfile}
+                </button>
+              ) : null}
+              {props.profile && !isArchived ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {confirmArchive ? (
+                    <>
+                      <button
+                        className="inline-flex h-9 items-center justify-center rounded-md bg-red-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
+                        disabled={props.archivePending}
+                        type="button"
+                        onClick={() => props.onArchive(props.profile!.id)}
+                      >
+                        {props.labels.confirmArchive}
+                      </button>
+                      <button
+                        className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
+                        type="button"
+                        onClick={() => setConfirmArchive(false)}
+                      >
+                        {props.labels.cancel}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:border-red-700 disabled:opacity-60"
+                      disabled={props.archivePending}
+                      type="button"
+                      onClick={() => setConfirmArchive(true)}
+                    >
+                      <Archive className="h-4 w-4" aria-hidden="true" />
+                      {props.labels.archiveProfile}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
+                type="button"
+                onClick={props.onCancel}
+              >
+                {props.labels.cancel}
+              </button>
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={props.isSaving}
+                type="submit"
+              >
+                {props.isEditing ? (
+                  <Save className="h-4 w-4" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                {props.isEditing ? props.labels.save : props.labels.create}
+              </button>
+            </div>
+          </div>
+        </fieldset>
       </form>
-    </div>
+    </Modal>
   );
 }
 

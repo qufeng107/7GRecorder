@@ -748,3 +748,7 @@ The current handlers are manually bound and have no usable exported OpenAPI sche
 This limited generator is the transitional typed-wrapper route; response envelopes remain explicit in the frontend
 transport. CI regenerates and checks the committed output. UI-only combined rows, forms and response envelopes remain explicit frontend types; request/response validation is
 still owned by the server. The generator preserves optional/null fields and excludes JSON-hidden secrets.
+
+COS disabled updates retain their existing API semantics: `enabled=false` disables an existing configuration but does
+not persist the other supplied fields or create a new COS profile. The frontend must display the returned state,
+retain any unpersisted edits as a draft and explain this result rather than reporting those fields saved.

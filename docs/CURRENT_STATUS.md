@@ -205,9 +205,15 @@ Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for th
 Work is on `frontend/settings-drafts`; formal deployment is paused by user instruction.
 System storage/TLS forms now retain local drafts through polling and background errors, preserve newer edits when an
 older save completes, show per-form save feedback, and confirm route departure. Refresh/close uses beforeunload.
-TLS credential material remains in memory only. Other settings modules retain their prior behavior until migrated.
+Upload Bilibili/COS and song settings now use the same draft handling. Profile switches confirm discarding changes
+and cannot change the submission target during a save. Profile/account dialogs support focus containment, Escape
+and discard confirmation; account passwords and credential material remain in memory only. Unapplied review cuts
+block approval and warn before departure. Mobile account tables scroll within their panel. Background fetch failures
+retain loaded module data and edits. COS disabling explicitly leaves other edited fields unsaved, matching the API.
+All existing console modules are migrated; the legacy dashboard is retained only for compatibility component tests.
+New public creative pages and live analytics remain future feature work.
 
 Local validation for this iteration passed: frontend lint/typecheck/build, 20 unit/component tests,
-17 synthetic browser tests and 3 real-backend integration tests. The local fixture UI can be opened at
+24 synthetic browser tests and 4 real-backend integration tests. The local fixture UI can be opened at
 `http://127.0.0.1:5173/admin/system`; the isolated integration process shuts down after its tests.
 No remote push or deployment was performed for this iteration.

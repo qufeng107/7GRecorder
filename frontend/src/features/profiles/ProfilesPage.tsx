@@ -1,3 +1,5 @@
+import { RefreshWarning } from "../../shared/ui/RefreshWarning";
+import { UnsavedChangesGuard } from "../../shared/forms/UnsavedChangesGuard";
 import { PageStatus } from "../../shared/ui/PageStatus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
@@ -23,6 +25,7 @@ import { useLanguage } from "../../app/preferences";
 export default function ProfilesPage() {
   const language = useLanguage();
   const queryClient = useQueryClient();
+  const [editorDirty, setEditorDirty] = useState(false);
   const [profileSearch, setProfileSearch] = useState("");
   const [profileSort, setProfileSort] = useState<ProfileSortKey>("name_asc");
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(
@@ -138,7 +141,10 @@ export default function ProfilesPage() {
     saveProfileMutation.mutate();
   };
   if (!user) return null;
-  if (profilesQuery.isError || accountsQuery.isError)
+  if (
+    (profilesQuery.isError && !profilesQuery.data) ||
+    (accountsQuery.isError && !accountsQuery.data)
+  )
     return (
       <PageStatus
         retry={() => {
@@ -151,6 +157,17 @@ export default function ProfilesPage() {
     return <PageStatus loading />;
   return (
     <div className="feature-page space-y-6">
+      <RefreshWarning
+        failed={[profilesQuery, accountsQuery].some((query) => query.isError)}
+        retry={() =>
+          [profilesQuery, accountsQuery]
+            .filter((query) => query.isError)
+            .forEach((query) => {
+              void query.refetch();
+            })
+        }
+      />
+      <UnsavedChangesGuard dirty={profileEditorOpen && editorDirty} />
       <ProfileListPanel
         labels={ui}
         canEdit={canEditRecordingProfiles}
@@ -170,6 +187,7 @@ export default function ProfilesPage() {
             ...emptyProfileForm,
             owner_user_id: String(user.id),
           });
+          setEditorDirty(false);
           setProfileEditorOpen(true);
         }}
         onSelect={(profile) => {
@@ -178,6 +196,7 @@ export default function ProfilesPage() {
           }
           setSelectedProfileId(profile.id);
           setProfileForm(profileToForm(profile));
+          setEditorDirty(false);
           setProfileEditorOpen(true);
         }}
         onSearchChange={setProfileSearch}
@@ -198,11 +217,30 @@ export default function ProfilesPage() {
           showOwner={Boolean(canManageSystemSettings)}
           onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
           onCancel={() => {
+            if (
+              saveProfileMutation.isPending ||
+              archiveProfileMutation.isPending ||
+              restoreProfileMutation.isPending
+            )
+              return;
+            if (
+              editorDirty &&
+              !window.confirm(
+                language === "zh"
+                  ? "放弃未保存的修改？"
+                  : "Discard unsaved changes?",
+              )
+            )
+              return;
+            setEditorDirty(false);
             setProfileEditorOpen(false);
             setSelectedProfileId(null);
             setProfileForm(emptyProfileForm);
           }}
-          onChange={setProfileForm}
+          onChange={(next) => {
+            setEditorDirty(true);
+            setProfileForm(next);
+          }}
           onRestore={(profileId) => restoreProfileMutation.mutate(profileId)}
           onSubmit={onProfileSubmit}
         />

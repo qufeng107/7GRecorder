@@ -165,35 +165,40 @@ export function SiteTLSPanel(props: {
             className="grid gap-3 border-t border-border pt-4"
             onSubmit={props.onCreateCredential}
           >
-            <h3 className="text-sm font-semibold">
-              {props.labels.tlsCredential}
-            </h3>
-            <TextField
-              label={props.labels.tlsCredentialLabel}
-              value={props.credentialLabel}
-              onChange={props.onCredentialLabelChange}
-            />
-            <JSONTextArea
-              label={props.labels.tlsCredentialSecret}
-              value={props.credentialSecret}
-              onChange={props.onCredentialSecretChange}
-            />
-            <p className="text-xs text-muted">
-              {props.labels.credentialSecretHint}
-            </p>
-            {props.credentialCreateError ? (
-              <p className="text-sm text-red-700">
-                {props.labels.tlsCredentialCreateFailed}
-              </p>
-            ) : null}
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold disabled:opacity-60"
+            <fieldset
+              className="min-w-0 space-y-3"
               disabled={props.credentialCreatePending}
-              type="submit"
             >
-              <Lock className="h-4 w-4" aria-hidden="true" />
-              {props.labels.createTLSCredential}
-            </button>
+              <h3 className="text-sm font-semibold">
+                {props.labels.tlsCredential}
+              </h3>
+              <TextField
+                label={props.labels.tlsCredentialLabel}
+                value={props.credentialLabel}
+                onChange={props.onCredentialLabelChange}
+              />
+              <JSONTextArea
+                label={props.labels.tlsCredentialSecret}
+                value={props.credentialSecret}
+                onChange={props.onCredentialSecretChange}
+              />
+              <p className="text-xs text-muted">
+                {props.labels.credentialSecretHint}
+              </p>
+              {props.credentialCreateError ? (
+                <p className="text-sm text-red-700">
+                  {props.labels.tlsCredentialCreateFailed}
+                </p>
+              ) : null}
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold disabled:opacity-60"
+                disabled={props.credentialCreatePending}
+                type="submit"
+              >
+                <Lock className="h-4 w-4" aria-hidden="true" />
+                {props.labels.createTLSCredential}
+              </button>
+            </fieldset>
           </form>
         </div>
       </div>

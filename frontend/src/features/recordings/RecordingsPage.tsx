@@ -1,3 +1,5 @@
+import { RefreshWarning } from "../../shared/ui/RefreshWarning";
+import { UnsavedChangesGuard } from "../../shared/forms/UnsavedChangesGuard";
 import { PageStatus } from "../../shared/ui/PageStatus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -37,6 +39,7 @@ import { useLanguage } from "../../app/preferences";
 export default function RecordingsPage() {
   const language = useLanguage();
   const queryClient = useQueryClient();
+  const [reviewDraftWarning, setReviewDraftWarning] = useState(false);
   const [recordingSearch, setRecordingSearch] = useState("");
   const [recordingSort, setRecordingSort] =
     useState<RecordingSortKey>("started_desc");
@@ -252,6 +255,7 @@ export default function RecordingsPage() {
     mutationFn: (request: {
       uploadSourceId: number;
       cuts: UploadSourceEditCut[];
+      draft: string;
     }) =>
       requestJson<UploadSourceItem>(
         `/api/v1/upload-sources/${request.uploadSourceId}/actions/apply-edit`,
@@ -263,7 +267,8 @@ export default function RecordingsPage() {
     onSuccess: (_result, request) => {
       setEditDrafts((current) => {
         const next = { ...current };
-        delete next[request.uploadSourceId];
+        if (next[request.uploadSourceId] === request.draft)
+          delete next[request.uploadSourceId];
         return next;
       });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
@@ -306,9 +311,9 @@ export default function RecordingsPage() {
   };
   if (!user) return null;
   if (
-    recordingsQuery.isError ||
-    rawRecordingsQuery.isError ||
-    jobsQuery.isError
+    (recordingsQuery.isError && !recordingsQuery.data) ||
+    (rawRecordingsQuery.isError && !rawRecordingsQuery.data) ||
+    (jobsQuery.isError && !jobsQuery.data)
   )
     return (
       <PageStatus
@@ -327,6 +332,30 @@ export default function RecordingsPage() {
     return <PageStatus loading />;
   return (
     <div className="feature-page space-y-6">
+      <RefreshWarning
+        failed={[recordingsQuery, rawRecordingsQuery, jobsQuery].some(
+          (query) => query.isError,
+        )}
+        retry={() =>
+          [recordingsQuery, rawRecordingsQuery, jobsQuery]
+            .filter((query) => query.isError)
+            .forEach((query) => {
+              void query.refetch();
+            })
+        }
+      />
+      {reviewDraftWarning && (
+        <p role="alert">
+          {language === "zh"
+            ? "还有未应用的剪辑区间，请先应用剪辑或清空输入，再完成审核。"
+            : "Apply or clear the draft cuts before approving this source."}
+        </p>
+      )}
+      <UnsavedChangesGuard
+        dirty={Object.values(editDrafts).some(
+          (value) => value.trim().length > 0,
+        )}
+      />
       {[
         protectRecordingMutation,
         requireRecordingReviewMutation,
@@ -395,6 +424,11 @@ export default function RecordingsPage() {
           cosFileDownloadUrlMutation.mutate({ fileId })
         }
         onApproveReview={(recording) => {
+          if (editDrafts[recording.upload_source_id ?? 0]?.trim()) {
+            setReviewDraftWarning(true);
+            return;
+          }
+          setReviewDraftWarning(false);
           if (recording.upload_source_id) {
             approveUploadSourceReviewMutation.mutate(
               recording.upload_source_id,
@@ -409,7 +443,8 @@ export default function RecordingsPage() {
           if (cuts.length === 0) {
             return;
           }
-          applyUploadSourceEditMutation.mutate({ uploadSourceId, cuts });
+          setReviewDraftWarning(false);
+          applyUploadSourceEditMutation.mutate({ uploadSourceId, cuts, draft });
         }}
         onEditDraftChange={(uploadSourceId, value) =>
           setEditDrafts((current) => ({ ...current, [uploadSourceId]: value }))

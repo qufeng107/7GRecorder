@@ -307,7 +307,7 @@ song processing FAILED
 公开主播页验证移动端、键盘访问、减弱动画和后台/动画资源加载隔离。
 测试不使用生产凭证或文件，mock 不可向生产透传；UI mock 不能替代 API 契约和联调验证。
 具体实施顺序见 `FRONTEND_UI.md`；Jobs、全部控制台路由、会话与公开路由隔离的浏览器测试及本地隔离环境已实现，
-运行方法见 `FRONTEND_DEVELOPMENT.md`。审核/清理等其余模块的浏览器覆盖随模块迁移补齐。
+运行方法见 `FRONTEND_DEVELOPMENT.md`。现有模块的审核、清理、权限、设置及编辑草稿均已加入浏览器回归。
 
 保持精简：
 
@@ -461,3 +461,9 @@ Frontend migration regression gate additionally covers:
 System-settings draft tests cover polling during edits, failed saves, edits during pending saves, latest-server
 discard, independent TLS/storage state, cancelled/confirmed route departure, and beforeunload registration.
 Secrets must not be persisted in browser storage. Run these locally without production credentials.
+
+Completion regression tests additionally cover independent Bilibili/COS drafts, profile switching confirmation,
+submission target stability, pending-save edits, song save failure/recovery, profile/account Escape confirmation,
+unapplied review cuts blocking approval, credential clearing, and every console module at a 390px dark viewport.
+Real-backend integration verifies disabled COS only persists the disabled state (other edits remain dirty), plus
+song prefix normalization and reload persistence. Synthetic fixtures must match these API semantics.

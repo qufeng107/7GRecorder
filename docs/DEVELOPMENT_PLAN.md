@@ -350,7 +350,7 @@ AI resource class = lowest priority；直播期间默认不启动新 AI Job。
 ## 13. Phase 10 — Public / Creative Frontend
 
 当前前端迭代优先完成模块化基础，再推进公开宣传页；保留 React/TypeScript/Vite。
-本地环境、共享布局与全部现有控制台模块已完成迁移；后续推进公开页面及交互细化。当前范围与启动方式见 `FRONTEND_DEVELOPMENT.md`。顺序：
+本地环境、共享布局与全部现有控制台模块已完成迁移，包括设置草稿、编辑弹窗、审核输入保护及移动端回归；后续推进公开页面及交互细化。当前范围与启动方式见 `FRONTEND_DEVELOPMENT.md`。顺序：
 
 1. 本地工具链、锁文件、合成数据模式、隔离联调配置与浏览器 smoke；
 2. 共享 API 契约、控制台布局、独立页面路由，以 Jobs 为首个迁移候选；

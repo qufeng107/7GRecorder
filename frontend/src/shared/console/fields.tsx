@@ -57,6 +57,7 @@ export function JSONTextArea(props: {
     <label className="flex flex-col gap-1 text-sm font-medium">
       {props.label}
       <textarea
+        aria-label={props.label}
         className="min-h-28 rounded-md border border-border bg-white px-3 py-2 font-mono text-xs font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
         disabled={props.disabled}
         value={props.value}
@@ -204,6 +205,7 @@ export function TextAreaField(props: {
     <label className="flex flex-col gap-1 text-sm font-medium">
       {props.label}
       <textarea
+        aria-label={props.label}
         className="min-h-28 rounded-md border border-border bg-white px-3 py-2 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
         disabled={props.disabled}
         value={props.value}

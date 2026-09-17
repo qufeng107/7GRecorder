@@ -1,3 +1,5 @@
+import { RefreshWarning } from "../../shared/ui/RefreshWarning";
+import { UnsavedChangesGuard } from "../../shared/forms/UnsavedChangesGuard";
 import { PageStatus } from "../../shared/ui/PageStatus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
@@ -26,6 +28,7 @@ import { useLanguage } from "../../app/preferences";
 export default function AccountsPage() {
   const language = useLanguage();
   const queryClient = useQueryClient();
+  const [editorDirty, setEditorDirty] = useState(false);
   const [accountSearch, setAccountSearch] = useState("");
   const [accountSort, setAccountSort] =
     useState<AccountSortKey>("username_asc");
@@ -127,7 +130,7 @@ export default function AccountsPage() {
     });
   };
   if (!user) return null;
-  if (accountsQuery.isError)
+  if (accountsQuery.isError && !accountsQuery.data)
     return (
       <PageStatus
         retry={() => {
@@ -138,6 +141,22 @@ export default function AccountsPage() {
   if (accountsQuery.isLoading) return <PageStatus loading />;
   return (
     <div className="feature-page space-y-6">
+      <RefreshWarning
+        failed={[accountsQuery].some((query) => query.isError)}
+        retry={() =>
+          [accountsQuery]
+            .filter((query) => query.isError)
+            .forEach((query) => {
+              void query.refetch();
+            })
+        }
+      />
+      <UnsavedChangesGuard
+        dirty={
+          (accountEditorOpen && editorDirty) ||
+          JSON.stringify(accountForm) !== JSON.stringify(emptyAccountForm)
+        }
+      />
       <AccountsPanel
         accountForm={accountForm}
         accounts={visibleAccounts}
@@ -158,6 +177,7 @@ export default function AccountsPage() {
         onEdit={(account) => {
           setSelectedAccountId(account.id);
           setAccountEditForm(accountToEditForm(account));
+          setEditorDirty(false);
           setAccountEditorOpen(true);
         }}
         onToggleEnabled={(account) =>
@@ -180,11 +200,25 @@ export default function AccountsPage() {
           labels={ui}
           saveError={updateAccountMutation.isError}
           onCancel={() => {
+            if (updateAccountMutation.isPending) return;
+            if (
+              editorDirty &&
+              !window.confirm(
+                language === "zh"
+                  ? "放弃未保存的修改？"
+                  : "Discard unsaved changes?",
+              )
+            )
+              return;
+            setEditorDirty(false);
             setAccountEditorOpen(false);
             setSelectedAccountId(null);
             setAccountEditForm(emptyAccountEditForm);
           }}
-          onChange={setAccountEditForm}
+          onChange={(next) => {
+            setEditorDirty(true);
+            setAccountEditForm(next);
+          }}
           onSubmit={onAccountEditSubmit}
         />
       ) : null}

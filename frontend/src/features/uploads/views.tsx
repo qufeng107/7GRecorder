@@ -134,6 +134,7 @@ export function UploadSettingsPanel(props: {
         <label className="mt-4 flex flex-col gap-1 text-sm font-medium">
           {props.labels.uploadProfile}
           <select
+            disabled={props.bilibiliConfigPending || props.cosConfigPending}
             className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
             value={props.settingsForm.profile_id}
             onChange={(event) =>
@@ -380,56 +381,61 @@ export function UploadSettingsPanel(props: {
           className="mt-5 grid gap-3 border-t border-border pt-4"
           onSubmit={props.onCreateCredential}
         >
-          <h3 className="text-sm font-semibold">
-            {props.labels.newCredential}
-          </h3>
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            {props.labels.platform}
-            <select
-              className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-              value={props.credentialForm.platform}
-              onChange={(event) =>
-                updateCredential(
-                  "platform",
-                  event.target.value as CredentialForm["platform"],
-                )
-              }
-            >
-              <option value="bilibili">Bilibili</option>
-              <option value="tencent_cos">Tencent COS</option>
-            </select>
-          </label>
-          <TextField
-            label={props.labels.accountLabel}
-            value={props.credentialForm.account_label}
-            onChange={(value) => updateCredential("account_label", value)}
-          />
-          <TextField
-            label={props.labels.externalUid}
-            value={props.credentialForm.external_uid}
-            onChange={(value) => updateCredential("external_uid", value)}
-          />
-          <JSONTextArea
-            label={props.labels.credentialSecret}
-            value={props.credentialForm.secret}
-            onChange={(value) => updateCredential("secret", value)}
-          />
-          <p className="text-xs text-muted">
-            {props.labels.credentialSecretHint}
-          </p>
-          {props.credentialCreateError ? (
-            <p className="text-sm text-red-700">
-              {props.labels.credentialCreateFailed}
-            </p>
-          ) : null}
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+          <fieldset
+            className="min-w-0 space-y-3"
             disabled={props.credentialCreatePending}
-            type="submit"
           >
-            <Save className="h-4 w-4" aria-hidden="true" />
-            {props.labels.createCredential}
-          </button>
+            <h3 className="text-sm font-semibold">
+              {props.labels.newCredential}
+            </h3>
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              {props.labels.platform}
+              <select
+                className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
+                value={props.credentialForm.platform}
+                onChange={(event) =>
+                  updateCredential(
+                    "platform",
+                    event.target.value as CredentialForm["platform"],
+                  )
+                }
+              >
+                <option value="bilibili">Bilibili</option>
+                <option value="tencent_cos">Tencent COS</option>
+              </select>
+            </label>
+            <TextField
+              label={props.labels.accountLabel}
+              value={props.credentialForm.account_label}
+              onChange={(value) => updateCredential("account_label", value)}
+            />
+            <TextField
+              label={props.labels.externalUid}
+              value={props.credentialForm.external_uid}
+              onChange={(value) => updateCredential("external_uid", value)}
+            />
+            <JSONTextArea
+              label={props.labels.credentialSecret}
+              value={props.credentialForm.secret}
+              onChange={(value) => updateCredential("secret", value)}
+            />
+            <p className="text-xs text-muted">
+              {props.labels.credentialSecretHint}
+            </p>
+            {props.credentialCreateError ? (
+              <p className="text-sm text-red-700">
+                {props.labels.credentialCreateFailed}
+              </p>
+            ) : null}
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
+              disabled={props.credentialCreatePending}
+              type="submit"
+            >
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {props.labels.createCredential}
+            </button>
+          </fieldset>
         </form>
       </section>
     </section>

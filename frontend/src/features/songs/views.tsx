@@ -123,37 +123,42 @@ export function SongsPanel(props: {
           className="grid content-start gap-3 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0"
           onSubmit={props.onCreateCredential}
         >
-          <h3 className="text-sm font-semibold">
-            {props.labels.acrCredential}
-          </h3>
-          <TextField
-            label={props.labels.acrCredentialName}
-            value={props.credentialLabel}
-            onChange={props.onCredentialLabelChange}
-          />
-          <label className="grid gap-1 text-sm font-medium">
-            {props.labels.acrSecret}
-            <textarea
-              className="min-h-28 rounded-md border border-border bg-white p-3 font-mono text-xs"
-              value={props.credentialSecret}
-              onChange={(event) =>
-                props.onCredentialSecretChange(event.target.value)
-              }
-            />
-          </label>
-          {props.credentialCreateError ? (
-            <p className="text-sm text-red-700">
-              {props.labels.songsCredentialFailed}
-            </p>
-          ) : null}
-          <button
-            className="inline-flex h-9 w-fit items-center gap-2 rounded-md border border-border px-3 text-sm font-medium disabled:opacity-60"
+          <fieldset
+            className="min-w-0 space-y-3"
             disabled={props.credentialCreatePending}
-            type="submit"
           >
-            <Lock className="h-4 w-4" aria-hidden="true" />
-            {props.labels.saveAcrCredential}
-          </button>
+            <h3 className="text-sm font-semibold">
+              {props.labels.acrCredential}
+            </h3>
+            <TextField
+              label={props.labels.acrCredentialName}
+              value={props.credentialLabel}
+              onChange={props.onCredentialLabelChange}
+            />
+            <label className="grid gap-1 text-sm font-medium">
+              {props.labels.acrSecret}
+              <textarea
+                className="min-h-28 rounded-md border border-border bg-white p-3 font-mono text-xs"
+                value={props.credentialSecret}
+                onChange={(event) =>
+                  props.onCredentialSecretChange(event.target.value)
+                }
+              />
+            </label>
+            {props.credentialCreateError ? (
+              <p className="text-sm text-red-700">
+                {props.labels.songsCredentialFailed}
+              </p>
+            ) : null}
+            <button
+              className="inline-flex h-9 w-fit items-center gap-2 rounded-md border border-border px-3 text-sm font-medium disabled:opacity-60"
+              disabled={props.credentialCreatePending}
+              type="submit"
+            >
+              <Lock className="h-4 w-4" aria-hidden="true" />
+              {props.labels.saveAcrCredential}
+            </button>
+          </fieldset>
         </form>
       </div>
 

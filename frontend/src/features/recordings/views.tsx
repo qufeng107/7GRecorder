@@ -897,6 +897,7 @@ export function UploadSourceReviewEditPanel(props: {
         <label className="min-w-[280px] flex-1 text-sm font-medium">
           {props.labels.editCuts}
           <textarea
+            aria-label={props.labels.editCuts}
             className="mt-1 min-h-20 w-full rounded-md border border-border bg-white px-3 py-2 text-sm font-normal outline-none focus:border-accent"
             placeholder={props.labels.editCutsPlaceholder}
             value={props.draft}

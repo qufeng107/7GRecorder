@@ -129,3 +129,42 @@ test("storage draft saves and reloads against the isolated backend", async ({
     "12",
   );
 });
+
+test("disabled COS keeps unsaved fields while song settings persist", async ({
+  page,
+}) => {
+  await page.goto("/admin/uploads");
+  await page.getByLabel("用户名", { exact: true }).fill("local-admin");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("local-test-only-password");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.getByLabel("COS 前缀", { exact: true }).fill("isolated-test/");
+  await page
+    .getByRole("button", { name: "保存 COS 配置", exact: true })
+    .click();
+  await expect(
+    page.getByText(
+      "COS 已禁用。禁用操作不保存其他配置字段；这些修改仍保留为草稿。",
+    ),
+  ).toBeVisible();
+  await expect(page.getByLabel("COS 前缀", { exact: true })).toHaveValue(
+    "isolated-test/",
+  );
+  await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+  await expect(page.getByLabel("COS 前缀", { exact: true })).toHaveValue(
+    "7grecorder/1/",
+  );
+  await page.reload();
+  await expect(page.getByLabel("COS 前缀", { exact: true })).toHaveValue(
+    "7grecorder/1/",
+  );
+  await page.getByRole("link", { name: "歌曲分析", exact: true }).click();
+  await page.getByLabel("音频对象前缀", { exact: true }).fill("songs-local/");
+  await page.getByRole("button", { name: "保存识别设置", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已保存");
+  await page.reload();
+  await expect(page.getByLabel("音频对象前缀", { exact: true })).toHaveValue(
+    "songs-local",
+  );
+});

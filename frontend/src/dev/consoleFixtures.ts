@@ -117,14 +117,14 @@ export function createConsoleFixtures() {
     ],
     danmaku_files: [],
   };
-  let bilibili = {
+  const bilibili = {
     recording_profile_id: 1,
     platform: "bilibili",
     credential_id: 1,
     enabled: false,
     settings: {},
   };
-  let cos = {
+  const cos = {
     recording_profile_id: 1,
     credential_id: 0,
     enabled: false,
@@ -132,6 +132,17 @@ export function createConsoleFixtures() {
     bucket: "",
     prefix: "demo/",
     max_managed_bytes: 1073741824,
+  };
+  const publishing = new Map<number, typeof bilibili>();
+  const storage = new Map<number, typeof cos>();
+  let songSettings = {
+    enabled: false,
+    region: "",
+    container_id: "",
+    songs_prefix: "songs",
+    boundary_padding_ms: 0,
+    algorithm_version: "v1",
+    updated_at: stamp,
   };
   let storageSettings = {
     max_recording_bytes: 10737418240,
@@ -196,12 +207,24 @@ export function createConsoleFixtures() {
       return ok(profile);
     }
     if (path.endsWith("/publishing/bilibili")) {
-      if (method !== "GET") bilibili = { ...bilibili, ...payload };
-      return ok(bilibili);
+      const id = Number(path.split("/")[4]);
+      const config = publishing.get(id) ?? {
+        ...bilibili,
+        recording_profile_id: id,
+      };
+      if (method !== "GET") Object.assign(config, payload);
+      publishing.set(id, config);
+      return ok(config);
     }
     if (path.endsWith("/storage/cos")) {
-      if (method !== "GET") cos = { ...cos, ...payload };
-      return ok(cos);
+      const id = Number(path.split("/")[4]);
+      const config = storage.get(id) ?? { ...cos, recording_profile_id: id };
+      if (method !== "GET") {
+        if (payload.enabled === false) config.enabled = false;
+        else Object.assign(config, payload);
+      }
+      storage.set(id, config);
+      return ok(config);
     }
     if (path === "/api/v1/credentials") {
       if (method === "POST") {
@@ -209,6 +232,8 @@ export function createConsoleFixtures() {
           ...credentials[0],
           id: credentials.length + 1,
           platform: String(payload.platform),
+          scope: String(payload.scope),
+          purpose: String(payload.purpose),
           account_label: String(payload.account_label),
         };
         credentials.push(item);
@@ -309,17 +334,19 @@ export function createConsoleFixtures() {
       if (method === "PUT") tls = { ...tls, ...payload };
       return ok(tls);
     }
-    if (path === "/api/v1/song-settings")
-      return ok({
-        enabled: false,
-        region: "",
-        container_id: "",
-        songs_prefix: "songs",
-        boundary_padding_ms: 0,
-        algorithm_version: "v1",
-        updated_at: stamp,
-        ...payload,
-      });
+    if (path === "/api/v1/song-settings") {
+      if (method === "PUT")
+        songSettings = {
+          ...songSettings,
+          ...payload,
+          songs_prefix:
+            String(payload.songs_prefix ?? songSettings.songs_prefix).replace(
+              /^\/+|\/+$/g,
+              "",
+            ) || "songs",
+        };
+      return ok(songSettings);
+    }
     if (
       [
         "/api/v1/song-analysis/sources",
