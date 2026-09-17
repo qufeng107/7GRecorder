@@ -12,6 +12,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import { useLanguage } from "../../app/preferences";
 import { Button } from "../../shared/ui/Button";
+import { JobProgress } from "../../shared/console/fields";
 import { useJobAction, useJobs } from "./api";
 import { copy } from "./copy";
 import type { Job } from "../../shared/api/contracts.generated";
@@ -228,20 +229,7 @@ export default function JobsPage() {
                       <p className="mt-2 text-xs text-muted">
                         {date(job.updated_at)}
                       </p>
-                      {job.progress_total_bytes &&
-                      job.progress_total_bytes > 0 ? (
-                        <progress
-                          className="mt-2 h-1.5 w-28 accent-teal-600"
-                          aria-label={t.progress}
-                          max={job.progress_total_bytes}
-                          value={job.progress_current_bytes ?? 0}
-                        />
-                      ) : null}
-                      {job.progress_message && (
-                        <p className="mt-1 max-w-40 text-xs text-muted">
-                          {job.progress_message}
-                        </p>
-                      )}
+                      <JobProgress job={job} />
                     </td>
                     <td className="px-5 py-5 tabular-nums">
                       {job.attempts} / {job.max_attempts}

@@ -15,6 +15,7 @@ export function mockPlugin(): Plugin {
     signedIn = true;
   const stamp = "2026-09-17T10:20:00Z";
   function seed(): Job[] {
+    const activeHeartbeat = new Date().toISOString();
     return ["RUNNING", "FAILED", "PENDING", "SUCCEEDED", "FAILED"].map(
       (status, index) => ({
         id: index + 1,
@@ -42,6 +43,8 @@ export function mockPlugin(): Plugin {
               progress_current_bytes: 640000000,
               progress_total_bytes: 1000000000,
               progress_message: "上传中 · 64%",
+              heartbeat_at: activeHeartbeat,
+              progress_updated_at: stamp,
             }
           : {}),
         ...(index === 1

@@ -203,6 +203,7 @@ Current implementation note:
 - 已实现：Bilibili 标题/简介模板配置、上传请求快照生成和 fake uploader Worker 路径；
 - pinned biliup version + CLI fixture；
 - biliup CLI Adapter；
+- 独立 Worker 心跳与上传进度时间，外部工具暂不输出进度时仍可判断任务存活；
 - Bilibili 多 P 投稿使用 Upload Source output parts，投稿标题/简介来自可编辑模板；
 - `VERIFY_BILIBILI`；
 - Publication status；

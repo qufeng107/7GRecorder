@@ -71,6 +71,11 @@ alias resolves to the original source, and that canonical local/COS-facing filen
 Progress regression tests include carriage-return progress lines and ANSI control sequences from the pinned biliup
 renderer, and assert non-zero aggregate byte progress.
 
+Worker heartbeat regression tests verify that a long-running claimed Job refreshes `heartbeat_at` even when its
+adapter emits no progress, that heartbeat-only updates leave `progress_updated_at` unchanged, and that a Worker cannot
+refresh a Job owned by another lock identity. Frontend Job tests distinguish fresh-heartbeat/stale-progress from a
+stale Worker heartbeat and must not label the former as stalled.
+
 Upload Source discovery regression tests must prove that stale Profile runtime values (`LIVE`/`RECORDING`) cannot
 permanently hide completed closed recordings. Existing adjacent `ACTIVE` Recording and `WRITING`/recent recorder-file
 tests remain the safety boundary that prevents premature parent creation during an actual recording.
@@ -451,6 +456,7 @@ System:
 
 
 Frontend migration regression gate additionally covers:
+
 - Profile creation/editing and draft retention during polling.
 - Review downloads only in expanded output details; applying edits never approves delivery.
 - Failed review requests surface an error; cleanup requests require explicit confirmation.

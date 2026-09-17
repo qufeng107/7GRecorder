@@ -157,18 +157,12 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 
 - `docs/LIVE_ANALYTICS_RESEARCH.md` records the operations-analytics research, metric limitations, Recorder 2.18.0
   capture gaps, and official Bilibili API options. A normal viewer account is allowed; target-streamer credentials or
-  authorization are not assumed. This is design input only: no collector, schema, production settings, or dependencies
-  have changed. Validate real sanitized XML and event coverage before selecting an implementation. The existing
-  non-goal for secondary real-time danmaku collection remains until an explicit design change.
-  Scope is live-stream data and its retrospective analysis only; uploaded-recording video analytics is excluded.
-  The user already has OpenLive developer Access Key ID/Secret; do not repeat onboarding. AppId, project status, and
-  target-streamer identity code remain unconfirmed. No authenticated API calls have been made; developer credentials
-  alone must not be treated as target-room authorization.
-  On 2026-09-17 the user paused integration and development to change their enterprise account to a personal account.
-  Credentials are reportedly stored in the development machine's `~/.bashrc`; their values have not been read.
-  Do not assume the account change preserves credentials, projects, or permissions. Resume when the user is ready,
-  then recheck these prerequisites. Research sections 7.7–7.8 capture the OpenLive data/function matrix, limitations,
-  candidate delivery order, and resumption checklist; no implementation is scheduled by this research.
+  authorization are not assumed. The local OpenLive probe used the user's authorized test-room identity code and
+  project `1793018783146`: start, WebSocket auth, API/WS heartbeat, one danmaku event, and end all succeeded while the
+  test room was offline. No credential, identity code, event body, collector, schema, production setting, or dependency
+  was committed. This proves the unlisted project can connect the developer's authorized test room; it does not prove
+  other-room access, complete event permissions, or production approval. Scope remains live-stream data and its
+  retrospective analysis only; uploaded-recording video analytics is excluded.
   The dynamic OpenLive documentation can now be read locally via `docs/references/bilibili-open-live/README.md`.
   Its published directory was discovered using an anonymous Playwright/Chrome session; the manual archive script is
   `scripts/docs/archive_bilibili_open_live.py`. Reference snapshots do not replace sanitized runtime fixtures.
@@ -217,3 +211,10 @@ Local validation for this iteration passed: frontend lint/typecheck/build, 20 un
 24 synthetic browser tests and 4 real-backend integration tests. The local fixture UI can be opened at
 `http://127.0.0.1:5173/admin/system`; the isolated integration process shuts down after its tests.
 No remote push or deployment was performed for this iteration.
+
+A subsequent local-only fix separates Worker liveness from external-tool progress. Claimed Jobs refresh
+`heartbeat_at` every 15 seconds without changing `progress_updated_at`; updates are lock-owner scoped. The Jobs UI now
+shows both timestamps and distinguishes a live Job with quiet/unparseable biliup progress from a stale Worker. Local
+verification: one focused Worker heartbeat unit test, frontend lint/typecheck/build, 22 unit/component tests, and 24
+synthetic browser tests. Per user instruction, no full backend suite or real-backend local environment was run. This
+fix is not deployed.

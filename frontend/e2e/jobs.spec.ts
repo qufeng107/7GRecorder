@@ -5,6 +5,12 @@ test.beforeEach(async ({ request }) => {
 test("deep link, search URL and theme survive refresh", async ({ page }) => {
   await page.goto("/admin/jobs");
   await expect(page.getByRole("heading", { name: "任务中心" })).toBeVisible();
+  const activeJob = page.getByRole("row").filter({ hasText: "#1 ·" });
+  await expect(activeJob).toContainText("任务心跳");
+  await expect(activeJob).toContainText("进度更新");
+  await expect(activeJob).toContainText(
+    "任务仍在运行；当前阶段暂无可解析进度。",
+  );
   await page.getByRole("textbox", { name: "搜索任务" }).fill("MERGE");
   await expect(page).toHaveURL(/q=MERGE/);
   await expect(page.getByRole("cell", { name: /视频合并/ })).toBeVisible();

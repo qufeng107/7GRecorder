@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/7grecorder/7grecorder/backend/internal/account"
@@ -46,6 +47,8 @@ type workerJob struct {
 	Attempts           int
 	MaxAttempts        int
 }
+
+const jobHeartbeatInterval = 15 * time.Second
 
 type RecoveryResult struct {
 	Retryable int
@@ -546,10 +549,20 @@ func (w Worker) runOnceForResource(ctx context.Context, resourceClass string) er
 func (w Worker) runClaimedJob(ctx context.Context, job workerJob) error {
 	jobCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	go w.cancelWhenJobStops(ctx, job.ID, cancel, done)
+	var monitors sync.WaitGroup
+	monitors.Add(2)
+	go func() {
+		defer monitors.Done()
+		w.cancelWhenJobStops(ctx, job.ID, cancel, done)
+	}()
+	go func() {
+		defer monitors.Done()
+		w.keepJobHeartbeat(ctx, job.ID, done, jobHeartbeatInterval)
+	}()
 	err := w.executeClaimedJob(jobCtx, job)
 	close(done)
 	cancel()
+	monitors.Wait()
 	if err != nil && ctx.Err() == nil {
 		status, statusErr := w.jobStatus(ctx, job.ID)
 		if statusErr == nil && status == "CANCELLED" {
@@ -557,6 +570,38 @@ func (w Worker) runClaimedJob(ctx context.Context, job workerJob) error {
 		}
 	}
 	return err
+}
+
+func (w Worker) keepJobHeartbeat(ctx context.Context, jobID int64, done <-chan struct{}, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := w.touchJobHeartbeat(ctx, jobID); err != nil && ctx.Err() == nil {
+				log.Printf("refresh job %d heartbeat failed: %v", jobID, err)
+			}
+		}
+	}
+}
+
+func (w Worker) touchJobHeartbeat(ctx context.Context, jobID int64) error {
+	_, err := w.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET heartbeat_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'RUNNING' AND locked_by = ?
+	`, jobID, w.lockID)
+	if err != nil {
+		return fmt.Errorf("refresh job heartbeat: %w", err)
+	}
+	return nil
 }
 
 func (w Worker) executeClaimedJob(ctx context.Context, job workerJob) error {

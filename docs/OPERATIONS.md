@@ -570,16 +570,21 @@ Job 可把 `error_class + last_error` 保存到 SQLite，UI 按类别指导管�
 ### 默认 Retry Policy
 
 Worker execution is resource-class concurrent: one `LIGHT` loop, one `MEDIA` loop, and two `NETWORK` loops. This allows
-one Bilibili upload and one COS upload to progress at the same time while keeping FFmpeg media work serialized. Long
-uploads refresh job progress and `heartbeat_at`; `COS_UPLOAD_MAX_BYTES_PER_SECOND` can cap COS request-body throughput
-per COS worker. COS upload reads the publish part directly and performs no video transcoding or archive packaging.
+one Bilibili upload and one COS upload to progress at the same time while keeping FFmpeg media work serialized. Every
+claimed Job refreshes `heartbeat_at` independently while it remains `RUNNING` and owned by the same Worker. Upload
+progress updates `progress_updated_at` separately. `COS_UPLOAD_MAX_BYTES_PER_SECOND` can cap COS request-body
+throughput per COS worker. COS upload reads the publish part directly and performs no video transcoding or archive
+packaging.
 Bilibili throughput is controlled by the persisted biliup `upload_limit` concurrency setting until a
 separate network shaper is designed.
 
-The admin Jobs page is the authoritative live progress view. Bilibili shows aggregate transferred bytes across all
-parts after the adapter parses biliup progress output. COS shows per-object network upload progress while sending the
-original publish part. Historical objects may still display old compression metadata, but new jobs do not enter a
-compression stage.
+The admin Jobs page is the authoritative live activity view. It shows Job heartbeat and transfer-progress timestamps
+separately. Bilibili shows aggregate transferred bytes across all parts after the adapter parses biliup progress
+output. During an external-tool stage that emits no parseable progress, the byte count may remain unchanged while a
+fresh heartbeat proves the Worker still owns and executes the Job. A heartbeat older than one minute is an operator
+warning, not an automatic retry signal. COS shows per-object network upload progress while sending the original
+publish part. Historical objects may still display old compression metadata, but new jobs do not enter a compression
+stage.
 
 不是全局统一指数退避，Job Handler 使用简单默认值：
 

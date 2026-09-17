@@ -1,6 +1,8 @@
 import { type AdminCopy, type Credential, type JobItem } from "./types";
 import { Search } from "lucide-react";
 import { formatChinaDateParts, formatBytes } from "./format";
+import { useLanguage } from "../../app/preferences";
+import { jobActivityState } from "./jobActivity";
 
 export function PermissionBadge(props: {
   enabled: boolean;
@@ -162,10 +164,12 @@ export function TextField(props: {
 }
 
 export function JobProgress(props: { job: JobItem }) {
+  const language = useLanguage();
   const total = props.job.progress_total_bytes ?? 0;
   const current = props.job.progress_current_bytes ?? 0;
   const message = props.job.progress_message ?? "";
-  if (total <= 0 && !message) {
+  const activity = jobActivityState(props.job);
+  if (total <= 0 && !message && activity === "not-running") {
     return null;
   }
   const percent =
@@ -173,7 +177,7 @@ export function JobProgress(props: { job: JobItem }) {
       ? Math.min(100, Math.max(0, Math.round((current / total) * 100)))
       : 0;
   return (
-    <div className="mt-2 w-36">
+    <div className="mt-2 w-48">
       {total > 0 ? (
         <>
           <div className="h-1.5 overflow-hidden rounded-sm bg-[#e5e8e1]">
@@ -191,7 +195,42 @@ export function JobProgress(props: { job: JobItem }) {
       {message ? (
         <p className="mt-1 break-words text-xs text-muted">{message}</p>
       ) : null}
+      {props.job.status === "RUNNING" && props.job.heartbeat_at ? (
+        <ActivityTime
+          label={language === "zh" ? "任务心跳" : "Job heartbeat"}
+          value={props.job.heartbeat_at}
+        />
+      ) : null}
+      {props.job.status === "RUNNING" && props.job.progress_updated_at ? (
+        <ActivityTime
+          label={language === "zh" ? "进度更新" : "Progress updated"}
+          value={props.job.progress_updated_at}
+        />
+      ) : null}
+      {activity === "active-without-progress" ? (
+        <p className="mt-1 text-xs text-accent" data-job-activity="active">
+          {language === "zh"
+            ? "任务仍在运行；当前阶段暂无可解析进度。"
+            : "Job is active; this stage has no parseable progress."}
+        </p>
+      ) : null}
+      {activity === "stale" ? (
+        <p className="mt-1 text-xs text-amber-700" data-job-activity="stale">
+          {language === "zh"
+            ? "任务心跳超过 1 分钟未更新，请检查 Worker。"
+            : "Job heartbeat is over one minute old; check the Worker."}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+function ActivityTime({ label, value }: { label: string; value: string }) {
+  const parts = formatChinaDateParts(value);
+  return (
+    <p className="mt-1 text-xs text-muted">
+      {label}：{parts.date} {parts.time}
+    </p>
   );
 }
 

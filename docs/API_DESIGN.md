@@ -463,8 +463,12 @@ The operator must first verify in Bilibili Creator Center that the submission do
 atomically restores the existing Publication and Job to `PENDING`; it does not create a second Publication or job.
 An omitted or false confirmation returns a validation error.
 Job DTOs expose optional `progress_current_bytes`, `progress_total_bytes`, `progress_message`, and
-`progress_updated_at` fields. Long-running Bilibili and COS uploads update these fields and refresh `heartbeat_at` while
-they run.
+`progress_updated_at` fields. A claimed Worker refreshes `heartbeat_at` independently at a fixed interval while the
+Job remains `RUNNING` and owned by that Worker. Upload adapters update the progress fields only when they observe
+meaningful transfer output. Clients must therefore present heartbeat freshness and progress freshness separately:
+a fresh heartbeat with old progress means the task is alive but its current external-tool stage has no parseable
+progress, while a stale heartbeat requires Worker/process diagnosis. Heartbeat-only writes must not change
+`progress_updated_at` or fabricate transferred bytes.
 
 ### Storage / System
 

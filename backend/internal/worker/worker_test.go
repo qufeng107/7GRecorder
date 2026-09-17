@@ -242,6 +242,64 @@ func TestCancelWhenJobStopsCancelsClaimedJobContext(t *testing.T) {
 	}
 }
 
+func TestClaimedJobHeartbeatIsIndependentFromProgressAndLockScoped(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDB(t, ctx)
+	worker := New(database, &fakeRecorder{})
+	const oldHeartbeat = "2000-01-01 00:00:00"
+	const oldProgress = "2001-01-01 00:00:00"
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO jobs
+			(id, type, resource_class, status, priority, max_attempts, locked_by,
+			 heartbeat_at, progress_updated_at)
+		VALUES
+			(1, 'UPLOAD_BILIBILI', 'NETWORK', 'RUNNING', 80, 3, ?, ?, ?),
+			(2, 'UPLOAD_BILIBILI', 'NETWORK', 'RUNNING', 80, 3, 'another-worker', ?, ?)
+	`, worker.lockID, oldHeartbeat, oldProgress, oldHeartbeat, oldProgress); err != nil {
+		t.Fatalf("seed heartbeat jobs returned error: %v", err)
+	}
+
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		worker.keepJobHeartbeat(ctx, 1, done, 10*time.Millisecond)
+		close(stopped)
+	}()
+	deadline := time.Now().Add(time.Second)
+	var heartbeat string
+	for time.Now().Before(deadline) {
+		if err := database.QueryRowContext(ctx, `SELECT heartbeat_at FROM jobs WHERE id = 1`).Scan(&heartbeat); err != nil {
+			t.Fatalf("read heartbeat returned error: %v", err)
+		}
+		if !strings.HasPrefix(heartbeat, "2000-01-01") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(done)
+	<-stopped
+	if strings.HasPrefix(heartbeat, "2000-01-01") {
+		t.Fatal("claimed job heartbeat was not refreshed")
+	}
+
+	var progressUpdatedAt, otherHeartbeat string
+	if err := database.QueryRowContext(ctx, `SELECT progress_updated_at FROM jobs WHERE id = 1`).Scan(&progressUpdatedAt); err != nil {
+		t.Fatalf("read progress timestamp returned error: %v", err)
+	}
+	if err := worker.touchJobHeartbeat(ctx, 2); err != nil {
+		t.Fatalf("touch other worker job returned error: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT heartbeat_at FROM jobs WHERE id = 2`).Scan(&otherHeartbeat); err != nil {
+		t.Fatalf("read other heartbeat returned error: %v", err)
+	}
+	if !strings.HasPrefix(progressUpdatedAt, "2001-01-01") {
+		t.Fatalf("heartbeat changed progress timestamp: %q", progressUpdatedAt)
+	}
+	if !strings.HasPrefix(otherHeartbeat, "2000-01-01") {
+		t.Fatalf("worker refreshed another lock owner's heartbeat: %q", otherHeartbeat)
+	}
+}
+
 func TestRecoverAbandonedJobsFreezesBilibiliAndRetriesCOS(t *testing.T) {
 	ctx := context.Background()
 	database := openTestDB(t, ctx)
