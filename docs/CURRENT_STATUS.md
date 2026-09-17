@@ -1,6 +1,6 @@
 # 7GRecorder Current Status
 
-Last updated: 2026-09-17
+Last updated: 2026-09-18
 
 This file is the handoff entry point for a new coding chat. Read it before reconstructing context from screenshots or
 server commands.
@@ -13,15 +13,11 @@ Recommended first-read order:
 
 ## Production
 
-- Current deployed production commit: `06f27e3e2e0f112bebe4a8b0bd2b3e2589fc11d1`.
-- Pending frontend release: `3e4d72e24328610296a396a663e50050535629c4` is on both main and dev.
-  Dev CI `35277849056`, main CI `35278208544`, and the reusable CI in Production Deploy `35278209327` passed.
-  Production release attempts on 2026-09-17 were refused by the running-job guard: job `108 / UPLOAD_BILIBILI`
-  reported `8291085357 / 11785673465` bytes at 21:51 and 21:55 UTC. No application switch occurred; public readiness
-  still returned the previous SHA. Do not cancel/retry this upload or bypass the guard merely to deploy.
-  The user has now paused deployment. Do not rerun the workflow even if the upload finishes; continue local development
-  and testing until a new deployment instruction.
-  The first reusable CI attempt also exposed an existing Worker TempDir cleanup flake; its full rerun passed.
+- Current deployed production commit: `bbe19a349f10bfde5f4cf9695c3cf565126eca26`.
+- The previously blocking job `108 / UPLOAD_BILIBILI` completed before deployment; the running-job guard was not
+  bypassed. Dev CI `35287008538`, main CI `35287392831`, and Production Deploy `35287393082` passed. Public readiness
+  reported the deployed SHA, `/admin/jobs` returned the new frontend entry and main asset, and unauthenticated
+  `/api/v1/me` continued to return `401 NOT_AUTHENTICATED`.
 - `main` runs the reusable CI gate before the release job; `dev` runs CI only.
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
@@ -194,9 +190,9 @@ rewritten automatically.
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
 
 
-## Active local-only frontend iteration
+## Frontend migration rollout
 
-Work is on `frontend/settings-drafts`; formal deployment is paused by user instruction.
+The frontend migration and Job heartbeat/progress visibility fix were deployed on 2026-09-18.
 System storage/TLS forms now retain local drafts through polling and background errors, preserve newer edits when an
 older save completes, show per-form save feedback, and confirm route departure. Refresh/close uses beforeunload.
 Upload Bilibili/COS and song settings now use the same draft handling. Profile switches confirm discarding changes
@@ -208,13 +204,13 @@ All existing console modules are migrated; the legacy dashboard is retained only
 New public creative pages and live analytics remain future feature work.
 
 Local validation for this iteration passed: frontend lint/typecheck/build, 20 unit/component tests,
-24 synthetic browser tests and 4 real-backend integration tests. The local fixture UI can be opened at
-`http://127.0.0.1:5173/admin/system`; the isolated integration process shuts down after its tests.
-No remote push or deployment was performed for this iteration.
+24 synthetic browser tests and 4 real-backend integration tests. Local fixture and isolated integration processes
+were stopped after validation.
+The migration is present on both `dev` and `main` and is now the production frontend.
 
 A subsequent local-only fix separates Worker liveness from external-tool progress. Claimed Jobs refresh
 `heartbeat_at` every 15 seconds without changing `progress_updated_at`; updates are lock-owner scoped. The Jobs UI now
 shows both timestamps and distinguishes a live Job with quiet/unparseable biliup progress from a stale Worker. Local
 verification: one focused Worker heartbeat unit test, frontend lint/typecheck/build, 22 unit/component tests, and 24
 synthetic browser tests. Per user instruction, no full backend suite or real-backend local environment was run. This
-fix is not deployed.
+fix is deployed in `bbe19a349f10bfde5f4cf9695c3cf565126eca26`.
