@@ -1,1773 +1,237 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
 import {
-  Activity,
-  Archive,
-  ArchiveRestore,
-  ChevronDown,
-  ChevronRight,
-  CloudUpload,
-  Database,
-  Download,
-  FileVideo,
-  HardDrive,
-  LayoutDashboard,
-  Lock,
-  LogIn,
-  LogOut,
-  Music2,
-  Plus,
-  RefreshCw,
-  Save,
-  Search,
-  Settings,
-  ShieldCheck,
-  Trash2,
-  Unlock,
-  UserCircle,
-  UserPlus,
-  Users,
-  X
-} from "lucide-react";
+  type AdminPage,
+  type Language,
+  type ProfileSortKey,
+  type RecordingSortKey,
+  type AccountSortKey,
+  type JobSortKey,
+  type ProfileForm,
+  type AccountEditForm,
+  type CredentialForm,
+  type SiteTLSForm,
+  type SongSettingsForm,
+  type UploadSettingsForm,
+  type AccountForm,
+  type MeResponse,
+  type HealthResponse,
+  type ProfileListResponse,
+  type UploadSourceListResponse,
+  type RecordingListResponse,
+  type JobListResponse,
+  type AccountListResponse,
+  type LocalStorageStatus,
+  type CleanupCandidateListResponse,
+  type CredentialListResponse,
+  type SiteTLSSettings,
+  type SongSettings,
+  type SongSourceListResponse,
+  type SongRunListResponse,
+  type RecognizedSongListResponse,
+  type RecordingProfile,
+  type RecordingItem,
+  type BilibiliPublishingConfig,
+  type COSStorageConfig,
+  type LocalStorageSettings,
+  type RecordingSettings,
+  type ReconcileResult,
+  type UploadSourceDiscoverResult,
+  type UploadSourceRegroupResult,
+  type UploadSourceRepairResult,
+  type UploadSourceItem,
+  type UploadSourceEditCut,
+  type COSDownloadURLResponse,
+  type CleanupRunResult,
+  type JobItem,
+  type Credential,
+  type SongAnalysisRun,
+  type UploadModuleReconcileResult,
+  type Account,
+  type ManagerPolicy,
+} from "../shared/console/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable
-} from "@tanstack/react-table";
-import type { ColumnDef, ColumnSizingState } from "@tanstack/react-table";
-
-const UPLOAD_SOURCE_MERGE_GAP_SECONDS = 600;
-
-type User = {
-  id: number;
-  username: string;
-  role: "SUPER_ADMIN" | "MANAGER";
-  enabled: boolean;
-};
-
-type ManagerPolicy = {
-  can_edit_recording_profile: boolean;
-  can_edit_bilibili_module: boolean;
-  can_edit_cos_module: boolean;
-  can_edit_netease_module: boolean;
-  can_manage_local_files: boolean;
-  updated_at?: string;
-};
-
-type PolicyFlag = Exclude<keyof ManagerPolicy, "updated_at">;
-
-type Account = User & {
-  profile_count: number;
-  policy?: ManagerPolicy;
-};
-
-type MeResponse = {
-  policy?: ManagerPolicy;
-  user: User;
-};
-
-type AccountListResponse = {
-  items: Account[] | null;
-  total?: number;
-};
-
-type HealthResponse = {
-  status: string;
-  release_sha: string;
-};
-
-type RecordingSettings = {
-  auto_record: boolean;
-  quality: string;
-  record_danmaku: boolean;
-  segment_duration_sec: number;
-  finalize_grace_period_sec: number;
-};
-
-type RecordingProfile = {
-  id: number;
-  name: string;
-  owner_user_id: number;
-  owner_username?: string;
-  platform: string;
-  room_id: string;
-  streamer_name: string;
-  streamer_uid?: string;
-  timezone: string;
-  enabled: boolean;
-  public_enabled: boolean;
-  public_slug?: string;
-  archived_at?: string;
-  recording_settings: RecordingSettings;
-  runtime: {
-    stream_status: string;
-    recorder_status: string;
-    sync_status: string;
-  };
-};
-
-type ProfileListResponse = {
-  items: RecordingProfile[] | null;
-  total?: number;
-};
-
-type RecordingFile = {
-  id: number;
-  recording_id: number;
-  relative_path: string;
-  original_name: string;
-  kind: string;
-  file_status: string;
-  size_bytes: number;
-  duration_ms: number;
-  closed_at?: string;
-  cos_status?: string;
-};
-
-type RecordingItem = {
-  id: number;
-  is_active_recording?: boolean;
-  upload_source_id?: number;
-  upload_source_status?: string;
-  local_cleanup_status?: string;
-  local_deleted_at?: string;
-  bilibili_status?: string;
-  bilibili_last_error?: string;
-  cos_status?: string;
-  cos_last_error?: string;
-  output_recording_file_id?: number;
-  output_relative_path?: string;
-  last_error?: string;
-  recording_profile_id: number;
-  profile_name: string;
-  room_id: string;
-  streamer_name: string;
-  title?: string;
-  started_at: string;
-  completed_at?: string;
-  duration_ms: number;
-  total_bytes?: number;
-  recording_status: string;
-  local_storage_status: string;
-  local_protected: boolean;
-  upload_review_status?: string;
-  upload_review_requested_at?: string;
-  upload_review_completed_at?: string;
-  upload_review_notes?: string;
-  review_status?: string;
-  review_requested_at?: string;
-  review_completed_at?: string;
-  review_notes?: string;
-  edit_decision_json?: string;
-  source_segments?: UploadSourceSegment[];
-  source_outputs?: UploadSourceOutput[];
-  danmaku_files?: RecordingFile[];
-  files: RecordingFile[] | null;
-};
-
-type UploadSourceSegment = {
-  id: number;
-  upload_source_id: number;
-  recording_id: number;
-  recording_file_id: number;
-  sort_order: number;
-  source_started_at: string;
-  source_completed_at: string;
-  timeline_start_ms: number;
-  timeline_end_ms: number;
-  relative_path: string;
-  size_bytes: number;
-  duration_ms: number;
-};
-
-type UploadSourceOutput = {
-  id: number;
-  upload_source_id: number;
-  sort_order: number;
-  relative_path: string;
-  size_bytes: number;
-  duration_ms: number;
-  timeline_start_ms: number;
-  timeline_end_ms: number;
-  status: string;
-  bilibili_status?: string;
-  bilibili_url?: string;
-  bilibili_last_error?: string;
-  cos_status?: string;
-  cos_last_error?: string;
-  cos_source_size_bytes?: number;
-  cos_uploaded_size_bytes?: number;
-  cos_compression_status?: string;
-  cos_compression_preset?: string;
-};
-
-type UploadSourceEditCut = {
-  start_ms: number;
-  end_ms: number;
-};
-
-type UploadSourceItem = {
-  id: number;
-  recording_profile_id: number;
-  profile_name: string;
-  room_id: string;
-  streamer_name: string;
-  title?: string;
-  started_at: string;
-  completed_at: string;
-  duration_ms: number;
-  status: string;
-  local_cleanup_status?: string;
-  local_deleted_at?: string;
-  bilibili_status?: string;
-  bilibili_last_error?: string;
-  cos_status?: string;
-  cos_last_error?: string;
-  output_relative_path?: string;
-  output_recording_file_id?: number;
-  total_bytes: number;
-  local_protected?: boolean;
-  recording_count: number;
-  file_count: number;
-  max_gap_seconds: number;
-  merge_gap_threshold_seconds: number;
-  metadata_json?: string;
-  ready_at?: string;
-  last_error?: string;
-  review_status?: string;
-  review_requested_at?: string;
-  review_completed_at?: string;
-  review_notes?: string;
-  edit_decision_json?: string;
-  segments: UploadSourceSegment[] | null;
-  outputs: UploadSourceOutput[] | null;
-  danmaku_files?: RecordingFile[] | null;
-};
-
-type UploadSourceListResponse = {
-  items: UploadSourceItem[] | null;
-  total: number;
-  merge_gap_threshold_seconds: number;
-};
-
-type RecordingListResponse = {
-  items: RecordingItem[] | null;
-  total: number;
-};
-
-type UploadSourceDiscoverResult = {
-  created: number;
-  ignored: number;
-  delayed?: number;
-  merge_jobs_enqueued?: number;
-  package_jobs_enqueued?: number;
-  merge_gap_threshold_seconds: number;
-};
-
-type UploadSourceRegroupResult = {
-  replaced_sources: number;
-  created_sources: number;
-  cancelled_jobs: number;
-  blocked?: Array<{
-    upload_source_ids: number[];
-    reason: string;
-  }>;
-  merge_gap_threshold_seconds: number;
-};
-
-type UploadSourceRepairResult = {
-  checked: number;
-  reset_to_merge: number;
-  reset_to_package: number;
-  outputs_marked_missing: number;
-  upload_jobs_cancelled: number;
-  merge_jobs_reset: number;
-  package_jobs_reset: number;
-  source_missing_blocks: number;
-  bilibili_publications_reset: number;
-};
-
-type RecordingRegroupResult = {
-  china_date: string;
-  items: UploadSourceRegroupResult[];
-};
-
-type ReconcileResult = {
-  scanned_files: number;
-  imported: number;
-  updated: number;
-  skipped: number;
-  errors?: number;
-  last_error?: string;
-};
-
-type RecordingScanResult = {
-  reconcile: ReconcileResult;
-  discover: UploadSourceDiscoverResult;
-};
-
-type COSDownloadURLResponse = {
-  url: string;
-  expires_at: string;
-  object_key: string;
-};
-
-type LocalStorageStatus = {
-  data_root: string;
-  disk_total_bytes: number;
-  disk_free_bytes: number;
-  disk_available_bytes: number;
-  indexed_video_bytes: number;
-  indexed_video_files: number;
-  protected_recordings: number;
-  completed_recordings: number;
-  settings_configured: boolean;
-  health: "HEALTHY" | "WARNING" | "CRITICAL";
-  need_reclaim_bytes: number;
-  target_video_bytes: number;
-  settings: LocalStorageSettings;
-};
-
-type LocalStorageSettings = {
-  max_recording_bytes: number;
-  min_system_free_bytes: number;
-  cleanup_target_ratio: number;
-  absolute_emergency_free_bytes: number;
-  updated_at?: string;
-};
-
-type CleanupCandidate = {
-  recording_id: number;
-  profile_name: string;
-  room_id: string;
-  streamer_name: string;
-  title?: string;
-  started_at: string;
-  completed_at?: string;
-  duration_ms: number;
-  file_count: number;
-  reclaimable_bytes: number;
-};
-
-type CleanupCandidateListResponse = {
-  items: CleanupCandidate[] | null;
-  total?: number;
-  preview_reclaimable_bytes: number;
-};
-
-type CleanupRunResult = {
-  deleted_recordings: number;
-  deleted_files: number;
-  reclaimed_bytes: number;
-  skipped_recordings: number;
-};
-
-type JobItem = {
-  id: number;
-  recording_profile_id?: number;
-  recording_id?: number;
-  recording_file_id?: number;
-  type: string;
-  resource_class: string;
-  business_key?: string;
-  status: string;
-  priority: number;
-  attempts: number;
-  max_attempts: number;
-  run_after: string;
-  locked_at?: string;
-  heartbeat_at?: string;
-  locked_by?: string;
-  last_error_class?: string;
-  last_error?: string;
-  progress_current_bytes?: number;
-  progress_total_bytes?: number;
-  progress_message?: string;
-  progress_updated_at?: string;
-  created_at: string;
-  updated_at: string;
-  profile_name?: string;
-  owner_username?: string;
-};
-
-type JobListResponse = {
-  items: JobItem[] | null;
-  total?: number;
-};
-
-type Credential = {
-  id: number;
-  owner_user_id?: number;
-  scope: "USER" | "SYSTEM";
-  platform: string;
-  purpose: string;
-  account_label: string;
-  external_uid?: string;
-  status: string;
-  last_verified_at?: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type CredentialListResponse = {
-  items: Credential[] | null;
-  total?: number;
-};
-
-type BilibiliPublishingConfig = {
-  id?: number;
-  recording_profile_id: number;
-  platform: string;
-  credential_id?: number;
-  enabled: boolean;
-  settings?: unknown;
-  created_at?: string;
-  updated_at?: string;
-};
-
-type COSStorageConfig = {
-  id?: number;
-  recording_profile_id: number;
-  credential_id?: number;
-  enabled: boolean;
-  region: string;
-  bucket: string;
-  prefix: string;
-  max_managed_bytes: number;
-  created_at?: string;
-  updated_at?: string;
-};
-
-type SiteTLSSettings = {
-  enabled: boolean;
-  credential_id?: number;
-  primary_domain: string;
-  additional_domains: string[];
-  status: string;
-  latest_certificate_id?: string;
-  latest_not_after?: string;
-  staged_certificate_id?: string;
-  staged_at?: string;
-  deployed_certificate_id?: string;
-  deployed_at?: string;
-  last_checked_at?: string;
-  last_error?: string;
-  updated_at: string;
-};
-
-type SiteTLSForm = {
-  enabled: boolean;
-  credential_id: string;
-  primary_domain: string;
-  additional_domains: string;
-};
-
-type SongSettings = {
-  enabled: boolean;
-  credential_id?: number;
-  region: string;
-  container_id: string;
-  destination_cos_storage_profile_id?: number;
-  songs_prefix: string;
-  boundary_padding_ms: number;
-  algorithm_version: string;
-  updated_at: string;
-};
-
-type SongSettingsForm = {
-  enabled: boolean;
-  credential_id: string;
-  region: string;
-  container_id: string;
-  destination_cos_storage_profile_id: string;
-  songs_prefix: string;
-  boundary_padding_ms: number;
-  algorithm_version: string;
-};
-
-type SongAnalysisSource = {
-  cos_object_id: number;
-  cos_storage_profile_id: number;
-  upload_source_id: number;
-  output_id: number;
-  recording_profile_id: number;
-  profile_name: string;
-  object_key: string;
-  etag?: string;
-  size_bytes: number;
-  timeline_start_ms: number;
-  timeline_end_ms: number;
-  upload_source_started_at: string;
-};
-
-type SongAnalysisRun = {
-  id: number;
-  source_cos_object_id: number;
-  source_object_key: string;
-  source_size_bytes: number;
-  status: string;
-  progress_message?: string;
-  last_error?: string;
-  created_at: string;
-};
-
-type SongSourceListResponse = { items: SongAnalysisSource[] | null; total?: number };
-type SongRunListResponse = { items: SongAnalysisRun[] | null; total?: number };
-
-type RecognizedSong = {
-  id: number;
-  analysis_run_id: number;
-  title: string;
-  artist: string;
-  start_ms: number;
-  end_ms: number;
-  confidence?: number;
-  status: string;
-  audio_artifact_status: string;
-  audio_url?: string;
-  created_at: string;
-};
-
-type RecognizedSongListResponse = { items: RecognizedSong[] | null; total?: number };
-
-type UploadModuleReconcileResult = {
-  publications_created: number;
-  bilibili_jobs_created: number;
-  cos_objects_created: number;
-  cos_jobs_created: number;
-  cos_file_objects_created?: number;
-  cos_file_jobs_created?: number;
-};
-
-type ProfileForm = {
-  owner_user_id: string;
-  name: string;
-  room_id: string;
-  streamer_name: string;
-  streamer_uid: string;
-  timezone: string;
-  enabled: boolean;
-  public_enabled: boolean;
-  public_slug: string;
-  auto_record: boolean;
-  quality: string;
-  record_danmaku: boolean;
-  segment_duration_sec: number;
-  finalize_grace_period_sec: number;
-};
-
-type AdminPage = "overview" | "profiles" | "recordings" | "uploads" | "songs" | "jobs" | "system" | "accounts" | "me";
-type Language = "zh" | "en";
-type RecordingSortKey = "started_desc" | "started_asc" | "duration_desc" | "size_desc";
-type ProfileSortKey = "name_asc" | "room_asc";
-type AccountSortKey = "username_asc" | "role_asc";
-type JobSortKey = "updated_desc" | "run_after_asc" | "status_asc";
-
-type AccountForm = {
-  username: string;
-  password: string;
-  enabled: boolean;
-  policy: ManagerPolicy;
-};
-
-type AccountEditForm = {
-  username: string;
-  password: string;
-  enabled: boolean;
-};
-
-type CredentialForm = {
-  platform: "bilibili" | "tencent_cos";
-  account_label: string;
-  external_uid: string;
-  secret: string;
-};
-
-type UploadSettingsForm = {
-  profile_id: string;
-  bilibili_enabled: boolean;
-  bilibili_credential_id: string;
-  bilibili_title_template: string;
-  bilibili_description_template: string;
-  bilibili_tags: string;
-  bilibili_copyright: number;
-  bilibili_source: string;
-  bilibili_upload_limit: number;
-  cos_enabled: boolean;
-  cos_credential_id: string;
-  cos_region: string;
-  cos_bucket: string;
-  cos_prefix: string;
-  cos_max_managed_gb: number;
-};
-
-const emptyProfileForm: ProfileForm = {
-  owner_user_id: "",
-  name: "",
-  room_id: "",
-  streamer_name: "",
-  streamer_uid: "",
-  timezone: "Asia/Shanghai",
-  enabled: true,
-  public_enabled: false,
-  public_slug: "",
-  auto_record: true,
-  quality: "original",
-  record_danmaku: true,
-  segment_duration_sec: 1800,
-  finalize_grace_period_sec: 300
-};
-
-const emptySiteTLSForm: SiteTLSForm = {
-  enabled: false,
-  credential_id: "",
-  primary_domain: "7g.chat",
-  additional_domains: "www.7g.chat"
-};
-
-const emptySongSettingsForm: SongSettingsForm = {
-  enabled: false,
-  credential_id: "",
-  region: "",
-  container_id: "",
-  destination_cos_storage_profile_id: "",
-  songs_prefix: "songs",
-  boundary_padding_ms: 0,
-  algorithm_version: "v1"
-};
-
-const defaultManagerPolicy: ManagerPolicy = {
-  can_edit_recording_profile: true,
-  can_edit_bilibili_module: true,
-  can_edit_cos_module: true,
-  can_edit_netease_module: true,
-  can_manage_local_files: true
-};
-
-const emptyAccountForm: AccountForm = {
-  username: "",
-  password: "",
-  enabled: true,
-  policy: defaultManagerPolicy
-};
-
-const emptyAccountEditForm: AccountEditForm = {
-  username: "",
-  password: "",
-  enabled: true
-};
-
-const emptyCredentialForm: CredentialForm = {
-  platform: "bilibili",
-  account_label: "",
-  external_uid: "",
-  secret: "{}"
-};
-
-const defaultBilibiliTitleTemplate = "{{profile_name}} {{date_compact}} 第{{live_ordinal}}场直播";
-const defaultBilibiliDescriptionTemplate =
-  "主播：{{streamer_name}}\n直播间：{{room_id}}\n录制时间：{{started_at_china}} - {{completed_at_china}}\n分片：{{part_count}} 个\n\n由 7GRecorder 自动归档。";
-
-const emptyUploadSettingsForm: UploadSettingsForm = {
-  profile_id: "",
-  bilibili_enabled: false,
-  bilibili_credential_id: "",
-  bilibili_title_template: defaultBilibiliTitleTemplate,
-  bilibili_description_template: defaultBilibiliDescriptionTemplate,
-  bilibili_tags: "录播,七宫筱野",
-  bilibili_copyright: 2,
-  bilibili_source: "https://live.bilibili.com/{{room_id}}",
-  bilibili_upload_limit: 1,
-  cos_enabled: false,
-  cos_credential_id: "",
-  cos_region: "",
-  cos_bucket: "",
-  cos_prefix: "",
-  cos_max_managed_gb: 100
-};
-
-const uiCopy = {
-  zh: {
-    appName: "7GRecorder 管理后台",
-    title: "录播控制台",
-    navLabel: "管理分区",
-    nav: {
-      overview: "总览",
-      profiles: "录制配置",
-      recordings: "录像文件",
-      uploads: "上传设置",
-      songs: "歌曲识别",
-      jobs: "任务",
-      accounts: "账号管理",
-      system: "系统设置"
-    },
-    songsTitle: "歌曲识别与切分",
-    songsSettings: "识别设置",
-    songsEnabled: "启用歌曲识别",
-    acrCredential: "ACRCloud 凭证",
-    acrCredentialName: "凭证名称",
-    acrSecret: "Access Token JSON",
-    saveAcrCredential: "保存 ACRCloud 凭证",
-    providerRegion: "ACRCloud 区域",
-    providerContainer: "File Scanning Container ID",
-    destinationCosProfile: "音频目标 COS 配置 ID",
-    songsPrefix: "音频对象前缀",
-    boundaryPadding: "边界扩展（毫秒）",
-    saveSongsSettings: "保存识别设置",
-    songsSettingsFailed: "保存识别设置失败，请检查凭证和 COS 配置。",
-    songsCredentialFailed: "保存 ACRCloud 凭证失败。",
-    analysisSource: "选择 COS 视频",
-    startAnalysis: "开始识别",
-    startAnalysisFailed: "无法创建识别任务，请确认模块已启用且来源仍可用。",
-    noSongSources: "暂无可分析的 COS 视频。",
-    analysisRuns: "识别任务",
-    analysisCreated: "创建时间",
-    noAnalysisRuns: "暂无识别任务。",
-    recognizedSongs: "识别结果",
-    songTimeRange: "时间范围",
-    songAudio: "音频",
-    noRecognizedSongs: "暂无识别结果。",
-    statusRows: [
-      { label: "录制核心", value: "配置已就绪", icon: Activity },
-      { label: "SQLite", value: "部署时自动迁移", icon: Database },
-      { label: "本地存储", value: "始终启用", icon: HardDrive },
-      { label: "可选模块", value: "配置后启用", icon: Archive },
-      { label: "部署", value: "仅 main 分支发布生产", icon: ShieldCheck }
-    ],
-    language: "语言",
-    chinese: "中文",
-    english: "English",
-    myAccount: "我的账号",
-    signOut: "退出登录",
-    signIn: "登录",
-    session: "会话",
-    username: "用户名",
-    password: "密码",
-    role: "角色",
-    status: "状态",
-    enabled: "启用",
-    disabled: "停用",
-    allowed: "允许",
-    blocked: "禁止",
-    access: "权限",
-    systemSettings: "系统设置",
-    siteTLS: "站点域名与 HTTPS",
-    siteTLSHint: "腾讯云负责续期；7GRecorder 校验证书后交由宿主机 Nginx 安全部署。",
-    primaryDomain: "主域名",
-    additionalDomains: "附加域名",
-    additionalDomainsHint: "每行一个域名。DNS 记录需已指向生产服务器。",
-    tlsCredential: "腾讯云 SSL 凭证",
-    tlsCredentialLabel: "凭证名称",
-    tlsCredentialSecret: "Secret JSON",
-    createTLSCredential: "保存 SSL 凭证",
-    saveSiteTLS: "保存并排队同步",
-    syncSiteTLS: "立即同步",
-    siteTLSStatus: "同步状态",
-    latestCertificate: "云端证书",
-    stagedCertificate: "待部署证书",
-    deployedCertificate: "已部署证书",
-    certificateExpires: "证书到期",
-    lastChecked: "最近检查",
-    siteTLSSaveFailed: "站点 TLS 保存失败，请检查域名和凭证。",
-    tlsCredentialCreateFailed: "SSL 凭证保存失败，请检查 Secret JSON。",
-    profiles: "录制配置",
-    allOwners: "全部账号",
-    policyUnavailable: "账号权限暂不可用。",
-    loginFailed: "登录失败，请检查用户名和密码。",
-    newProfile: "新建配置",
-    editProfile: "编辑配置",
-    archivedProfile: "已归档配置",
-    owner: "所属账号",
-    currentOwner: "当前所属账号",
-    name: "名称",
-    roomId: "直播间 ID",
-    streamer: "主播",
-    streamerUid: "主播 UID",
-    timezone: "时区",
-    publicSlug: "公开地址",
-    quality: "画质",
-    segmentSeconds: "分段秒数",
-    finalizeGraceSeconds: "收尾宽限秒数",
-    autoRecord: "自动录制",
-    recordDanmaku: "录制弹幕",
-    publicPage: "公开页面",
-    save: "保存",
-    create: "创建",
-    cancel: "取消",
-    close: "关闭",
-    restoreProfile: "恢复配置",
-    archiveProfile: "归档配置",
-    confirmArchive: "确认归档",
-    profileSaveFailed: "配置保存失败，请检查直播间是否重复以及必填项。",
-    recordingProfiles: "录制配置",
-    total: (count: number) => `共 ${count} 条`,
-    new: "新建",
-    ownerColumn: "所属账号",
-    room: "直播间",
-    runtime: "运行",
-    sync: "同步",
-    actions: "操作",
-    edit: "编辑",
-    archived: "已归档",
-    noProfiles: "暂无录制配置。",
-    newManager: "新建管理员",
-    initialPassword: "初始密码",
-    accountCreationFailed: "账号创建失败，请检查用户名和密码。",
-    accounts: "账号",
-    account: "账号",
-    noAccounts: "暂无账号。",
-    editAccount: "编辑账号",
-    accountSaveFailed: "账号保存失败，请检查用户名、密码或账号状态。",
-    newPassword: "新密码",
-    newPasswordHint: "留空表示不修改密码。",
-    saveAccount: "保存账号",
-    currentAccount: "当前账号",
-    noAction: "无可用操作",
-    disable: "停用",
-    enable: "启用",
-    editProfiles: "编辑录制配置",
-    bilibiliConfig: "Bilibili 配置",
-    cosConfig: "COS 配置",
-    neteaseConfig: "网易云配置",
-    localFiles: "本地文件",
-    localStorage: "本地存储",
-    checkingStorage: "正在检查存储。",
-    indexedVideos: "已索引视频",
-    indexedSize: "已索引大小",
-    diskAvailable: "磁盘可用",
-    protected: "已保护",
-    health: "健康状态",
-    needReclaim: "需回收",
-    previewReclaimable: "预估可回收",
-    diskSummary: (used: number, total: string, completed: number, configured: boolean) =>
-      `磁盘已用 ${used}%，总计 ${total}。已完成录像 ${completed} 条。设置：${configured ? "已配置" : "使用默认值"}。`,
-    storageSettings: "存储设置",
-    maxRecordingGB: "录像上限 GB",
-    minFreeGB: "最低空闲 GB",
-    emergencyFreeGB: "紧急保留 GB",
-    cleanupTargetPercent: "清理目标 %",
-    storageSaveFailed: "存储设置保存失败，请检查阈值。",
-    cleanupPreview: "清理预览",
-    oldestUnprotected: "最早的未保护已完成录像",
-    recording: "录像",
-    profile: "配置",
-    closed: "结束时间",
-    files: "文件数",
-    reclaimable: "可回收",
-    untitled: "未命名",
-    noCleanupCandidates: "暂无可清理候选。",
-    runCleanup: "执行清理",
-    cleanupConfirm: "将删除最旧的未保护已完成录像文件，并保留数据库记录。确认执行？",
-    cleanupResult: (recordings: number, files: number, bytes: string, skipped: number) =>
-      `清理完成：删除 ${recordings} 条录像、${files} 个文件，回收 ${bytes}，跳过 ${skipped} 条。`,
-    cleanupFailed: "清理失败，请查看服务器日志。",
-    jobs: "任务",
-    job: "任务",
-    jobType: "类型",
-    jobSyncRecorderProfile: "同步录制配置",
-    jobMergeUploadSource: "合并可上传视频",
-    jobPackageUploadSource: "封装可上传视频",
-    jobApplyUploadSourceEdit: "应用剪辑",
-    jobUploadBilibili: "上传到 Bilibili",
-    jobUploadCOS: "上传到 COS",
-    jobUploadCOSRecordingFile: "上传原始文件到 COS",
-    jobSyncSiteTLS: "同步站点 TLS 证书",
-    jobStatusPending: "待开始",
-    jobStatusRunning: "运行中",
-    jobStatusSucceeded: "已成功",
-    jobStatusFailed: "失败",
-    jobStatusCancelled: "已取消",
-    resourceClass: "资源",
-    runAfter: "计划时间",
-    attempts: "尝试",
-    lastError: "最近错误",
-    retry: "重试",
-    retryJob: "重试任务",
-    confirmAmbiguousBilibiliRetry: "上次 Bilibili 上传被中断，平台可能已经收到稿件。请先在创作中心确认同标题、同日期稿件不存在。确认不存在并继续重试吗？",
-    cancelJob: "取消任务",
-    jobsFailed: "任务加载失败，请查看服务器日志。",
-    noJobs: "暂无任务。",
-    recordings: "录像文件",
-    scan: "扫描",
-    regroupToday: "重整最新日期",
-    regroupTodayConfirm: "将按当前列表最新录像的录制日期和 10 分钟连续窗口重整已生成的可上传视频。不会删除本地文件或 COS 对象；存在 Bilibili 投稿或运行中任务的分组会被跳过。确认继续？",
-    regroupResult: (result: RecordingRegroupResult) => {
-      const totals = result.items.reduce(
-        (sum, item) => ({
-          replaced: sum.replaced + item.replaced_sources,
-          created: sum.created + item.created_sources,
-          cancelled: sum.cancelled + item.cancelled_jobs,
-          blocked: sum.blocked + (item.blocked?.length ?? 0)
-        }),
-        { replaced: 0, created: 0, cancelled: 0, blocked: 0 }
-      );
-      return `重整 ${result.china_date}：替换旧父视频 ${totals.replaced}，生成新父视频 ${totals.created}，取消旧任务 ${totals.cancelled}，阻止 ${totals.blocked} 组。`;
-    },
-    regroupFailed: "重整失败，请查看服务器日志。",
-    repairUploadSources: "修复上传源",
-    repairUploadSourcesConfirm: "将检查上传源产物是否仍在本地磁盘，缺失时自动回退到合并或封装步骤并取消下游上传任务。确认继续？",
-    repairUploadSourcesResult: (result: UploadSourceRepairResult) =>
-      `修复：检查 ${result.checked} 个，回退合并 ${result.reset_to_merge} 个，回退封装 ${result.reset_to_package} 个，重置 merge/package 任务 ${result.merge_jobs_reset + result.package_jobs_reset} 个，取消上传任务 ${result.upload_jobs_cancelled} 个，原始文件缺失阻止 ${result.source_missing_blocks} 个。`,
-    repairUploadSourcesFailed: "修复失败，请查看服务器日志。",
-    refresh: "刷新",
-    scanResult: (imported: number, updated: number, skipped: number) =>
-      `扫描：新增 ${imported}，更新 ${updated}，忽略 ${skipped}。`,
-    scanFailed: "扫描失败，请查看服务器日志。",
-    startTime: "录制时间",
-    completedAt: "完成时间",
-    duration: "时长",
-    size: "大小",
-    sourceSize: "源大小",
-    uploadedSize: "上传大小",
-    compressionStatus: "COS 文件",
-    path: "路径",
-    fileStatus: "文件状态",
-    noFile: "无文件",
-    unprotect: "取消保护",
-    protect: "保护",
-    download: "下载",
-    downloadFromCos: "COS 下载",
-    downloadLocal: "本地下载",
-    openBilibili: "打开 Bilibili",
-    details: "详情",
-    recordingDetails: "录像详情",
-    uploadSources: "可上传视频",
-    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number, packageJobsEnqueued: number) =>
-      `生成可上传视频：新增 ${created}，等待 ${ignored}，补建合并任务 ${mergeJobsEnqueued}，补建封装任务 ${packageJobsEnqueued}。`,
-    uploadSourcePendingMerge: "待合并",
-    uploadSourceMerging: "合并中",
-    uploadSourceMergeCompleteRefreshing: "合并完成，刷新中",
-    uploadSourcePendingPackage: "待封装",
-    uploadSourcePackaging: "封装中",
-    uploadSourcePackageCompleteRefreshing: "封装完成，刷新中",
-    uploadSourceReady: "可上传",
-    uploadSourceUploading: "上传中",
-    uploadSourceUploadFailed: "上传失败",
-    uploadSourceComplete: "上传完成",
-    uploadSourceLocalCleaned: "本地文件已自动清理",
-    uploadSourceActiveRecording: "录制中",
-    uploadSourceMergeFailed: "合并失败",
-    uploadSourcePackageFailed: "封装失败",
-    uploadSourceWaitingReview: "等待审核",
-    requireReview: "需要审核",
-    rerequireReview: "重新审核",
-    approveReview: "审核完成",
-    reviewRequired: "需审核",
-    reviewPending: "审核中",
-    editCuts: "删除区间",
-    editCutsPlaceholder: "00:10:00-00:12:30\n01:05:20-01:06:00",
-    applyEdit: "应用剪辑",
-    editQueued: "剪辑任务已排队",
-    editFailed: "剪辑提交失败，请查看服务器日志。",
-    bilibiliStatus: "Bilibili",
-    cosStatus: "COS",
-    uploadStatusDisabled: "未启用",
-    uploadStatusWaitingSource: "等待文件",
-    uploadStatusPending: "待上传",
-    uploadStatusUploading: "上传中",
-    uploadStatusAvailable: "已上传",
-    uploadStatusVerified: "已发布",
-    uploadStatusFailed: "失败",
-    compressionStatusDisabled: "原文件",
-    compressionStatusPending: "待压缩",
-    compressionStatusCompressing: "压缩中",
-    compressionStatusCompressed: "已压缩",
-    compressionStatusSkippedLowGain: "收益低跳过",
-    compressionStatusFailed: "压缩失败",
-    sourceSegments: "原始片段",
-    sourceOutputs: "发布分片",
-    danmakuFiles: "原始弹幕",
-    downloadDanmakuFromCos: "下载弹幕",
-    showSourceSegments: "显示原始片段",
-    hideSourceSegments: "隐藏原始片段",
-    timeline: "合并时间轴",
-    recordingStatus: "录像状态",
-    localStorageStatus: "本地状态",
-    file: "文件",
-    fileKind: "文件类型",
-    fileSize: "文件大小",
-    filePath: "文件路径",
-    visibleSize: "当前列表大小",
-    shortSegments: "短片段",
-    protectedRecordings: "受保护录像",
-    loadingRecordings: "正在加载录像。",
-    noRecordings: "暂无已索引录像。",
-    api: "API",
-    release: "版本",
-    checking: "检查中",
-    unknown: "未知",
-    chinaTime: "中国时间",
-    search: "搜索",
-    searchPlaceholder: "搜索名称、直播间、路径",
-    sortBy: "排序",
-    sortNewest: "录制时间：新到旧",
-    sortOldest: "录制时间：旧到新",
-    sortDuration: "时长：长到短",
-    sortSize: "大小：大到小",
-    sortName: "名称：A 到 Z",
-    sortRoom: "直播间：小到大",
-    sortUsername: "用户名：A 到 Z",
-    sortRole: "角色：A 到 Z",
-    sortUpdated: "更新时间：新到旧",
-    sortRunAfter: "计划时间：近到远",
-    sortStatus: "状态：A 到 Z",
-    uploadSettings: "上传设置",
-    uploadProfile: "录制配置",
-    uploadProfileHint: "Bilibili 和 COS 配置按录制配置分别保存。",
-    credentialVault: "凭证库",
-    newCredential: "新建凭证",
-    platform: "平台",
-    purpose: "用途",
-    accountLabel: "账号标识",
-    externalUid: "外部 UID",
-    credentialSecret: "凭证 JSON",
-    credentialSecretHint: "只会加密保存；保存后不会再显示明文。",
-    createCredential: "保存凭证",
-    credentialCreateFailed: "凭证保存失败，请检查 JSON 和必填项。",
-    noCredentials: "暂无凭证。",
-    bilibiliPublishing: "Bilibili 投稿",
-    cosStorage: "腾讯云 COS",
-    credential: "凭证",
-    noCredentialSelected: "未选择凭证",
-    moduleEnabled: "启用模块",
-    moduleDisabled: "模块未启用",
-    bilibiliTitleTemplate: "视频标题模板",
-    bilibiliDescriptionTemplate: "视频简介模板",
-    bilibiliTags: "标签",
-    bilibiliCopyright: "版权类型",
-    bilibiliCopyrightOriginal: "自制",
-    bilibiliCopyrightRepost: "转载",
-    bilibiliSource: "转载来源",
-    bilibiliUploadLimit: "Bilibili 上传并发",
-    bilibiliTemplateHint: "可用变量：{{profile_name}}、{{streamer_name}}、{{room_id}}、{{date}}、{{date_compact}}、{{start_time}}、{{end_time}}、{{started_at_china}}、{{completed_at_china}}、{{live_ordinal}}、{{part_count}}。",
-    cosRegion: "COS 地域",
-    cosBucket: "COS Bucket",
-    cosPrefix: "COS 前缀",
-    cosMaxManagedGB: "COS 托管上限 GB",
-    saveBilibiliConfig: "保存 Bilibili 配置",
-    saveCosConfig: "保存 COS 配置",
-    uploadConfigSaveFailed: "上传配置保存失败，请检查凭证、区域、Bucket 或 JSON。",
-    reconcileUploadJobs: "生成上传任务",
-    reconcileUploadHint: "只会为可上传视频补建缺失的 Bilibili/COS 任务。",
-    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number, cosFileObjects: number, cosFileJobs: number) =>
-      `上传任务：Bilibili 发布 ${publications}，Bilibili 任务 ${bilibiliJobs}，COS 视频对象 ${cosObjects}，COS 视频任务 ${cosJobs}，COS 原始文件 ${cosFileObjects}，原始文件任务 ${cosFileJobs}。`,
-    uploadReconcileFailed: "上传任务生成失败，请查看服务器日志。",
-    uploadAccessBlocked: "当前账号没有上传模块配置权限。",
-    emptyFiltered: "没有匹配结果。"
-  },
-  en: {
-    appName: "7GRecorder Admin",
-    title: "Recorder Console",
-    navLabel: "Admin sections",
-    nav: {
-      overview: "Overview",
-      profiles: "Profiles",
-      recordings: "Recordings",
-      uploads: "Upload Settings",
-      songs: "Song Recognition",
-      jobs: "Jobs",
-      accounts: "Accounts",
-      system: "System Settings"
-    },
-    songsTitle: "Song Recognition and Clips",
-    songsSettings: "Recognition Settings",
-    songsEnabled: "Enable song recognition",
-    acrCredential: "ACRCloud Credential",
-    acrCredentialName: "Credential Name",
-    acrSecret: "Access Token JSON",
-    saveAcrCredential: "Save ACRCloud Credential",
-    providerRegion: "ACRCloud Region",
-    providerContainer: "File Scanning Container ID",
-    destinationCosProfile: "Audio Destination COS Profile ID",
-    songsPrefix: "Audio Object Prefix",
-    boundaryPadding: "Boundary Padding (ms)",
-    saveSongsSettings: "Save Recognition Settings",
-    songsSettingsFailed: "Could not save recognition settings. Check the credential and COS profile.",
-    songsCredentialFailed: "Could not save the ACRCloud credential.",
-    analysisSource: "Select COS Video",
-    startAnalysis: "Start Recognition",
-    startAnalysisFailed: "Could not create the analysis job. Check settings and source availability.",
-    noSongSources: "No COS videos are available for analysis.",
-    analysisRuns: "Recognition Jobs",
-    analysisCreated: "Created",
-    noAnalysisRuns: "No recognition jobs yet.",
-    recognizedSongs: "Recognized Songs",
-    songTimeRange: "Time Range",
-    songAudio: "Audio",
-    noRecognizedSongs: "No recognized songs yet.",
-    statusRows: [
-      { label: "Recording Core", value: "Profiles ready", icon: Activity },
-      { label: "SQLite", value: "Migrated on deploy", icon: Database },
-      { label: "Local Storage", value: "Always enabled", icon: HardDrive },
-      { label: "Optional Modules", value: "Disabled until configured", icon: Archive },
-      { label: "Deployment", value: "main-only production", icon: ShieldCheck }
-    ],
-    language: "Language",
-    chinese: "中文",
-    english: "English",
-    myAccount: "My Account",
-    signOut: "Sign out",
-    signIn: "Sign in",
-    session: "Session",
-    username: "Username",
-    password: "Password",
-    role: "Role",
-    status: "Status",
-    enabled: "ENABLED",
-    disabled: "DISABLED",
-    allowed: "Allowed",
-    blocked: "Blocked",
-    access: "Access",
-    systemSettings: "System Settings",
-    siteTLS: "Site Domain & HTTPS",
-    siteTLSHint: "Tencent Cloud renews the certificate; 7GRecorder validates it before host Nginx deploys it.",
-    primaryDomain: "Primary Domain",
-    additionalDomains: "Additional Domains",
-    additionalDomainsHint: "One domain per line. DNS must already point to the production server.",
-    tlsCredential: "Tencent SSL Credential",
-    tlsCredentialLabel: "Credential Name",
-    tlsCredentialSecret: "Secret JSON",
-    createTLSCredential: "Save SSL Credential",
-    saveSiteTLS: "Save & Queue Sync",
-    syncSiteTLS: "Sync Now",
-    siteTLSStatus: "Sync Status",
-    latestCertificate: "Cloud Certificate",
-    stagedCertificate: "Staged Certificate",
-    deployedCertificate: "Deployed Certificate",
-    certificateExpires: "Certificate Expiry",
-    lastChecked: "Last Checked",
-    siteTLSSaveFailed: "Could not save Site TLS. Check the domains and credential.",
-    tlsCredentialCreateFailed: "Could not save the SSL credential. Check the secret JSON.",
-    profiles: "Profiles",
-    allOwners: "All owners",
-    policyUnavailable: "Access policy is not available.",
-    loginFailed: "Login failed. Check the credentials.",
-    newProfile: "New Profile",
-    editProfile: "Edit Profile",
-    archivedProfile: "Archived profile",
-    owner: "Owner",
-    currentOwner: "Current owner",
-    name: "Name",
-    roomId: "Room ID",
-    streamer: "Streamer",
-    streamerUid: "Streamer UID",
-    timezone: "Timezone",
-    publicSlug: "Public Slug",
-    quality: "Quality",
-    segmentSeconds: "Segment Seconds",
-    finalizeGraceSeconds: "Finalize Grace Seconds",
-    autoRecord: "Auto Record",
-    recordDanmaku: "Record Danmaku",
-    publicPage: "Public Page",
-    save: "Save",
-    create: "Create",
-    cancel: "Cancel",
-    close: "Close",
-    restoreProfile: "Restore profile",
-    archiveProfile: "Archive profile",
-    confirmArchive: "Confirm archive",
-    profileSaveFailed: "Profile save failed. Check unique room and required fields.",
-    recordingProfiles: "Recording Profiles",
-    total: (count: number) => `${count} total`,
-    new: "New",
-    ownerColumn: "Owner",
-    room: "Room",
-    runtime: "Runtime",
-    sync: "Sync",
-    actions: "Actions",
-    edit: "Edit",
-    archived: "Archived",
-    noProfiles: "No profiles yet.",
-    newManager: "New Manager",
-    initialPassword: "Initial Password",
-    accountCreationFailed: "Account creation failed. Check username and password.",
-    accounts: "Accounts",
-    account: "Account",
-    noAccounts: "No accounts yet.",
-    editAccount: "Edit Account",
-    accountSaveFailed: "Account save failed. Check username, password, or account status.",
-    newPassword: "New Password",
-    newPasswordHint: "Leave blank to keep the current password.",
-    saveAccount: "Save Account",
-    currentAccount: "Current account",
-    noAction: "No actions",
-    disable: "Disable",
-    enable: "Enable",
-    editProfiles: "Edit profiles",
-    bilibiliConfig: "Bilibili config",
-    cosConfig: "COS config",
-    neteaseConfig: "NetEase config",
-    localFiles: "Local files",
-    localStorage: "Local Storage",
-    checkingStorage: "Checking storage.",
-    indexedVideos: "Indexed Videos",
-    indexedSize: "Indexed Size",
-    diskAvailable: "Disk Available",
-    protected: "Protected",
-    health: "Health",
-    needReclaim: "Need Reclaim",
-    previewReclaimable: "Preview Reclaimable",
-    diskSummary: (used: number, total: string, completed: number, configured: boolean) =>
-      `Disk used: ${used}% of ${total}. Completed recordings: ${completed}. Settings: ${
-        configured ? "configured" : "derived default"
-      }.`,
-    storageSettings: "Storage Settings",
-    maxRecordingGB: "Max Recording GB",
-    minFreeGB: "Min Free GB",
-    emergencyFreeGB: "Emergency Free GB",
-    cleanupTargetPercent: "Cleanup Target %",
-    storageSaveFailed: "Storage settings save failed. Check the thresholds.",
-    cleanupPreview: "Cleanup Preview",
-    oldestUnprotected: "Oldest unprotected completed recordings",
-    recording: "Recording",
-    profile: "Profile",
-    closed: "Closed",
-    files: "Files",
-    reclaimable: "Reclaimable",
-    untitled: "Untitled",
-    noCleanupCandidates: "No cleanup candidates.",
-    runCleanup: "Run Cleanup",
-    cleanupConfirm: "This will delete the oldest unprotected completed local recording files while keeping database records. Continue?",
-    cleanupResult: (recordings: number, files: number, bytes: string, skipped: number) =>
-      `Cleanup finished: deleted ${recordings} recordings, ${files} files, reclaimed ${bytes}, skipped ${skipped}.`,
-    cleanupFailed: "Cleanup failed. Check server logs.",
-    jobs: "Jobs",
-    job: "Job",
-    jobType: "Type",
-    jobSyncRecorderProfile: "Sync recording profile",
-    jobMergeUploadSource: "Merge upload source",
-    jobPackageUploadSource: "Package upload source",
-    jobApplyUploadSourceEdit: "Apply edit",
-    jobUploadBilibili: "Upload to Bilibili",
-    jobUploadCOS: "Upload to COS",
-    jobUploadCOSRecordingFile: "Upload raw file to COS",
-    jobSyncSiteTLS: "Sync site TLS certificate",
-    jobStatusPending: "Pending",
-    jobStatusRunning: "Running",
-    jobStatusSucceeded: "Succeeded",
-    jobStatusFailed: "Failed",
-    jobStatusCancelled: "Cancelled",
-    resourceClass: "Resource",
-    runAfter: "Run After",
-    attempts: "Attempts",
-    lastError: "Last Error",
-    retry: "Retry",
-    retryJob: "Retry job",
-    confirmAmbiguousBilibiliRetry: "The previous Bilibili upload was interrupted and may already exist. First verify that no matching title/date is present in Creator Center. Confirm it is absent and retry?",
-    cancelJob: "Cancel job",
-    jobsFailed: "Jobs failed to load. Check server logs.",
-    noJobs: "No jobs yet.",
-    recordings: "Recordings",
-    scan: "Scan",
-    regroupToday: "Regroup Latest Date",
-    regroupTodayConfirm: "Regroup existing upload sources for the newest recording date in the current list using the 10-minute continuity window. This will not delete local files or COS objects; groups with Bilibili publications or running jobs will be skipped. Continue?",
-    regroupResult: (result: RecordingRegroupResult) => {
-      const totals = result.items.reduce(
-        (sum, item) => ({
-          replaced: sum.replaced + item.replaced_sources,
-          created: sum.created + item.created_sources,
-          cancelled: sum.cancelled + item.cancelled_jobs,
-          blocked: sum.blocked + (item.blocked?.length ?? 0)
-        }),
-        { replaced: 0, created: 0, cancelled: 0, blocked: 0 }
-      );
-      return `Regrouped ${result.china_date}: ${totals.replaced} old sources replaced, ${totals.created} new sources created, ${totals.cancelled} old jobs cancelled, ${totals.blocked} groups blocked.`;
-    },
-    regroupFailed: "Regroup failed. Check server logs.",
-    repairUploadSources: "Repair Sources",
-    repairUploadSourcesConfirm: "Check upload-source files on disk. Missing derived files will roll back to merge or package and downstream upload jobs will be cancelled. Continue?",
-    repairUploadSourcesResult: (result: UploadSourceRepairResult) =>
-      `Repair: checked ${result.checked}, reset ${result.reset_to_merge} to merge and ${result.reset_to_package} to package, reset ${result.merge_jobs_reset + result.package_jobs_reset} merge/package jobs, cancelled ${result.upload_jobs_cancelled} upload jobs, blocked ${result.source_missing_blocks} sources with missing raw files.`,
-    repairUploadSourcesFailed: "Repair failed. Check server logs.",
-    refresh: "Refresh",
-    scanResult: (imported: number, updated: number, skipped: number, errors?: number, lastError?: string) =>
-      `Scan: ${imported} imported, ${updated} updated, ${skipped} ignored${errors ? `, ${errors} errors (last: ${lastError || "unknown"})` : ""}.`,
-    scanFailed: "Scan failed. Check server logs.",
-    startTime: "Recording Time",
-    completedAt: "Completed",
-    duration: "Duration",
-    size: "Size",
-    sourceSize: "Source Size",
-    uploadedSize: "Uploaded Size",
-    compressionStatus: "COS file",
-    path: "Path",
-    fileStatus: "File Status",
-    noFile: "NO_FILE",
-    unprotect: "Unprotect",
-    protect: "Protect",
-    download: "Download",
-    downloadFromCos: "COS Download",
-    downloadLocal: "Local Download",
-    openBilibili: "Open Bilibili",
-    details: "Details",
-    recordingDetails: "Recording Details",
-    uploadSources: "Upload Sources",
-    uploadSourceDiscoverResult: (created: number, ignored: number, mergeJobsEnqueued: number, packageJobsEnqueued: number) =>
-      `Upload sources: ${created} created, ${ignored} waiting, ${mergeJobsEnqueued} merge jobs and ${packageJobsEnqueued} package jobs backfilled.`,
-    uploadSourcePendingMerge: "Pending merge",
-    uploadSourceMerging: "Merging",
-    uploadSourceMergeCompleteRefreshing: "Merge finished, refreshing",
-    uploadSourcePendingPackage: "Pending package",
-    uploadSourcePackaging: "Packaging",
-    uploadSourcePackageCompleteRefreshing: "Package finished, refreshing",
-    uploadSourceReady: "Ready to upload",
-    uploadSourceUploading: "Uploading",
-    uploadSourceUploadFailed: "Upload failed",
-    uploadSourceComplete: "Upload complete",
-    uploadSourceLocalCleaned: "Local files automatically cleaned",
-    uploadSourceActiveRecording: "Recording",
-    uploadSourceMergeFailed: "Merge failed",
-    uploadSourcePackageFailed: "Package failed",
-    uploadSourceWaitingReview: "Waiting review",
-    requireReview: "Require review",
-    rerequireReview: "Re-review",
-    approveReview: "Approve",
-    reviewRequired: "Needs review",
-    reviewPending: "In review",
-    editCuts: "Cut ranges",
-    editCutsPlaceholder: "00:10:00-00:12:30\n01:05:20-01:06:00",
-    applyEdit: "Apply edit",
-    editQueued: "Edit job queued",
-    editFailed: "Failed to submit edit. Check server logs.",
-    bilibiliStatus: "Bilibili",
-    cosStatus: "COS",
-    uploadStatusDisabled: "Disabled",
-    uploadStatusWaitingSource: "Waiting for source",
-    uploadStatusPending: "Pending upload",
-    uploadStatusUploading: "Uploading",
-    uploadStatusAvailable: "Uploaded",
-    uploadStatusVerified: "Published",
-    uploadStatusFailed: "Failed",
-    compressionStatusDisabled: "Original",
-    compressionStatusPending: "Pending",
-    compressionStatusCompressing: "Compressing",
-    compressionStatusCompressed: "Compressed",
-    compressionStatusSkippedLowGain: "Skipped",
-    compressionStatusFailed: "Failed",
-    sourceSegments: "Original Segments",
-    sourceOutputs: "Publish Parts",
-    danmakuFiles: "Raw Danmaku",
-    downloadDanmakuFromCos: "Download Danmaku",
-    showSourceSegments: "Show Original Segments",
-    hideSourceSegments: "Hide Original Segments",
-    timeline: "Timeline",
-    recordingStatus: "Recording Status",
-    localStorageStatus: "Local Status",
-    file: "File",
-    fileKind: "File Type",
-    fileSize: "File Size",
-    filePath: "File Path",
-    visibleSize: "Visible Size",
-    shortSegments: "Short Segments",
-    protectedRecordings: "Protected Recordings",
-    loadingRecordings: "Loading recordings.",
-    noRecordings: "No recordings indexed yet.",
-    api: "API",
-    release: "Release",
-    checking: "checking",
-    unknown: "unknown",
-    chinaTime: "China Time",
-    search: "Search",
-    searchPlaceholder: "Search name, room, or path",
-    sortBy: "Sort by",
-    sortNewest: "Recording time: newest",
-    sortOldest: "Recording time: oldest",
-    sortDuration: "Duration: longest",
-    sortSize: "Size: largest",
-    sortName: "Name: A to Z",
-    sortRoom: "Room: low to high",
-    sortUsername: "Username: A to Z",
-    sortRole: "Role: A to Z",
-    sortUpdated: "Updated: newest",
-    sortRunAfter: "Run after: soonest",
-    sortStatus: "Status: A to Z",
-    uploadSettings: "Upload Settings",
-    uploadProfile: "Recording Profile",
-    uploadProfileHint: "Bilibili and COS settings are saved per recording profile.",
-    credentialVault: "Credential Vault",
-    newCredential: "New Credential",
-    platform: "Platform",
-    purpose: "Purpose",
-    accountLabel: "Account Label",
-    externalUid: "External UID",
-    credentialSecret: "Credential JSON",
-    credentialSecretHint: "Stored encrypted only; plaintext is never shown after saving.",
-    createCredential: "Save Credential",
-    credentialCreateFailed: "Credential save failed. Check JSON and required fields.",
-    noCredentials: "No credentials yet.",
-    bilibiliPublishing: "Bilibili Publishing",
-    cosStorage: "Tencent COS",
-    credential: "Credential",
-    noCredentialSelected: "No credential selected",
-    moduleEnabled: "Module enabled",
-    moduleDisabled: "Module disabled",
-    bilibiliTitleTemplate: "Video Title Template",
-    bilibiliDescriptionTemplate: "Video Description Template",
-    bilibiliTags: "Tags",
-    bilibiliCopyright: "Copyright",
-    bilibiliCopyrightOriginal: "Original",
-    bilibiliCopyrightRepost: "Repost",
-    bilibiliSource: "Repost Source",
-    bilibiliUploadLimit: "Bilibili Upload Concurrency",
-    bilibiliTemplateHint: "Variables: {{profile_name}}, {{streamer_name}}, {{room_id}}, {{date}}, {{date_compact}}, {{start_time}}, {{end_time}}, {{started_at_china}}, {{completed_at_china}}, {{live_ordinal}}, {{part_count}}.",
-    cosRegion: "COS Region",
-    cosBucket: "COS Bucket",
-    cosPrefix: "COS Prefix",
-    cosMaxManagedGB: "COS Managed Limit GB",
-    saveBilibiliConfig: "Save Bilibili Config",
-    saveCosConfig: "Save COS Config",
-    uploadConfigSaveFailed: "Upload config save failed. Check credential, region, bucket, or JSON.",
-    reconcileUploadJobs: "Create Upload Jobs",
-    reconcileUploadHint: "Backfills missing Bilibili/COS jobs for ready upload sources only.",
-    uploadReconcileResult: (publications: number, bilibiliJobs: number, cosObjects: number, cosJobs: number, cosFileObjects: number, cosFileJobs: number) =>
-      `Upload jobs: ${publications} Bilibili publications, ${bilibiliJobs} Bilibili jobs, ${cosObjects} COS video objects, ${cosJobs} COS video jobs, ${cosFileObjects} COS raw files, ${cosFileJobs} raw file jobs.`,
-    uploadReconcileFailed: "Upload job reconciliation failed. Check server logs.",
-    uploadAccessBlocked: "This account cannot configure upload modules.",
-    emptyFiltered: "No matching results."
-  }
-} as const;
-
-type AdminCopy = (typeof uiCopy)[Language];
-
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  headers.set("Content-Type", "application/json");
-  const response = await fetch(path, {
-    ...init,
-    credentials: "include",
-    headers
-  });
-  if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
-  }
-  return (await response.json()) as T;
-}
-
-function parseConfigJSON(value: string): unknown {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return {};
-  }
-  return JSON.parse(trimmed) as unknown;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function bilibiliSettingsFromConfig(value: unknown) {
-  const settings = isPlainObject(value) ? value : {};
-  return {
-    title_template: typeof settings.title_template === "string" ? settings.title_template : defaultBilibiliTitleTemplate,
-    description_template:
-      typeof settings.description_template === "string" ? settings.description_template : defaultBilibiliDescriptionTemplate,
-    tags: Array.isArray(settings.tags)
-      ? settings.tags.filter((tag): tag is string => typeof tag === "string").join(",")
-      : typeof settings.tags === "string"
-        ? settings.tags
-        : "录播,七宫筱野",
-    copyright: typeof settings.copyright === "number" ? settings.copyright : 2,
-    source: typeof settings.source === "string" ? settings.source : "https://live.bilibili.com/{{room_id}}",
-    upload_limit: typeof settings.upload_limit === "number" ? settings.upload_limit : 1
-  };
-}
-
-function bilibiliSettingsPayload(form: UploadSettingsForm) {
-  return {
-    title_template: form.bilibili_title_template,
-    description_template: form.bilibili_description_template,
-    tags: form.bilibili_tags
-      .split(/[,\n，]/)
-      .map((tag) => tag.trim())
-      .filter(Boolean),
-    copyright: form.bilibili_copyright,
-    source: form.bilibili_source.trim(),
-    upload_limit: Math.min(8, Math.max(1, Math.round(form.bilibili_upload_limit || 1)))
-  };
-}
-
-function profileToForm(profile: RecordingProfile): ProfileForm {
-  return {
-    owner_user_id: String(profile.owner_user_id),
-    name: profile.name,
-    room_id: profile.room_id,
-    streamer_name: profile.streamer_name,
-    streamer_uid: profile.streamer_uid ?? "",
-    timezone: profile.timezone,
-    enabled: profile.enabled,
-    public_enabled: profile.public_enabled,
-    public_slug: profile.public_slug ?? "",
-    auto_record: profile.recording_settings.auto_record,
-    quality: profile.recording_settings.quality,
-    record_danmaku: profile.recording_settings.record_danmaku,
-    segment_duration_sec: profile.recording_settings.segment_duration_sec,
-    finalize_grace_period_sec: profile.recording_settings.finalize_grace_period_sec
-  };
-}
-
-function profilePayload(form: ProfileForm) {
-  return {
-    owner_user_id: form.owner_user_id ? Number(form.owner_user_id) : undefined,
-    name: form.name,
-    room_id: form.room_id,
-    streamer_name: form.streamer_name,
-    streamer_uid: form.streamer_uid,
-    timezone: form.timezone,
-    enabled: form.enabled,
-    public_enabled: form.public_enabled,
-    public_slug: form.public_slug,
-    recording_settings: {
-      auto_record: form.auto_record,
-      quality: form.quality,
-      record_danmaku: form.record_danmaku,
-      segment_duration_sec: form.segment_duration_sec,
-      finalize_grace_period_sec: form.finalize_grace_period_sec
-    }
-  };
-}
-
-function accountToEditForm(account: Account): AccountEditForm {
-  return {
-    username: account.username,
-    password: "",
-    enabled: account.enabled
-  };
-}
-
-function accountUpdatePayload(form: AccountEditForm) {
-  return {
-    username: form.username,
-    enabled: form.enabled,
-    ...(form.password ? { password: form.password } : {})
-  };
-}
-
-function hasManagerPermission(user: User | undefined, policy: ManagerPolicy | undefined, key: PolicyFlag): boolean {
-  if (!user) {
-    return false;
-  }
-  if (user.role === "SUPER_ADMIN") {
-    return true;
-  }
-  return Boolean(policy?.[key]);
-}
-
-function includesSearch(value: string | number | undefined, search: string): boolean {
-  return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase());
-}
-
-function uploadSourceToRecordingItem(source: UploadSourceItem): RecordingItem {
-  const segments = source.segments ?? [];
-  const outputs = source.outputs ?? [];
-  const danmakuFiles = source.danmaku_files ?? [];
-  return {
-    id: segments[0]?.recording_id ?? source.id,
-    upload_source_id: source.id,
-    upload_source_status: source.status,
-    local_cleanup_status: source.local_cleanup_status,
-    local_deleted_at: source.local_deleted_at,
-    bilibili_status: source.bilibili_status,
-    bilibili_last_error: source.bilibili_last_error,
-    cos_status: source.cos_status,
-    cos_last_error: source.cos_last_error,
-    output_recording_file_id: source.output_recording_file_id,
-    output_relative_path: source.output_relative_path,
-    last_error: source.last_error,
-    review_status: source.review_status ?? "NONE",
-    review_requested_at: source.review_requested_at,
-    review_completed_at: source.review_completed_at,
-    review_notes: source.review_notes,
-    edit_decision_json: source.edit_decision_json,
-    recording_profile_id: source.recording_profile_id,
-    profile_name: source.profile_name,
-    room_id: source.room_id,
-    streamer_name: source.streamer_name,
-    title: source.title,
-    started_at: source.started_at,
-    completed_at: source.completed_at,
-    duration_ms: source.duration_ms,
-    total_bytes: source.local_cleanup_status === "DELETED" ? 0 : source.total_bytes,
-    recording_status: source.status,
-    local_storage_status: source.output_relative_path ? "AVAILABLE" : source.status,
-    local_protected: Boolean(source.local_protected),
-    source_segments: segments,
-    source_outputs: outputs,
-    danmaku_files: danmakuFiles,
-    files: segments.map((segment) => ({
-      id: segment.recording_file_id,
-      recording_id: segment.recording_id,
-      relative_path: segment.relative_path,
-      original_name: segment.relative_path.split("/").pop() ?? segment.relative_path,
-      kind: "video",
-      file_status: source.status === "READY_TO_UPLOAD" ? "CLOSED" : source.status,
-      size_bytes: segment.size_bytes,
-      duration_ms: segment.duration_ms,
-      closed_at: segment.source_completed_at
-    }))
-  };
-}
-
-function recordingToActiveRecordingItem(recording: RecordingItem): RecordingItem {
-  return {
-    ...recording,
-    is_active_recording: true,
-    upload_source_status: recording.recording_status === "ACTIVE" ? "ACTIVE_RECORDING" : recording.recording_status,
-    review_status: recording.upload_review_status ?? "NONE",
-    review_requested_at: recording.upload_review_requested_at,
-    review_completed_at: recording.upload_review_completed_at,
-    review_notes: recording.upload_review_notes,
-    source_segments: [],
-    source_outputs: [],
-    danmaku_files: [],
-    files: recording.files ?? []
-  };
-}
-
-function filterProfiles(items: RecordingProfile[], search: string, sort: ProfileSortKey): RecordingProfile[] {
-  const filtered = items.filter((profile) => {
-    if (!search.trim()) {
-      return true;
-    }
-    return (
-      includesSearch(profile.name, search) ||
-      includesSearch(profile.room_id, search) ||
-      includesSearch(profile.streamer_name, search) ||
-      includesSearch(profile.owner_username, search)
-    );
-  });
-  return [...filtered].sort((left, right) => {
-    if (sort === "room_asc") {
-      return left.room_id.localeCompare(right.room_id, "zh-CN", { numeric: true });
-    }
-    return left.name.localeCompare(right.name, "zh-CN");
-  });
-}
-
-function filterAccounts(items: Account[], search: string, sort: AccountSortKey): Account[] {
-  const filtered = items.filter((account) => {
-    if (!search.trim()) {
-      return true;
-    }
-    return includesSearch(account.username, search) || includesSearch(account.role, search);
-  });
-  return [...filtered].sort((left, right) => {
-    if (sort === "role_asc") {
-      return left.role.localeCompare(right.role) || left.username.localeCompare(right.username, "zh-CN");
-    }
-    return left.username.localeCompare(right.username, "zh-CN");
-  });
-}
-
-function filterRecordings(items: RecordingItem[], search: string, sort: RecordingSortKey): RecordingItem[] {
-  const filtered = items.filter((recording) => {
-    if (!search.trim()) {
-      return true;
-    }
-    const firstFile = recording.files?.[0];
-    return (
-      includesSearch(recording.title, search) ||
-      includesSearch(recording.profile_name, search) ||
-      includesSearch(recording.room_id, search) ||
-      includesSearch(recording.streamer_name, search) ||
-      includesSearch(firstFile?.relative_path, search) ||
-      includesSearch(firstFile?.original_name, search)
-    );
-  });
-  return [...filtered].sort((left, right) => {
-    if (sort === "started_asc") {
-      return Date.parse(left.started_at) - Date.parse(right.started_at);
-    }
-    if (sort === "duration_desc") {
-      return right.duration_ms - left.duration_ms;
-    }
-    if (sort === "size_desc") {
-      return totalRecordingBytes(right) - totalRecordingBytes(left);
-    }
-    return Date.parse(right.started_at) - Date.parse(left.started_at);
-  });
-}
-
-function filterJobs(items: JobItem[], search: string, sort: JobSortKey): JobItem[] {
-  const filtered = items.filter((job) => {
-    if (!search.trim()) {
-      return true;
-    }
-    return (
-      includesSearch(job.type, search) ||
-      includesSearch(job.status, search) ||
-      includesSearch(job.resource_class, search) ||
-      includesSearch(job.business_key, search) ||
-      includesSearch(job.profile_name, search) ||
-      includesSearch(job.owner_username, search) ||
-      includesSearch(job.last_error, search)
-    );
-  });
-  return [...filtered].sort((left, right) => {
-    if (sort === "run_after_asc") {
-      return Date.parse(left.run_after) - Date.parse(right.run_after);
-    }
-    if (sort === "status_asc") {
-      return left.status.localeCompare(right.status) || Date.parse(right.updated_at) - Date.parse(left.updated_at);
-    }
-    return Date.parse(right.updated_at) - Date.parse(left.updated_at);
-  });
-}
-
-export function AdminDashboard() {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  emptyProfileForm,
+  filterProfiles,
+  profilePayload,
+} from "../features/profiles/model";
+import {
+  emptyAccountEditForm,
+  emptyAccountForm,
+  defaultManagerPolicy,
+  filterAccounts,
+  accountUpdatePayload,
+} from "../features/accounts/model";
+import {
+  emptyCredentialForm,
+  emptyUploadSettingsForm,
+  bilibiliSettingsFromConfig,
+  parseConfigJSON,
+  bilibiliSettingsPayload,
+} from "../features/uploads/model";
+import { emptySiteTLSForm } from "../features/system/model";
+import { emptySongSettingsForm } from "../features/songs/model";
+import { requestJson } from "../shared/api/client";
+import {
+  hasManagerPermission,
+  UPLOAD_SOURCE_MERGE_GAP_SECONDS,
+  profileToForm,
+  accountToEditForm,
+  bytesToGB,
+  chinaDateFromTimestamp,
+  gbToBytes,
+} from "../shared/console/format";
+import { uiCopy } from "../shared/console/copy";
+import {
+  uploadSourceToRecordingItem,
+  recordingToActiveRecordingItem,
+  filterRecordings,
+  latestRecordingChinaDate,
+  currentChinaDate,
+  parseEditCutDraft,
+} from "../features/recordings/model";
+import { filterJobs } from "../features/jobs/model";
+import {
+  AccountMenu,
+  LanguageControl,
+  AdminNav,
+  SessionPanel,
+} from "../features/legacy/views";
+import { OverviewPanel } from "../features/overview/views";
+import {
+  MyAccountPanel,
+  AccountsPanel,
+  AccountEditorDialog,
+} from "../features/accounts/views";
+import {
+  ProfileListPanel,
+  ProfileEditorDialog,
+} from "../features/profiles/views";
+import { SiteTLSPanel, StoragePanel } from "../features/system/views";
+import { UploadSettingsPanel } from "../features/uploads/views";
+import { SongsPanel } from "../features/songs/views";
+import { RecordingsPanel } from "../features/recordings/views";
+import { JobsPanel } from "../features/jobs/views";
+
+export function AdminDashboard(
+  props: { page?: string; onPageChange?: (page: AdminPage) => void } = {},
+) {
   const queryClient = useQueryClient();
   const [language, setLanguage] = useState<Language>("zh");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [activePage, setActivePage] = useState<AdminPage>("overview");
+  const [localPage, setLocalPage] = useState<AdminPage>("overview");
+  const pages: AdminPage[] = [
+    "overview",
+    "profiles",
+    "recordings",
+    "uploads",
+    "songs",
+    "jobs",
+    "system",
+    "accounts",
+    "me",
+  ];
+  const activePage: AdminPage =
+    props.page && pages.includes(props.page as AdminPage)
+      ? (props.page as AdminPage)
+      : localPage;
+  const onPageChange = props.onPageChange;
+  const setActivePage = useCallback(
+    (page: AdminPage) => {
+      if (onPageChange) onPageChange(page);
+      else setLocalPage(page);
+    },
+    [onPageChange],
+  );
   const [profileSearch, setProfileSearch] = useState("");
   const [profileSort, setProfileSort] = useState<ProfileSortKey>("name_asc");
   const [recordingSearch, setRecordingSearch] = useState("");
-  const [recordingSort, setRecordingSort] = useState<RecordingSortKey>("started_desc");
+  const [recordingSort, setRecordingSort] =
+    useState<RecordingSortKey>("started_desc");
   const [editDrafts, setEditDrafts] = useState<Record<number, string>>({});
   const [accountSearch, setAccountSearch] = useState("");
-  const [accountSort, setAccountSort] = useState<AccountSortKey>("username_asc");
+  const [accountSort, setAccountSort] =
+    useState<AccountSortKey>("username_asc");
   const [jobSearch, setJobSearch] = useState("");
   const [jobSort, setJobSort] = useState<JobSortKey>("updated_desc");
-  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(
+    null,
+  );
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
+    null,
+  );
   const [accountEditorOpen, setAccountEditorOpen] = useState(false);
-  const [accountEditForm, setAccountEditForm] = useState<AccountEditForm>(emptyAccountEditForm);
+  const [accountEditForm, setAccountEditForm] =
+    useState<AccountEditForm>(emptyAccountEditForm);
   const [storageForm, setStorageForm] = useState({
     maxRecordingGB: 0,
     minFreeGB: 0,
     emergencyFreeGB: 0,
-    cleanupTargetPercent: 85
+    cleanupTargetPercent: 85,
   });
-  const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredentialForm);
+  const [credentialForm, setCredentialForm] =
+    useState<CredentialForm>(emptyCredentialForm);
   const [siteTLSForm, setSiteTLSForm] = useState<SiteTLSForm>(emptySiteTLSForm);
-  const [tlsCredentialLabel, setTLSCredentialLabel] = useState("7g.chat SSL sync");
-  const [tlsCredentialSecret, setTLSCredentialSecret] = useState('{"secret_id":"","secret_key":""}');
-  const [songSettingsForm, setSongSettingsForm] = useState<SongSettingsForm>(emptySongSettingsForm);
-  const [acrCredentialLabel, setAcrCredentialLabel] = useState("ACRCloud song recognition");
-  const [acrCredentialSecret, setAcrCredentialSecret] = useState('{"access_token":""}');
+  const [tlsCredentialLabel, setTLSCredentialLabel] =
+    useState("7g.chat SSL sync");
+  const [tlsCredentialSecret, setTLSCredentialSecret] = useState(
+    '{"secret_id":"","secret_key":""}',
+  );
+  const [songSettingsForm, setSongSettingsForm] = useState<SongSettingsForm>(
+    emptySongSettingsForm,
+  );
+  const [acrCredentialLabel, setAcrCredentialLabel] = useState(
+    "ACRCloud song recognition",
+  );
+  const [acrCredentialSecret, setAcrCredentialSecret] = useState(
+    '{"access_token":""}',
+  );
   const [selectedSongSourceID, setSelectedSongSourceID] = useState("");
-  const [uploadSettingsForm, setUploadSettingsForm] = useState<UploadSettingsForm>(emptyUploadSettingsForm);
+  const [uploadSettingsForm, setUploadSettingsForm] =
+    useState<UploadSettingsForm>(emptyUploadSettingsForm);
   const [accountForm, setAccountForm] = useState<AccountForm>({
     ...emptyAccountForm,
-    policy: { ...defaultManagerPolicy }
+    policy: { ...defaultManagerPolicy },
   });
 
   const meQuery = useQuery({
     queryKey: ["me"],
     queryFn: () => requestJson<MeResponse>("/api/v1/me"),
-    retry: false
+    retry: false,
   });
   const user = meQuery.data?.user;
   const ownPolicy = meQuery.data?.policy;
   const canManageSystemSettings = user?.role === "SUPER_ADMIN";
-  const canEditRecordingProfiles = hasManagerPermission(user, ownPolicy, "can_edit_recording_profile");
-  const canEditBilibiliModule = hasManagerPermission(user, ownPolicy, "can_edit_bilibili_module");
-  const canEditCosModule = hasManagerPermission(user, ownPolicy, "can_edit_cos_module");
+  const canEditRecordingProfiles = hasManagerPermission(
+    user,
+    ownPolicy,
+    "can_edit_recording_profile",
+  );
+  const canEditBilibiliModule = hasManagerPermission(
+    user,
+    ownPolicy,
+    "can_edit_bilibili_module",
+  );
+  const canEditCosModule = hasManagerPermission(
+    user,
+    ownPolicy,
+    "can_edit_cos_module",
+  );
   const canManageUploadSettings = canEditBilibiliModule || canEditCosModule;
-  const canManageLocalFiles = hasManagerPermission(user, ownPolicy, "can_manage_local_files");
+  const canManageLocalFiles = hasManagerPermission(
+    user,
+    ownPolicy,
+    "can_manage_local_files",
+  );
   const canScanLocalFiles = Boolean(canManageSystemSettings);
   const ui = uiCopy[language];
 
@@ -1775,24 +239,27 @@ export function AdminDashboard() {
     queryKey: ["system-health"],
     queryFn: () => requestJson<HealthResponse>("/api/v1/system/health"),
     retry: false,
-    refetchInterval: 10000
+    refetchInterval: 10000,
   });
 
   const profilesQuery = useQuery({
     queryKey: ["recording-profiles"],
-    queryFn: () => requestJson<ProfileListResponse>("/api/v1/recording-profiles"),
+    queryFn: () =>
+      requestJson<ProfileListResponse>("/api/v1/recording-profiles"),
     enabled: Boolean(meQuery.data?.user),
     retry: false,
-    refetchInterval: 10000
+    refetchInterval: 10000,
   });
 
   const recordingsQuery = useQuery({
     queryKey: ["upload-sources"],
     queryFn: () =>
-      requestJson<UploadSourceListResponse>(`/api/v1/upload-sources?merge_gap_seconds=${UPLOAD_SOURCE_MERGE_GAP_SECONDS}`),
+      requestJson<UploadSourceListResponse>(
+        `/api/v1/upload-sources?merge_gap_seconds=${UPLOAD_SOURCE_MERGE_GAP_SECONDS}`,
+      ),
     enabled: Boolean(meQuery.data?.user),
     retry: false,
-    refetchInterval: 15000
+    refetchInterval: 15000,
   });
 
   const rawRecordingsQuery = useQuery({
@@ -1800,7 +267,7 @@ export function AdminDashboard() {
     queryFn: () => requestJson<RecordingListResponse>("/api/v1/recordings"),
     enabled: Boolean(meQuery.data?.user),
     retry: false,
-    refetchInterval: 5000
+    refetchInterval: 5000,
   });
 
   const jobsQuery = useQuery({
@@ -1808,7 +275,7 @@ export function AdminDashboard() {
     queryFn: () => requestJson<JobListResponse>("/api/v1/jobs?limit=100"),
     enabled: Boolean(meQuery.data?.user),
     retry: false,
-    refetchInterval: 5000
+    refetchInterval: 5000,
   });
 
   const accountsQuery = useQuery({
@@ -1816,7 +283,7 @@ export function AdminDashboard() {
     queryFn: () => requestJson<AccountListResponse>("/api/v1/accounts"),
     enabled: Boolean(canManageSystemSettings),
     retry: false,
-    refetchInterval: 30000
+    refetchInterval: 30000,
   });
 
   const localStorageQuery = useQuery({
@@ -1824,23 +291,29 @@ export function AdminDashboard() {
     queryFn: () => requestJson<LocalStorageStatus>("/api/v1/storage/local"),
     enabled: Boolean(canManageSystemSettings),
     retry: false,
-    refetchInterval: 30000
+    refetchInterval: 30000,
   });
 
   const cleanupCandidatesQuery = useQuery({
     queryKey: ["cleanup-candidates"],
-    queryFn: () => requestJson<CleanupCandidateListResponse>("/api/v1/storage/local/cleanup-candidates?limit=5"),
+    queryFn: () =>
+      requestJson<CleanupCandidateListResponse>(
+        "/api/v1/storage/local/cleanup-candidates?limit=5",
+      ),
     enabled: Boolean(canManageSystemSettings),
     retry: false,
-    refetchInterval: 30000
+    refetchInterval: 30000,
   });
 
   const credentialsQuery = useQuery({
     queryKey: ["credentials"],
     queryFn: () => requestJson<CredentialListResponse>("/api/v1/credentials"),
-    enabled: Boolean(meQuery.data?.user && (canManageUploadSettings || canManageSystemSettings)),
+    enabled: Boolean(
+      meQuery.data?.user &&
+        (canManageUploadSettings || canManageSystemSettings),
+    ),
     retry: false,
-    refetchInterval: 30000
+    refetchInterval: 30000,
   });
 
   const siteTLSQuery = useQuery({
@@ -1848,30 +321,32 @@ export function AdminDashboard() {
     queryFn: () => requestJson<SiteTLSSettings>("/api/v1/system/site-tls"),
     enabled: Boolean(canManageSystemSettings && activePage === "system"),
     retry: false,
-    refetchInterval: 10000
+    refetchInterval: 10000,
   });
 
   const songSettingsQuery = useQuery({
     queryKey: ["song-settings"],
     queryFn: () => requestJson<SongSettings>("/api/v1/song-settings"),
     enabled: Boolean(canManageSystemSettings && activePage === "songs"),
-    retry: false
+    retry: false,
   });
 
   const songSourcesQuery = useQuery({
     queryKey: ["song-analysis-sources"],
-    queryFn: () => requestJson<SongSourceListResponse>("/api/v1/song-analysis/sources"),
+    queryFn: () =>
+      requestJson<SongSourceListResponse>("/api/v1/song-analysis/sources"),
     enabled: Boolean(canManageSystemSettings && activePage === "songs"),
     retry: false,
-    refetchInterval: 15000
+    refetchInterval: 15000,
   });
 
   const songRunsQuery = useQuery({
     queryKey: ["song-analysis-runs"],
-    queryFn: () => requestJson<SongRunListResponse>("/api/v1/song-analysis/runs"),
+    queryFn: () =>
+      requestJson<SongRunListResponse>("/api/v1/song-analysis/runs"),
     enabled: Boolean(canManageSystemSettings && activePage === "songs"),
     retry: false,
-    refetchInterval: 5000
+    refetchInterval: 5000,
   });
 
   const recognizedSongsQuery = useQuery({
@@ -1879,16 +354,25 @@ export function AdminDashboard() {
     queryFn: () => requestJson<RecognizedSongListResponse>("/api/v1/songs"),
     enabled: Boolean(canManageSystemSettings && activePage === "songs"),
     retry: false,
-    refetchInterval: 5000
+    refetchInterval: 5000,
   });
 
-  const profiles = useMemo(() => profilesQuery.data?.items ?? [], [profilesQuery.data?.items]);
+  const profiles = useMemo(
+    () => profilesQuery.data?.items ?? [],
+    [profilesQuery.data?.items],
+  );
   const profileTotal = profilesQuery.data?.total ?? profiles.length;
-  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
+  const selectedProfile = profiles.find(
+    (profile) => profile.id === selectedProfileId,
+  );
   const uploadProfileId = Number(uploadSettingsForm.profile_id);
-  const uploadProfile = profiles.find((profile) => profile.id === uploadProfileId);
+  const uploadProfile = profiles.find(
+    (profile) => profile.id === uploadProfileId,
+  );
   const recordings = useMemo(() => {
-    const uploadSourceItems = (recordingsQuery.data?.items ?? []).map(uploadSourceToRecordingItem);
+    const uploadSourceItems = (recordingsQuery.data?.items ?? []).map(
+      uploadSourceToRecordingItem,
+    );
     const representedRecordingIDs = new Set<number>();
     for (const item of uploadSourceItems) {
       for (const segment of item.source_segments ?? []) {
@@ -1896,37 +380,64 @@ export function AdminDashboard() {
       }
     }
     const activeItems = (rawRecordingsQuery.data?.items ?? [])
-      .filter((recording) => recording.local_storage_status !== "DELETED" && !representedRecordingIDs.has(recording.id))
+      .filter(
+        (recording) =>
+          recording.local_storage_status !== "DELETED" &&
+          !representedRecordingIDs.has(recording.id),
+      )
       .map(recordingToActiveRecordingItem);
     return [...activeItems, ...uploadSourceItems].sort((left, right) => {
-      return new Date(right.started_at).getTime() - new Date(left.started_at).getTime();
+      return (
+        new Date(right.started_at).getTime() -
+        new Date(left.started_at).getTime()
+      );
     });
   }, [rawRecordingsQuery.data?.items, recordingsQuery.data?.items]);
-  const recordingTotal = (recordingsQuery.data?.total ?? 0) + recordings.filter((item) => item.is_active_recording).length;
+  const recordingTotal =
+    (recordingsQuery.data?.total ?? 0) +
+    recordings.filter((item) => item.is_active_recording).length;
   const jobs = jobsQuery.data?.items ?? [];
   const jobTotal = jobsQuery.data?.total ?? jobs.length;
-  const accounts = useMemo(() => accountsQuery.data?.items ?? [], [accountsQuery.data?.items]);
+  const accounts = useMemo(
+    () => accountsQuery.data?.items ?? [],
+    [accountsQuery.data?.items],
+  );
   const accountTotal = accountsQuery.data?.total ?? accounts.length;
   const localStorageSettings = localStorageQuery.data?.settings;
   const visibleProfiles = filterProfiles(profiles, profileSearch, profileSort);
-  const visibleRecordings = filterRecordings(recordings, recordingSearch, recordingSort);
+  const visibleRecordings = filterRecordings(
+    recordings,
+    recordingSearch,
+    recordingSort,
+  );
   const visibleJobs = filterJobs(jobs, jobSearch, jobSort);
   const visibleAccounts = filterAccounts(accounts, accountSearch, accountSort);
-  const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
-  const credentials = useMemo(() => credentialsQuery.data?.items ?? [], [credentialsQuery.data?.items]);
+  const selectedAccount = accounts.find(
+    (account) => account.id === selectedAccountId,
+  );
+  const credentials = useMemo(
+    () => credentialsQuery.data?.items ?? [],
+    [credentialsQuery.data?.items],
+  );
 
   const bilibiliConfigQuery = useQuery({
     queryKey: ["upload-config", "bilibili", uploadProfileId],
-    queryFn: () => requestJson<BilibiliPublishingConfig>(`/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`),
+    queryFn: () =>
+      requestJson<BilibiliPublishingConfig>(
+        `/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`,
+      ),
     enabled: Boolean(uploadProfileId && canEditBilibiliModule),
-    retry: false
+    retry: false,
   });
 
   const cosConfigQuery = useQuery({
     queryKey: ["upload-config", "cos", uploadProfileId],
-    queryFn: () => requestJson<COSStorageConfig>(`/api/v1/recording-profiles/${uploadProfileId}/storage/cos`),
+    queryFn: () =>
+      requestJson<COSStorageConfig>(
+        `/api/v1/recording-profiles/${uploadProfileId}/storage/cos`,
+      ),
     enabled: Boolean(uploadProfileId && canEditCosModule),
-    retry: false
+    retry: false,
   });
 
   useEffect(() => {
@@ -1942,22 +453,31 @@ export function AdminDashboard() {
     if (activePage === "uploads" && user && !canManageUploadSettings) {
       setActivePage("overview");
     }
-  }, [activePage, canManageSystemSettings, canManageUploadSettings, user]);
+  }, [
+    activePage,
+    canManageSystemSettings,
+    canManageUploadSettings,
+    user,
+    setActivePage,
+  ]);
 
   useEffect(() => {
     const settings = songSettingsQuery.data;
     if (!settings) return;
     setSongSettingsForm({
       enabled: settings.enabled,
-      credential_id: settings.credential_id ? String(settings.credential_id) : "",
+      credential_id: settings.credential_id
+        ? String(settings.credential_id)
+        : "",
       region: settings.region,
       container_id: settings.container_id,
-      destination_cos_storage_profile_id: settings.destination_cos_storage_profile_id
-        ? String(settings.destination_cos_storage_profile_id)
-        : "",
+      destination_cos_storage_profile_id:
+        settings.destination_cos_storage_profile_id
+          ? String(settings.destination_cos_storage_profile_id)
+          : "",
       songs_prefix: settings.songs_prefix,
       boundary_padding_ms: settings.boundary_padding_ms,
-      algorithm_version: settings.algorithm_version
+      algorithm_version: settings.algorithm_version,
     });
   }, [songSettingsQuery.data]);
 
@@ -1966,28 +486,45 @@ export function AdminDashboard() {
     if (!selectedSongSourceID && sources.length > 0) {
       setSelectedSongSourceID(String(sources[0].cos_object_id));
       if (!songSettingsForm.destination_cos_storage_profile_id) {
-        setSongSettingsForm((form) => ({ ...form, destination_cos_storage_profile_id: String(sources[0].cos_storage_profile_id) }));
+        setSongSettingsForm((form) => ({
+          ...form,
+          destination_cos_storage_profile_id: String(
+            sources[0].cos_storage_profile_id,
+          ),
+        }));
       }
     }
-  }, [selectedSongSourceID, songSettingsForm.destination_cos_storage_profile_id, songSourcesQuery.data?.items]);
+  }, [
+    selectedSongSourceID,
+    songSettingsForm.destination_cos_storage_profile_id,
+    songSourcesQuery.data?.items,
+  ]);
 
   useEffect(() => {
     if (uploadSettingsForm.profile_id || profiles.length === 0) {
       return;
     }
-    const firstAvailableProfile = profiles.find((profile) => !profile.archived_at) ?? profiles[0];
-    setUploadSettingsForm((form) => ({ ...form, profile_id: String(firstAvailableProfile.id) }));
+    const firstAvailableProfile =
+      profiles.find((profile) => !profile.archived_at) ?? profiles[0];
+    setUploadSettingsForm((form) => ({
+      ...form,
+      profile_id: String(firstAvailableProfile.id),
+    }));
   }, [profiles, uploadSettingsForm.profile_id]);
 
   useEffect(() => {
-    const selected = profiles.find((profile) => profile.id === selectedProfileId);
+    const selected = profiles.find(
+      (profile) => profile.id === selectedProfileId,
+    );
     if (selected) {
       setProfileForm(profileToForm(selected));
     }
   }, [profiles, selectedProfileId]);
 
   useEffect(() => {
-    const selected = accounts.find((account) => account.id === selectedAccountId);
+    const selected = accounts.find(
+      (account) => account.id === selectedAccountId,
+    );
     if (selected) {
       setAccountEditForm(accountToEditForm(selected));
     }
@@ -2002,7 +539,7 @@ export function AdminDashboard() {
       maxRecordingGB: bytesToGB(settings.max_recording_bytes),
       minFreeGB: bytesToGB(settings.min_system_free_bytes),
       emergencyFreeGB: bytesToGB(settings.absolute_emergency_free_bytes),
-      cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100)
+      cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100),
     });
   }, [localStorageSettings]);
 
@@ -2013,9 +550,11 @@ export function AdminDashboard() {
     }
     setSiteTLSForm({
       enabled: settings.enabled,
-      credential_id: settings.credential_id ? String(settings.credential_id) : "",
+      credential_id: settings.credential_id
+        ? String(settings.credential_id)
+        : "",
       primary_domain: settings.primary_domain,
-      additional_domains: settings.additional_domains.join("\n")
+      additional_domains: (settings.additional_domains ?? []).join("\n"),
     });
   }, [siteTLSQuery.data]);
 
@@ -2028,13 +567,15 @@ export function AdminDashboard() {
     setUploadSettingsForm((form) => ({
       ...form,
       bilibili_enabled: config.enabled,
-      bilibili_credential_id: config.credential_id ? String(config.credential_id) : "",
+      bilibili_credential_id: config.credential_id
+        ? String(config.credential_id)
+        : "",
       bilibili_title_template: settings.title_template,
       bilibili_description_template: settings.description_template,
       bilibili_tags: settings.tags,
       bilibili_copyright: settings.copyright,
       bilibili_source: settings.source,
-      bilibili_upload_limit: settings.upload_limit
+      bilibili_upload_limit: settings.upload_limit,
     }));
   }, [bilibiliConfigQuery.data]);
 
@@ -2046,11 +587,14 @@ export function AdminDashboard() {
     setUploadSettingsForm((form) => ({
       ...form,
       cos_enabled: config.enabled,
-      cos_credential_id: config.credential_id ? String(config.credential_id) : "",
+      cos_credential_id: config.credential_id
+        ? String(config.credential_id)
+        : "",
       cos_region: config.region ?? "",
       cos_bucket: config.bucket ?? "",
       cos_prefix: config.prefix ?? "",
-      cos_max_managed_gb: bytesToGB(config.max_managed_bytes) || form.cos_max_managed_gb
+      cos_max_managed_gb:
+        bytesToGB(config.max_managed_bytes) || form.cos_max_managed_gb,
     }));
   }, [cosConfigQuery.data]);
 
@@ -2058,16 +602,19 @@ export function AdminDashboard() {
     mutationFn: () =>
       requestJson<MeResponse>("/api/v1/auth/login", {
         method: "POST",
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password }),
       }),
     onSuccess: () => {
       setPassword("");
       void queryClient.invalidateQueries({ queryKey: ["me"] });
-    }
+    },
   });
 
   const logoutMutation = useMutation({
-    mutationFn: () => requestJson<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
+    mutationFn: () =>
+      requestJson<{ status: string }>("/api/v1/auth/logout", {
+        method: "POST",
+      }),
     onSuccess: () => {
       setActivePage("overview");
       setSelectedProfileId(null);
@@ -2085,7 +632,7 @@ export function AdminDashboard() {
       queryClient.removeQueries({ queryKey: ["credentials"] });
       queryClient.removeQueries({ queryKey: ["upload-config"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
-    }
+    },
   });
 
   const saveProfileMutation = useMutation({
@@ -2095,21 +642,23 @@ export function AdminDashboard() {
           `/api/v1/recording-profiles/${selectedProfileId}`,
           {
             method: "PATCH",
-            body: JSON.stringify(profilePayload(profileForm))
-          }
+            body: JSON.stringify(profilePayload(profileForm)),
+          },
         );
         await requestJson<RecordingSettings>(
           `/api/v1/recording-profiles/${selectedProfileId}/recording-settings`,
           {
             method: "PUT",
-            body: JSON.stringify(profilePayload(profileForm).recording_settings)
-          }
+            body: JSON.stringify(
+              profilePayload(profileForm).recording_settings,
+            ),
+          },
         );
         return updated;
       }
       return requestJson<RecordingProfile>("/api/v1/recording-profiles", {
         method: "POST",
-        body: JSON.stringify(profilePayload(profileForm))
+        body: JSON.stringify(profilePayload(profileForm)),
       });
     },
     onSuccess: (profile) => {
@@ -2117,21 +666,24 @@ export function AdminDashboard() {
       setProfileEditorOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
-    }
+    },
   });
 
   const reconcileMutation = useMutation({
     mutationFn: async () => {
-      const reconcile = await requestJson<ReconcileResult>("/api/v1/recording-files/reconcile", {
-        method: "POST",
-        body: "{}"
-      });
+      const reconcile = await requestJson<ReconcileResult>(
+        "/api/v1/recording-files/reconcile",
+        {
+          method: "POST",
+          body: "{}",
+        },
+      );
       const discover = await requestJson<UploadSourceDiscoverResult>(
         `/api/v1/upload-sources/actions/discover?merge_gap_seconds=${UPLOAD_SOURCE_MERGE_GAP_SECONDS}`,
         {
           method: "POST",
-          body: "{}"
-        }
+          body: "{}",
+        },
       );
       return { reconcile, discover };
     },
@@ -2140,27 +692,36 @@ export function AdminDashboard() {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
-    }
+    },
   });
 
   const regroupTodayMutation = useMutation({
     mutationFn: async () => {
-      const chinaDate = latestRecordingChinaDate(recordings) ?? currentChinaDate();
-      const profileIds = Array.from(new Set(
-        recordings
-          .filter((recording) => chinaDateFromTimestamp(recording.started_at) === chinaDate)
-          .map((recording) => recording.recording_profile_id)
-      ));
+      const chinaDate =
+        latestRecordingChinaDate(recordings) ?? currentChinaDate();
+      const profileIds = Array.from(
+        new Set(
+          recordings
+            .filter(
+              (recording) =>
+                chinaDateFromTimestamp(recording.started_at) === chinaDate,
+            )
+            .map((recording) => recording.recording_profile_id),
+        ),
+      );
       const items: UploadSourceRegroupResult[] = [];
       for (const profileId of profileIds) {
-        const result = await requestJson<UploadSourceRegroupResult>("/api/v1/upload-sources/actions/regroup", {
-          method: "POST",
-          body: JSON.stringify({
-            recording_profile_id: profileId,
-            china_date: chinaDate,
-            merge_gap_seconds: UPLOAD_SOURCE_MERGE_GAP_SECONDS
-          })
-        });
+        const result = await requestJson<UploadSourceRegroupResult>(
+          "/api/v1/upload-sources/actions/regroup",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              recording_profile_id: profileId,
+              china_date: chinaDate,
+              merge_gap_seconds: UPLOAD_SOURCE_MERGE_GAP_SECONDS,
+            }),
+          },
+        );
         items.push(result);
       }
       return { china_date: chinaDate, items };
@@ -2169,20 +730,23 @@ export function AdminDashboard() {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
-    }
+    },
   });
 
   const repairUploadSourcesMutation = useMutation({
     mutationFn: () =>
-      requestJson<UploadSourceRepairResult>("/api/v1/upload-sources/actions/repair", {
-        method: "POST",
-        body: "{}"
-      }),
+      requestJson<UploadSourceRepairResult>(
+        "/api/v1/upload-sources/actions/repair",
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
-    }
+    },
   });
 
   const protectRecordingMutation = useMutation({
@@ -2191,59 +755,74 @@ export function AdminDashboard() {
         `/api/v1/recordings/${request.id}/actions/${request.protected ? "protect-local" : "unprotect-local"}`,
         {
           method: "POST",
-          body: "{}"
-        }
+          body: "{}",
+        },
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
-    }
+    },
   });
 
   const requireRecordingReviewMutation = useMutation({
     mutationFn: (recordingId: number) =>
-      requestJson<RecordingItem>(`/api/v1/recordings/${recordingId}/actions/require-upload-review`, {
-        method: "POST",
-        body: "{}"
-      }),
+      requestJson<RecordingItem>(
+        `/api/v1/recordings/${recordingId}/actions/require-upload-review`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const requireUploadSourceReviewMutation = useMutation({
     mutationFn: (uploadSourceId: number) =>
-      requestJson<UploadSourceItem>(`/api/v1/upload-sources/${uploadSourceId}/actions/require-review`, {
-        method: "POST",
-        body: "{}"
-      }),
+      requestJson<UploadSourceItem>(
+        `/api/v1/upload-sources/${uploadSourceId}/actions/require-review`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const approveUploadSourceReviewMutation = useMutation({
     mutationFn: (uploadSourceId: number) =>
-      requestJson<UploadSourceItem>(`/api/v1/upload-sources/${uploadSourceId}/actions/approve-review`, {
-        method: "POST",
-        body: "{}"
-      }),
+      requestJson<UploadSourceItem>(
+        `/api/v1/upload-sources/${uploadSourceId}/actions/approve-review`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const applyUploadSourceEditMutation = useMutation({
-    mutationFn: (request: { uploadSourceId: number; cuts: UploadSourceEditCut[] }) =>
-      requestJson<UploadSourceItem>(`/api/v1/upload-sources/${request.uploadSourceId}/actions/apply-edit`, {
-        method: "POST",
-        body: JSON.stringify({ cuts: request.cuts })
-      }),
+    mutationFn: (request: {
+      uploadSourceId: number;
+      cuts: UploadSourceEditCut[];
+    }) =>
+      requestJson<UploadSourceItem>(
+        `/api/v1/upload-sources/${request.uploadSourceId}/actions/apply-edit`,
+        {
+          method: "POST",
+          body: JSON.stringify({ cuts: request.cuts }),
+        },
+      ),
     onSuccess: (_result, request) => {
       setEditDrafts((current) => {
         const next = { ...current };
@@ -2252,7 +831,7 @@ export function AdminDashboard() {
       });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const cosDownloadUrlMutation = useMutation({
@@ -2261,27 +840,35 @@ export function AdminDashboard() {
         `/api/v1/upload-sources/${request.uploadSourceId}/outputs/${request.outputId}/actions/download-url`,
         {
           method: "POST",
-          body: "{}"
-        }
+          body: "{}",
+        },
       ),
     onSuccess: (result) => {
       window.location.assign(result.url);
-    }
+    },
   });
 
   const cosFileDownloadUrlMutation = useMutation({
     mutationFn: (request: { fileId: number }) =>
-      requestJson<COSDownloadURLResponse>(`/api/v1/recording-files/${request.fileId}/actions/cos-download-url`, {
-        method: "POST",
-        body: "{}"
-      }),
+      requestJson<COSDownloadURLResponse>(
+        `/api/v1/recording-files/${request.fileId}/actions/cos-download-url`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: (result) => {
       window.location.assign(result.url);
-    }
+    },
   });
 
-  const downloadLocalUploadSourceOutput = (uploadSourceId: number, outputId: number) => {
-    window.location.assign(`/api/v1/upload-sources/${uploadSourceId}/outputs/${outputId}/download`);
+  const downloadLocalUploadSourceOutput = (
+    uploadSourceId: number,
+    outputId: number,
+  ) => {
+    window.location.assign(
+      `/api/v1/upload-sources/${uploadSourceId}/outputs/${outputId}/download`,
+    );
   };
 
   const saveStorageSettingsMutation = useMutation({
@@ -2292,48 +879,58 @@ export function AdminDashboard() {
           max_recording_bytes: gbToBytes(storageForm.maxRecordingGB),
           min_system_free_bytes: gbToBytes(storageForm.minFreeGB),
           cleanup_target_ratio: storageForm.cleanupTargetPercent / 100,
-          absolute_emergency_free_bytes: gbToBytes(storageForm.emergencyFreeGB)
-        })
+          absolute_emergency_free_bytes: gbToBytes(storageForm.emergencyFreeGB),
+        }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
-    }
+    },
   });
 
   const cleanupMutation = useMutation({
     mutationFn: () =>
       requestJson<CleanupRunResult>("/api/v1/storage/local/actions/cleanup", {
         method: "POST",
-        body: JSON.stringify({ max_recordings: Math.max(1, Math.min(5, cleanupCandidatesQuery.data?.items?.length ?? 5)) })
+        body: JSON.stringify({
+          max_recordings: Math.max(
+            1,
+            Math.min(5, cleanupCandidatesQuery.data?.items?.length ?? 5),
+          ),
+        }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recordings"] });
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
-    }
+    },
   });
 
   const retryJobMutation = useMutation({
-    mutationFn: (request: { jobId: number; confirmAmbiguousBilibili: boolean }) =>
+    mutationFn: (request: {
+      jobId: number;
+      confirmAmbiguousBilibili: boolean;
+    }) =>
       requestJson<JobItem>(`/api/v1/jobs/${request.jobId}/actions/retry`, {
         method: "POST",
-        body: JSON.stringify({ confirm_ambiguous_bilibili: request.confirmAmbiguousBilibili })
+        body: JSON.stringify({
+          confirm_ambiguous_bilibili: request.confirmAmbiguousBilibili,
+        }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const cancelJobMutation = useMutation({
     mutationFn: (jobId: number) =>
       requestJson<JobItem>(`/api/v1/jobs/${jobId}/actions/cancel`, {
         method: "POST",
-        body: "{}"
+        body: "{}",
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const createCredentialMutation = useMutation({
@@ -2344,17 +941,18 @@ export function AdminDashboard() {
         body: JSON.stringify({
           scope: "USER",
           platform: credentialForm.platform,
-          purpose: credentialForm.platform === "bilibili" ? "PUBLISHER" : "STORAGE",
+          purpose:
+            credentialForm.platform === "bilibili" ? "PUBLISHER" : "STORAGE",
           account_label: credentialForm.account_label,
           external_uid: credentialForm.external_uid,
-          secret
-        })
+          secret,
+        }),
       });
     },
     onSuccess: () => {
       setCredentialForm(emptyCredentialForm);
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
-    }
+    },
   });
 
   const createTLSCredentialMutation = useMutation({
@@ -2366,60 +964,72 @@ export function AdminDashboard() {
           platform: "tencent_ssl",
           purpose: "TLS",
           account_label: tlsCredentialLabel,
-          secret: parseConfigJSON(tlsCredentialSecret)
-        })
+          secret: parseConfigJSON(tlsCredentialSecret),
+        }),
       }),
     onSuccess: (credential) => {
-      setSiteTLSForm((form) => ({ ...form, credential_id: String(credential.id) }));
+      setSiteTLSForm((form) => ({
+        ...form,
+        credential_id: String(credential.id),
+      }));
       setTLSCredentialSecret('{"secret_id":"","secret_key":""}');
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
-    }
+    },
   });
 
   const createAcrCredentialMutation = useMutation({
-    mutationFn: () => requestJson<Credential>("/api/v1/credentials", {
-      method: "POST",
-      body: JSON.stringify({
-        scope: "SYSTEM",
-        platform: "acrcloud",
-        purpose: "SONG_RECOGNITION",
-        account_label: acrCredentialLabel,
-        secret: parseConfigJSON(acrCredentialSecret)
-      })
-    }),
+    mutationFn: () =>
+      requestJson<Credential>("/api/v1/credentials", {
+        method: "POST",
+        body: JSON.stringify({
+          scope: "SYSTEM",
+          platform: "acrcloud",
+          purpose: "SONG_RECOGNITION",
+          account_label: acrCredentialLabel,
+          secret: parseConfigJSON(acrCredentialSecret),
+        }),
+      }),
     onSuccess: (credential) => {
-      setSongSettingsForm((form) => ({ ...form, credential_id: String(credential.id) }));
+      setSongSettingsForm((form) => ({
+        ...form,
+        credential_id: String(credential.id),
+      }));
       setAcrCredentialSecret('{"access_token":""}');
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
-    }
+    },
   });
 
   const saveSongSettingsMutation = useMutation({
-    mutationFn: () => requestJson<SongSettings>("/api/v1/song-settings", {
-      method: "PUT",
-      body: JSON.stringify({
-        enabled: songSettingsForm.enabled,
-        credential_id: Number(songSettingsForm.credential_id || 0),
-        region: songSettingsForm.region,
-        container_id: songSettingsForm.container_id,
-        destination_cos_storage_profile_id: Number(songSettingsForm.destination_cos_storage_profile_id || 0),
-        songs_prefix: songSettingsForm.songs_prefix,
-        boundary_padding_ms: songSettingsForm.boundary_padding_ms,
-        algorithm_version: songSettingsForm.algorithm_version
-      })
-    }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["song-settings"] })
+    mutationFn: () =>
+      requestJson<SongSettings>("/api/v1/song-settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: songSettingsForm.enabled,
+          credential_id: Number(songSettingsForm.credential_id || 0),
+          region: songSettingsForm.region,
+          container_id: songSettingsForm.container_id,
+          destination_cos_storage_profile_id: Number(
+            songSettingsForm.destination_cos_storage_profile_id || 0,
+          ),
+          songs_prefix: songSettingsForm.songs_prefix,
+          boundary_padding_ms: songSettingsForm.boundary_padding_ms,
+          algorithm_version: songSettingsForm.algorithm_version,
+        }),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["song-settings"] }),
   });
 
   const createSongRunMutation = useMutation({
-    mutationFn: () => requestJson<SongAnalysisRun>("/api/v1/song-analysis/runs", {
-      method: "POST",
-      body: JSON.stringify({ cos_object_id: Number(selectedSongSourceID) })
-    }),
+    mutationFn: () =>
+      requestJson<SongAnalysisRun>("/api/v1/song-analysis/runs", {
+        method: "POST",
+        body: JSON.stringify({ cos_object_id: Number(selectedSongSourceID) }),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["song-analysis-runs"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const saveSiteTLSMutation = useMutation({
@@ -2430,75 +1040,97 @@ export function AdminDashboard() {
           enabled: siteTLSForm.enabled,
           credential_id: Number(siteTLSForm.credential_id || 0),
           primary_domain: siteTLSForm.primary_domain,
-          additional_domains: siteTLSForm.additional_domains.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)
-        })
+          additional_domains: siteTLSForm.additional_domains
+            .split(/\r?\n/)
+            .map((value) => value.trim())
+            .filter(Boolean),
+        }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["site-tls"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const syncSiteTLSMutation = useMutation({
-    mutationFn: () => requestJson<SiteTLSSettings>("/api/v1/system/site-tls/actions/sync", { method: "POST", body: "{}" }),
+    mutationFn: () =>
+      requestJson<SiteTLSSettings>("/api/v1/system/site-tls/actions/sync", {
+        method: "POST",
+        body: "{}",
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["site-tls"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const saveBilibiliConfigMutation = useMutation({
     mutationFn: () =>
-      requestJson<BilibiliPublishingConfig>(`/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`, {
-        method: "PUT",
-        body: JSON.stringify({
-          enabled: uploadSettingsForm.bilibili_enabled,
-          credential_id: Number(uploadSettingsForm.bilibili_credential_id || 0),
-          settings: bilibiliSettingsPayload(uploadSettingsForm)
-        })
-      }),
+      requestJson<BilibiliPublishingConfig>(
+        `/api/v1/recording-profiles/${uploadProfileId}/publishing/bilibili`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            enabled: uploadSettingsForm.bilibili_enabled,
+            credential_id: Number(
+              uploadSettingsForm.bilibili_credential_id || 0,
+            ),
+            settings: bilibiliSettingsPayload(uploadSettingsForm),
+          }),
+        },
+      ),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["upload-config", "bilibili", uploadProfileId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["upload-config", "bilibili", uploadProfileId],
+      });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const saveCosConfigMutation = useMutation({
     mutationFn: () =>
-      requestJson<COSStorageConfig>(`/api/v1/recording-profiles/${uploadProfileId}/storage/cos`, {
-        method: "PUT",
-        body: JSON.stringify({
-          enabled: uploadSettingsForm.cos_enabled,
-          credential_id: Number(uploadSettingsForm.cos_credential_id || 0),
-          region: uploadSettingsForm.cos_region,
-          bucket: uploadSettingsForm.cos_bucket,
-          prefix: uploadSettingsForm.cos_prefix,
-          max_managed_bytes: gbToBytes(uploadSettingsForm.cos_max_managed_gb)
-        })
-      }),
+      requestJson<COSStorageConfig>(
+        `/api/v1/recording-profiles/${uploadProfileId}/storage/cos`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            enabled: uploadSettingsForm.cos_enabled,
+            credential_id: Number(uploadSettingsForm.cos_credential_id || 0),
+            region: uploadSettingsForm.cos_region,
+            bucket: uploadSettingsForm.cos_bucket,
+            prefix: uploadSettingsForm.cos_prefix,
+            max_managed_bytes: gbToBytes(uploadSettingsForm.cos_max_managed_gb),
+          }),
+        },
+      ),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["upload-config", "cos", uploadProfileId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["upload-config", "cos", uploadProfileId],
+      });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    }
+    },
   });
 
   const reconcileUploadModulesMutation = useMutation({
     mutationFn: () =>
-      requestJson<UploadModuleReconcileResult>("/api/v1/upload-modules/actions/reconcile", {
-        method: "POST",
-        body: "{}"
-      }),
+      requestJson<UploadModuleReconcileResult>(
+        "/api/v1/upload-modules/actions/reconcile",
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
-    }
+    },
   });
 
   const archiveProfileMutation = useMutation({
     mutationFn: (profileId: number) =>
       requestJson<RecordingProfile>(`/api/v1/recording-profiles/${profileId}`, {
         method: "PATCH",
-        body: JSON.stringify({ archived: true })
+        body: JSON.stringify({ archived: true }),
       }),
     onSuccess: () => {
       setSelectedProfileId(null);
@@ -2506,14 +1138,14 @@ export function AdminDashboard() {
       setProfileForm(emptyProfileForm);
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
-    }
+    },
   });
 
   const restoreProfileMutation = useMutation({
     mutationFn: (profileId: number) =>
       requestJson<RecordingProfile>(`/api/v1/recording-profiles/${profileId}`, {
         method: "PATCH",
-        body: JSON.stringify({ archived: false, enabled: true })
+        body: JSON.stringify({ archived: false, enabled: true }),
       }),
     onSuccess: (profile) => {
       setSelectedProfileId(profile.id);
@@ -2521,7 +1153,7 @@ export function AdminDashboard() {
       setProfileForm(profileToForm(profile));
       void queryClient.invalidateQueries({ queryKey: ["recording-profiles"] });
       void queryClient.invalidateQueries({ queryKey: ["upload-sources"] });
-    }
+    },
   });
 
   const createAccountMutation = useMutation({
@@ -2533,38 +1165,47 @@ export function AdminDashboard() {
           password: accountForm.password,
           role: "MANAGER",
           enabled: accountForm.enabled,
-          policy: accountForm.policy
-        })
+          policy: accountForm.policy,
+        }),
       }),
     onSuccess: () => {
-      setAccountForm({ ...emptyAccountForm, policy: { ...defaultManagerPolicy } });
+      setAccountForm({
+        ...emptyAccountForm,
+        policy: { ...defaultManagerPolicy },
+      });
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
-    }
+    },
   });
 
   const updateAccountMutation = useMutation({
-    mutationFn: (request: { accountId: number; payload: ReturnType<typeof accountUpdatePayload> | { enabled: boolean } }) =>
+    mutationFn: (request: {
+      accountId: number;
+      payload: ReturnType<typeof accountUpdatePayload> | { enabled: boolean };
+    }) =>
       requestJson<Account>(`/api/v1/accounts/${request.accountId}`, {
         method: "PATCH",
-        body: JSON.stringify(request.payload)
+        body: JSON.stringify(request.payload),
       }),
     onSuccess: () => {
       setAccountEditorOpen(false);
       setSelectedAccountId(null);
       setAccountEditForm(emptyAccountEditForm);
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
-    }
+    },
   });
 
   const updatePolicyMutation = useMutation({
     mutationFn: (request: { accountId: number; policy: ManagerPolicy }) =>
-      requestJson<ManagerPolicy>(`/api/v1/accounts/${request.accountId}/policy`, {
-        method: "PUT",
-        body: JSON.stringify(request.policy)
-      }),
+      requestJson<ManagerPolicy>(
+        `/api/v1/accounts/${request.accountId}/policy`,
+        {
+          method: "PUT",
+          body: JSON.stringify(request.policy),
+        },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
-    }
+    },
   });
 
   const onLoginSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -2589,7 +1230,7 @@ export function AdminDashboard() {
     }
     updateAccountMutation.mutate({
       accountId: selectedAccountId,
-      payload: accountUpdatePayload(accountEditForm)
+      payload: accountUpdatePayload(accountEditForm),
     });
   };
 
@@ -2600,7 +1241,9 @@ export function AdminDashboard() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-sm font-medium text-accent">{ui.appName}</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-normal">{ui.title}</h1>
+              <h1 className="mt-2 text-3xl font-semibold tracking-normal">
+                {ui.title}
+              </h1>
             </div>
             {user ? (
               <AccountMenu
@@ -2613,7 +1256,11 @@ export function AdminDashboard() {
                 onLanguageChange={setLanguage}
               />
             ) : (
-              <LanguageControl language={language} labels={ui} onLanguageChange={setLanguage} />
+              <LanguageControl
+                language={language}
+                labels={ui}
+                onLanguageChange={setLanguage}
+              />
             )}
           </div>
           {user ? (
@@ -2644,7 +1291,9 @@ export function AdminDashboard() {
 
         {user ? (
           <>
-            {activePage === "overview" ? <OverviewPanel statusRows={ui.statusRows} /> : null}
+            {activePage === "overview" ? (
+              <OverviewPanel statusRows={ui.statusRows} />
+            ) : null}
 
             {activePage === "me" ? (
               <MyAccountPanel
@@ -2671,7 +1320,10 @@ export function AdminDashboard() {
                     return;
                   }
                   setSelectedProfileId(null);
-                  setProfileForm({ ...emptyProfileForm, owner_user_id: String(user.id) });
+                  setProfileForm({
+                    ...emptyProfileForm,
+                    owner_user_id: String(user.id),
+                  });
                   setProfileEditorOpen(true);
                 }}
                 onSelect={(profile) => {
@@ -2711,7 +1363,10 @@ export function AdminDashboard() {
                   setAccountEditorOpen(true);
                 }}
                 onToggleEnabled={(account) =>
-                  updateAccountMutation.mutate({ accountId: account.id, payload: { enabled: !account.enabled } })
+                  updateAccountMutation.mutate({
+                    accountId: account.id,
+                    payload: { enabled: !account.enabled },
+                  })
                 }
                 onUpdatePolicy={(account, policy) =>
                   updatePolicyMutation.mutate({ accountId: account.id, policy })
@@ -2749,14 +1404,18 @@ export function AdminDashboard() {
                 saveError={saveProfileMutation.isError}
                 ownerAccounts={accounts}
                 showOwner={Boolean(canManageSystemSettings)}
-                onArchive={(profileId) => archiveProfileMutation.mutate(profileId)}
+                onArchive={(profileId) =>
+                  archiveProfileMutation.mutate(profileId)
+                }
                 onCancel={() => {
                   setProfileEditorOpen(false);
                   setSelectedProfileId(null);
                   setProfileForm(emptyProfileForm);
                 }}
                 onChange={setProfileForm}
-                onRestore={(profileId) => restoreProfileMutation.mutate(profileId)}
+                onRestore={(profileId) =>
+                  restoreProfileMutation.mutate(profileId)
+                }
                 onSubmit={onProfileSubmit}
               />
             ) : null}
@@ -2764,9 +1423,16 @@ export function AdminDashboard() {
             {activePage === "system" && canManageSystemSettings ? (
               <div className="grid gap-4">
                 <SiteTLSPanel
-                  credentials={credentials.filter((item) => item.scope === "SYSTEM" && item.platform === "tencent_ssl" && item.purpose === "TLS")}
+                  credentials={credentials.filter(
+                    (item) =>
+                      item.scope === "SYSTEM" &&
+                      item.platform === "tencent_ssl" &&
+                      item.purpose === "TLS",
+                  )}
                   credentialCreateError={createTLSCredentialMutation.isError}
-                  credentialCreatePending={createTLSCredentialMutation.isPending}
+                  credentialCreatePending={
+                    createTLSCredentialMutation.isPending
+                  }
                   credentialLabel={tlsCredentialLabel}
                   credentialSecret={tlsCredentialSecret}
                   form={siteTLSForm}
@@ -2775,7 +1441,10 @@ export function AdminDashboard() {
                   savePending={saveSiteTLSMutation.isPending}
                   settings={siteTLSQuery.data}
                   syncPending={syncSiteTLSMutation.isPending}
-                  onCreateCredential={(event) => { event.preventDefault(); createTLSCredentialMutation.mutate(); }}
+                  onCreateCredential={(event) => {
+                    event.preventDefault();
+                    createTLSCredentialMutation.mutate();
+                  }}
                   onCredentialLabelChange={setTLSCredentialLabel}
                   onCredentialSecretChange={setTLSCredentialSecret}
                   onFormChange={setSiteTLSForm}
@@ -2784,7 +1453,9 @@ export function AdminDashboard() {
                 />
                 <StoragePanel
                   candidates={cleanupCandidatesQuery.data?.items ?? []}
-                  previewReclaimableBytes={cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0}
+                  previewReclaimableBytes={
+                    cleanupCandidatesQuery.data?.preview_reclaimable_bytes ?? 0
+                  }
                   form={storageForm}
                   cleanupError={cleanupMutation.isError}
                   cleanupPending={cleanupMutation.isPending}
@@ -2839,7 +1510,12 @@ export function AdminDashboard() {
 
             {activePage === "songs" && canManageSystemSettings ? (
               <SongsPanel
-                acrCredentials={credentials.filter((item) => item.scope === "SYSTEM" && item.platform === "acrcloud" && item.purpose === "SONG_RECOGNITION")}
+                acrCredentials={credentials.filter(
+                  (item) =>
+                    item.scope === "SYSTEM" &&
+                    item.platform === "acrcloud" &&
+                    item.purpose === "SONG_RECOGNITION",
+                )}
                 credentialCreateError={createAcrCredentialMutation.isError}
                 credentialCreatePending={createAcrCredentialMutation.isPending}
                 credentialLabel={acrCredentialLabel}
@@ -2854,7 +1530,10 @@ export function AdminDashboard() {
                 sources={songSourcesQuery.data?.items ?? []}
                 startError={createSongRunMutation.isError}
                 startPending={createSongRunMutation.isPending}
-                onCreateCredential={(event) => { event.preventDefault(); createAcrCredentialMutation.mutate(); }}
+                onCreateCredential={(event) => {
+                  event.preventDefault();
+                  createAcrCredentialMutation.mutate();
+                }}
                 onCredentialLabelChange={setAcrCredentialLabel}
                 onCredentialSecretChange={setAcrCredentialSecret}
                 onFormChange={setSongSettingsForm}
@@ -2866,15 +1545,21 @@ export function AdminDashboard() {
 
             {activePage === "recordings" ? (
               <RecordingsPanel
-                isLoading={recordingsQuery.isLoading || rawRecordingsQuery.isLoading}
+                isLoading={
+                  recordingsQuery.isLoading || rawRecordingsQuery.isLoading
+                }
                 jobs={jobs}
                 labels={ui}
                 canManageLocalFiles={canManageLocalFiles}
                 canScanLocalFiles={canScanLocalFiles}
                 cosDownloadPending={cosDownloadUrlMutation.isPending}
-                cosDownloadPendingOutputId={cosDownloadUrlMutation.variables?.outputId ?? null}
+                cosDownloadPendingOutputId={
+                  cosDownloadUrlMutation.variables?.outputId ?? null
+                }
                 cosFileDownloadPending={cosFileDownloadUrlMutation.isPending}
-                cosFileDownloadPendingFileId={cosFileDownloadUrlMutation.variables?.fileId ?? null}
+                cosFileDownloadPendingFileId={
+                  cosFileDownloadUrlMutation.variables?.fileId ?? null
+                }
                 protectPending={protectRecordingMutation.isPending}
                 reviewPending={
                   requireRecordingReviewMutation.isPending ||
@@ -2907,12 +1592,18 @@ export function AdminDashboard() {
                     repairUploadSourcesMutation.mutate();
                   }
                 }}
-                onDownloadOutput={(uploadSourceId, outputId) => cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })}
+                onDownloadOutput={(uploadSourceId, outputId) =>
+                  cosDownloadUrlMutation.mutate({ uploadSourceId, outputId })
+                }
                 onDownloadLocalOutput={downloadLocalUploadSourceOutput}
-                onDownloadFile={(fileId) => cosFileDownloadUrlMutation.mutate({ fileId })}
+                onDownloadFile={(fileId) =>
+                  cosFileDownloadUrlMutation.mutate({ fileId })
+                }
                 onApproveReview={(recording) => {
                   if (recording.upload_source_id) {
-                    approveUploadSourceReviewMutation.mutate(recording.upload_source_id);
+                    approveUploadSourceReviewMutation.mutate(
+                      recording.upload_source_id,
+                    );
                   }
                 }}
                 editDrafts={editDrafts}
@@ -2923,14 +1614,22 @@ export function AdminDashboard() {
                   if (cuts.length === 0) {
                     return;
                   }
-                  applyUploadSourceEditMutation.mutate({ uploadSourceId, cuts });
+                  applyUploadSourceEditMutation.mutate({
+                    uploadSourceId,
+                    cuts,
+                  });
                 }}
                 onEditDraftChange={(uploadSourceId, value) =>
-                  setEditDrafts((current) => ({ ...current, [uploadSourceId]: value }))
+                  setEditDrafts((current) => ({
+                    ...current,
+                    [uploadSourceId]: value,
+                  }))
                 }
                 onRequireReview={(recording) => {
                   if (recording.upload_source_id) {
-                    requireUploadSourceReviewMutation.mutate(recording.upload_source_id);
+                    requireUploadSourceReviewMutation.mutate(
+                      recording.upload_source_id,
+                    );
                     return;
                   }
                   requireRecordingReviewMutation.mutate(recording.id);
@@ -2938,7 +1637,10 @@ export function AdminDashboard() {
                 onSearchChange={setRecordingSearch}
                 onSortChange={setRecordingSort}
                 onToggleProtect={(recording) =>
-                  protectRecordingMutation.mutate({ id: recording.id, protected: !recording.local_protected })
+                  protectRecordingMutation.mutate({
+                    id: recording.id,
+                    protected: !recording.local_protected,
+                  })
                 }
               />
             ) : null}
@@ -2958,11 +1660,19 @@ export function AdminDashboard() {
                 onCancel={(job) => cancelJobMutation.mutate(job.id)}
                 onRefresh={() => void jobsQuery.refetch()}
                 onRetry={(job) => {
-                  const ambiguousBilibili = job.type === "UPLOAD_BILIBILI" && job.last_error_class === "AMBIGUOUS";
-                  if (ambiguousBilibili && !window.confirm(ui.confirmAmbiguousBilibiliRetry)) {
+                  const ambiguousBilibili =
+                    job.type === "UPLOAD_BILIBILI" &&
+                    job.last_error_class === "AMBIGUOUS";
+                  if (
+                    ambiguousBilibili &&
+                    !window.confirm(ui.confirmAmbiguousBilibiliRetry)
+                  ) {
                     return;
                   }
-                  retryJobMutation.mutate({ jobId: job.id, confirmAmbiguousBilibili: ambiguousBilibili });
+                  retryJobMutation.mutate({
+                    jobId: job.id,
+                    confirmAmbiguousBilibili: ambiguousBilibili,
+                  });
                 }}
                 onSearchChange={setJobSearch}
                 onSortChange={setJobSort}
@@ -2972,3064 +1682,14 @@ export function AdminDashboard() {
         ) : null}
 
         <section className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-4 text-sm text-muted">
-          <span>{ui.api}: {healthQuery.data?.status ?? ui.checking}</span>
-          <span>{ui.release}: {healthQuery.data?.release_sha ?? ui.unknown}</span>
+          <span>
+            {ui.api}: {healthQuery.data?.status ?? ui.checking}
+          </span>
+          <span>
+            {ui.release}: {healthQuery.data?.release_sha ?? ui.unknown}
+          </span>
         </section>
       </div>
     </main>
-  );
-}
-
-function AdminNav(props: {
-  activePage: AdminPage;
-  canManageSystemSettings: boolean;
-  canManageUploadSettings: boolean;
-  labels: AdminCopy;
-  onChange: (page: AdminPage) => void;
-}) {
-  const items: Array<{ page: AdminPage; label: string; icon: typeof Activity }> = [
-    { page: "overview", label: props.labels.nav.overview, icon: LayoutDashboard },
-    { page: "profiles", label: props.labels.nav.profiles, icon: Activity },
-    { page: "recordings", label: props.labels.nav.recordings, icon: FileVideo }
-  ];
-
-  if (props.canManageUploadSettings) {
-    items.push({ page: "uploads", label: props.labels.nav.uploads, icon: CloudUpload });
-  }
-
-  if (props.canManageSystemSettings) {
-    items.push({ page: "songs", label: props.labels.nav.songs, icon: Music2 });
-  }
-
-  items.push({ page: "jobs", label: props.labels.nav.jobs, icon: RefreshCw });
-
-  if (props.canManageSystemSettings) {
-    items.push({ page: "accounts", label: props.labels.nav.accounts, icon: Users });
-    items.push({ page: "system", label: props.labels.nav.system, icon: Settings });
-  }
-
-  return (
-    <nav className="mt-5 flex flex-wrap gap-2" aria-label={props.labels.navLabel}>
-      {items.map(({ page, label, icon: Icon }) => {
-        const isActive = props.activePage === page;
-        return (
-          <button
-            key={page}
-            className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium shadow-sm ${
-              isActive
-                ? "border-accent bg-accent text-white"
-                : "border-border bg-panel text-ink hover:border-accent hover:text-accent"
-            }`}
-            type="button"
-            onClick={() => props.onChange(page)}
-          >
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            {label}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
-function AccountMenu(props: {
-  language: Language;
-  labels: AdminCopy;
-  logoutPending: boolean;
-  user: User;
-  onAccount: () => void;
-  onLanguageChange: (language: Language) => void;
-  onLogout: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-panel px-3 py-2 shadow-sm">
-      <UserCircle className="h-5 w-5 text-accent" aria-hidden="true" />
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold">{props.user.username}</p>
-        <p className="text-xs text-muted">{props.user.role}</p>
-      </div>
-      <LanguageControl language={props.language} labels={props.labels} onLanguageChange={props.onLanguageChange} />
-      <button
-        className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent"
-        type="button"
-        onClick={props.onAccount}
-      >
-        <UserCircle className="h-4 w-4" aria-hidden="true" />
-        {props.labels.myAccount}
-      </button>
-      <button
-        className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-medium text-white disabled:opacity-60"
-        disabled={props.logoutPending}
-        type="button"
-        onClick={props.onLogout}
-      >
-        <LogOut className="h-4 w-4" aria-hidden="true" />
-        {props.labels.signOut}
-      </button>
-    </div>
-  );
-}
-
-function LanguageControl(props: {
-  language: Language;
-  labels: AdminCopy;
-  onLanguageChange: (language: Language) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-xs font-medium text-muted shadow-sm">
-      {props.labels.language}
-      <select
-        className="h-9 rounded-md border border-border bg-white px-2 text-sm font-medium text-ink outline-none focus:border-accent"
-        value={props.language}
-        onChange={(event) => props.onLanguageChange(event.target.value as Language)}
-      >
-        <option value="zh">{props.labels.chinese}</option>
-        <option value="en">{props.labels.english}</option>
-      </select>
-    </label>
-  );
-}
-
-function MyAccountPanel(props: {
-  canManageSystemSettings: boolean;
-  labels: AdminCopy;
-  policy?: ManagerPolicy;
-  user: User;
-}) {
-  return (
-    <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">{props.labels.myAccount}</h2>
-        <div className="mt-4 grid gap-3">
-          <Metric label={props.labels.username} value={props.user.username} />
-          <Metric label={props.labels.role} value={props.user.role} />
-          <Metric label={props.labels.status} value={props.user.enabled ? props.labels.enabled : props.labels.disabled} />
-        </div>
-      </section>
-
-      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">{props.labels.access}</h2>
-        {props.canManageSystemSettings ? (
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <Metric label={props.labels.systemSettings} value={props.labels.allowed} />
-            <Metric label={props.labels.accounts} value={props.labels.allowed} />
-            <Metric label={props.labels.profiles} value={props.labels.allOwners} />
-          </div>
-        ) : props.policy ? (
-          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            <PermissionBadge labels={props.labels} label={props.labels.recordingProfiles} enabled={props.policy.can_edit_recording_profile} />
-            <PermissionBadge labels={props.labels} label={props.labels.bilibiliConfig} enabled={props.policy.can_edit_bilibili_module} />
-            <PermissionBadge labels={props.labels} label={props.labels.cosConfig} enabled={props.policy.can_edit_cos_module} />
-            <PermissionBadge labels={props.labels} label={props.labels.neteaseConfig} enabled={props.policy.can_edit_netease_module} />
-            <PermissionBadge labels={props.labels} label={props.labels.localFiles} enabled={props.policy.can_manage_local_files} />
-          </div>
-        ) : (
-          <p className="mt-4 text-sm text-muted">{props.labels.policyUnavailable}</p>
-        )}
-      </section>
-    </section>
-  );
-}
-
-function PermissionBadge(props: { enabled: boolean; label: string; labels: AdminCopy }) {
-  return (
-    <div className="rounded-md border border-border bg-white px-3 py-2">
-      <p className="text-xs uppercase text-muted">{props.label}</p>
-      <p className={`mt-1 text-sm font-semibold ${props.enabled ? "text-accent" : "text-muted"}`}>
-        {props.enabled ? props.labels.allowed : props.labels.blocked}
-      </p>
-    </div>
-  );
-}
-
-function OverviewPanel(props: { statusRows: AdminCopy["statusRows"] }) {
-  return (
-    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {props.statusRows.map(({ label, value, icon: Icon }) => (
-        <article key={label} className="rounded-md border border-border bg-panel p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold">{label}</h2>
-              <p className="mt-2 text-sm leading-5 text-muted">{value}</p>
-            </div>
-            <Icon className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
-          </div>
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function SessionPanel(props: {
-  labels: AdminCopy;
-  loginError: boolean;
-  logoutPending: boolean;
-  password: string;
-  username: string;
-  user?: User;
-  onLoginSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onLogout: () => void;
-  onPasswordChange: (value: string) => void;
-  onUsernameChange: (value: string) => void;
-}) {
-  if (props.user) {
-    return (
-      <aside className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">{props.labels.session}</h2>
-        <div className="mt-4 flex flex-col gap-4">
-          <div>
-            <p className="text-lg font-semibold">{props.user.username}</p>
-            <p className="text-sm text-muted">{props.user.role}</p>
-          </div>
-          <button
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-medium text-white disabled:opacity-60"
-            disabled={props.logoutPending}
-            type="button"
-            onClick={props.onLogout}
-          >
-            <LogOut className="h-4 w-4" aria-hidden="true" />
-            {props.labels.signOut}
-          </button>
-        </div>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="rounded-md border border-border bg-panel p-4 shadow-sm">
-      <h2 className="text-sm font-semibold">{props.labels.session}</h2>
-      <form className="mt-4 flex flex-col gap-3" onSubmit={props.onLoginSubmit}>
-        <TextField
-          autoComplete="username"
-          label={props.labels.username}
-          value={props.username}
-          onChange={props.onUsernameChange}
-        />
-        <TextField
-          autoComplete="current-password"
-          label={props.labels.password}
-          type="password"
-          value={props.password}
-          onChange={props.onPasswordChange}
-        />
-        {props.loginError ? (
-          <p className="text-sm text-red-700">{props.labels.loginFailed}</p>
-        ) : null}
-        <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white">
-          <LogIn className="h-4 w-4" aria-hidden="true" />
-          {props.labels.signIn}
-        </button>
-      </form>
-    </aside>
-  );
-}
-
-function ProfileEditorDialog(props: {
-  archivePending: boolean;
-  form: ProfileForm;
-  isEditing: boolean;
-  isSaving: boolean;
-  labels: AdminCopy;
-  ownerAccounts: Account[];
-  profile?: RecordingProfile;
-  restorePending: boolean;
-  saveError: boolean;
-  showOwner: boolean;
-  onArchive: (profileId: number) => void;
-  onCancel: () => void;
-  onChange: (form: ProfileForm) => void;
-  onRestore: (profileId: number) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const update = <K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) => {
-    props.onChange({ ...props.form, [key]: value });
-  };
-  const isArchived = Boolean(props.profile?.archived_at);
-  const ownerOptions = props.ownerAccounts.filter((account) => account.enabled);
-  const selectedOwnerMissing =
-    props.form.owner_user_id && !ownerOptions.some((account) => String(account.id) === props.form.owner_user_id);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
-      <form
-        className="w-full max-w-xl rounded-md border border-border bg-panel p-4 shadow-xl"
-        onSubmit={props.onSubmit}
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
-          <div>
-            <h2 className="text-base font-semibold">{props.isEditing ? props.labels.editProfile : props.labels.newProfile}</h2>
-            {isArchived ? <p className="mt-1 text-xs font-medium text-muted">{props.labels.archivedProfile}</p> : null}
-          </div>
-          <button
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
-            type="button"
-            onClick={props.onCancel}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">{props.labels.close}</span>
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3">
-          {props.showOwner ? (
-            <label className="flex flex-col gap-1 text-sm font-medium">
-              {props.labels.owner}
-              <select
-                className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-                value={props.form.owner_user_id}
-                onChange={(event) => update("owner_user_id", event.target.value)}
-              >
-                {selectedOwnerMissing ? <option value={props.form.owner_user_id}>{props.labels.currentOwner}</option> : null}
-                {ownerOptions.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.username} ({account.role})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <TextField label={props.labels.name} value={props.form.name} onChange={(value) => update("name", value)} />
-          <TextField
-            label={props.labels.roomId}
-            value={props.form.room_id}
-            onChange={(value) => update("room_id", value)}
-          />
-          <TextField
-            label={props.labels.streamer}
-            value={props.form.streamer_name}
-            onChange={(value) => update("streamer_name", value)}
-          />
-          <TextField
-            label={props.labels.streamerUid}
-            value={props.form.streamer_uid}
-            onChange={(value) => update("streamer_uid", value)}
-          />
-          <TextField
-            label={props.labels.timezone}
-            value={props.form.timezone}
-            onChange={(value) => update("timezone", value)}
-          />
-          <TextField
-            label={props.labels.publicSlug}
-            value={props.form.public_slug}
-            onChange={(value) => update("public_slug", value)}
-          />
-          <SelectField label={props.labels.quality} value={props.form.quality} onChange={(value) => update("quality", value)} />
-          <NumberField
-            label={props.labels.segmentSeconds}
-            min={60}
-            value={props.form.segment_duration_sec}
-            onChange={(value) => update("segment_duration_sec", value)}
-          />
-          <NumberField
-            label={props.labels.finalizeGraceSeconds}
-            min={0}
-            value={props.form.finalize_grace_period_sec}
-            onChange={(value) => update("finalize_grace_period_sec", value)}
-          />
-          <ToggleField label={props.labels.enabled} checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
-          <ToggleField
-            label={props.labels.autoRecord}
-            checked={props.form.auto_record}
-            onChange={(value) => update("auto_record", value)}
-          />
-          <ToggleField
-            label={props.labels.recordDanmaku}
-            checked={props.form.record_danmaku}
-            onChange={(value) => update("record_danmaku", value)}
-          />
-          <ToggleField
-            label={props.labels.publicPage}
-            checked={props.form.public_enabled}
-            onChange={(value) => update("public_enabled", value)}
-          />
-        </div>
-
-        {props.saveError ? (
-          <p className="mt-3 text-sm text-red-700">{props.labels.profileSaveFailed}</p>
-        ) : null}
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <div>
-            {props.profile && isArchived ? (
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.restorePending}
-                type="button"
-                onClick={() => props.onRestore(props.profile!.id)}
-              >
-                <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
-                {props.labels.restoreProfile}
-              </button>
-            ) : null}
-            {props.profile && !isArchived ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {confirmArchive ? (
-                  <>
-                    <button
-                      className="inline-flex h-9 items-center justify-center rounded-md bg-red-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
-                      disabled={props.archivePending}
-                      type="button"
-                      onClick={() => props.onArchive(props.profile!.id)}
-                    >
-                      {props.labels.confirmArchive}
-                    </button>
-                    <button
-                      className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
-                      type="button"
-                      onClick={() => setConfirmArchive(false)}
-                    >
-                      {props.labels.cancel}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:border-red-700 disabled:opacity-60"
-                    disabled={props.archivePending}
-                    type="button"
-                    onClick={() => setConfirmArchive(true)}
-                  >
-                    <Archive className="h-4 w-4" aria-hidden="true" />
-                    {props.labels.archiveProfile}
-                  </button>
-                )}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
-              type="button"
-              onClick={props.onCancel}
-            >
-              {props.labels.cancel}
-            </button>
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-              disabled={props.isSaving}
-              type="submit"
-            >
-              {props.isEditing ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-              {props.isEditing ? props.labels.save : props.labels.create}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function AccountsPanel(props: {
-  accountForm: AccountForm;
-  accounts: Account[];
-  createError: boolean;
-  createPending: boolean;
-  currentUserId: number;
-  labels: AdminCopy;
-  policyPending: boolean;
-  search: string;
-  sort: AccountSortKey;
-  total: number;
-  visibleTotal: number;
-  updatePending: boolean;
-  onAccountFormChange: (form: AccountForm) => void;
-  onCreate: (event: FormEvent<HTMLFormElement>) => void;
-  onEdit: (account: Account) => void;
-  onSearchChange: (value: string) => void;
-  onSortChange: (value: AccountSortKey) => void;
-  onToggleEnabled: (account: Account) => void;
-  onUpdatePolicy: (account: Account, policy: ManagerPolicy) => void;
-}) {
-  const updateForm = <K extends keyof AccountForm>(key: K, value: AccountForm[K]) => {
-    props.onAccountFormChange({ ...props.accountForm, [key]: value });
-  };
-  const updateFormPolicy = (key: PolicyFlag, value: boolean) => {
-    props.onAccountFormChange({
-      ...props.accountForm,
-      policy: { ...props.accountForm.policy, [key]: value }
-    });
-  };
-
-  return (
-    <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <form className="rounded-md border border-border bg-panel p-4 shadow-sm" onSubmit={props.onCreate}>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">{props.labels.newManager}</h2>
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={props.createPending}
-            type="submit"
-          >
-            <UserPlus className="h-4 w-4" aria-hidden="true" />
-            {props.labels.create}
-          </button>
-        </div>
-        <div className="mt-4 grid gap-3">
-          <TextField
-            autoComplete="username"
-            label={props.labels.username}
-            value={props.accountForm.username}
-            onChange={(value) => updateForm("username", value)}
-          />
-          <TextField
-            autoComplete="new-password"
-            label={props.labels.initialPassword}
-            type="password"
-            value={props.accountForm.password}
-            onChange={(value) => updateForm("password", value)}
-          />
-          <ToggleField
-            label={props.labels.enabled}
-            checked={props.accountForm.enabled}
-            onChange={(value) => updateForm("enabled", value)}
-          />
-          <AccountPolicyFields
-            labels={props.labels}
-            policy={props.accountForm.policy}
-            onChange={(key, value) => updateFormPolicy(key, value)}
-          />
-          {props.createError ? (
-            <p className="text-sm text-red-700">{props.labels.accountCreationFailed}</p>
-          ) : null}
-        </div>
-      </form>
-
-      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">{props.labels.accounts}</h2>
-          <span className="text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</span>
-        </div>
-        <TableToolbar
-          labels={props.labels}
-          search={props.search}
-          sort={props.sort}
-          sortOptions={[
-            { value: "username_asc", label: props.labels.sortUsername },
-            { value: "role_asc", label: props.labels.sortRole }
-          ]}
-          onSearchChange={props.onSearchChange}
-          onSortChange={(value) => props.onSortChange(value as AccountSortKey)}
-        />
-        <div className="mt-4 overflow-hidden rounded-md border border-border">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-              <tr>
-                <th className="px-3 py-2 font-semibold">{props.labels.account}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.role}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.profiles}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.accounts.map((account) => (
-                <tr key={account.id} className="bg-white align-top">
-                  <td className="px-3 py-3">
-                    <p className="font-semibold text-ink">{account.username}</p>
-                    <p className="mt-1 text-xs text-muted">ID {account.id}</p>
-                  </td>
-                  <td className="px-3 py-3 text-muted">{account.role}</td>
-                  <td className="px-3 py-3 text-muted">{account.profile_count}</td>
-                  <td className="px-3 py-3 text-muted">{account.enabled ? props.labels.enabled : props.labels.disabled}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-col items-start gap-2">
-                      <button
-                        className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                        type="button"
-                        onClick={() => props.onEdit(account)}
-                      >
-                        {props.labels.edit}
-                      </button>
-                      <button
-                        className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                        disabled={props.updatePending || account.id === props.currentUserId}
-                        type="button"
-                        onClick={() => props.onToggleEnabled(account)}
-                      >
-                        {account.enabled ? props.labels.disable : props.labels.enable}
-                      </button>
-                      {account.policy ? (
-                        <div className="grid gap-2 pt-1">
-                          <AccountPolicyFields
-                            compact
-                            labels={props.labels}
-                            policy={account.policy}
-                            onChange={(key, value) =>
-                              props.onUpdatePolicy(account, { ...account.policy!, [key]: value })
-                            }
-                            disabled={props.policyPending}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {props.accounts.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-8 text-center text-muted" colSpan={5}>
-                    {props.accounts.length === 0 && props.search ? props.labels.emptyFiltered : props.labels.noAccounts}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </section>
-  );
-}
-
-function AccountPolicyFields(props: {
-  compact?: boolean;
-  disabled?: boolean;
-  labels: AdminCopy;
-  policy: ManagerPolicy;
-  onChange: (key: PolicyFlag, value: boolean) => void;
-}) {
-  const fields: Array<{ key: PolicyFlag; label: string }> = [
-    { key: "can_edit_recording_profile", label: props.labels.editProfiles },
-    { key: "can_edit_bilibili_module", label: props.labels.bilibiliConfig },
-    { key: "can_edit_cos_module", label: props.labels.cosConfig },
-    { key: "can_edit_netease_module", label: props.labels.neteaseConfig },
-    { key: "can_manage_local_files", label: props.labels.localFiles }
-  ];
-
-  return (
-    <div className={props.compact ? "grid gap-1" : "grid gap-2"}>
-      {fields.map((field) => (
-        <ToggleField
-          key={field.key}
-          checked={Boolean(props.policy[field.key])}
-          disabled={props.disabled}
-          label={field.label}
-          onChange={(value) => props.onChange(field.key, value)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function AccountEditorDialog(props: {
-  account: Account;
-  currentUserId: number;
-  form: AccountEditForm;
-  isSaving: boolean;
-  labels: AdminCopy;
-  saveError: boolean;
-  onCancel: () => void;
-  onChange: (form: AccountEditForm) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  const update = <K extends keyof AccountEditForm>(key: K, value: AccountEditForm[K]) => {
-    props.onChange({ ...props.form, [key]: value });
-  };
-  const isCurrentUser = props.account.id === props.currentUserId;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-4 py-6">
-      <form
-        className="w-full max-w-lg rounded-md border border-border bg-panel p-4 shadow-xl"
-        onSubmit={props.onSubmit}
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
-          <div>
-            <h2 className="text-base font-semibold">{props.labels.editAccount}</h2>
-            <p className="mt-1 text-xs text-muted">
-              ID {props.account.id} · {isCurrentUser ? props.labels.currentAccount : props.account.role}
-            </p>
-          </div>
-          <button
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink hover:border-accent hover:text-accent"
-            type="button"
-            onClick={props.onCancel}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">{props.labels.close}</span>
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3">
-          <TextField
-            autoComplete="username"
-            label={props.labels.username}
-            value={props.form.username}
-            onChange={(value) => update("username", value)}
-          />
-          <TextField
-            autoComplete="new-password"
-            label={props.labels.newPassword}
-            type="password"
-            value={props.form.password}
-            onChange={(value) => update("password", value)}
-          />
-          <p className="-mt-2 text-xs text-muted">{props.labels.newPasswordHint}</p>
-          <ToggleField
-            disabled={isCurrentUser}
-            label={props.labels.enabled}
-            checked={props.form.enabled}
-            onChange={(value) => update("enabled", value)}
-          />
-        </div>
-
-        {props.saveError ? (
-          <p className="mt-3 text-sm text-red-700">{props.labels.accountSaveFailed}</p>
-        ) : null}
-
-        <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
-          <button
-            className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-ink"
-            type="button"
-            onClick={props.onCancel}
-          >
-            {props.labels.cancel}
-          </button>
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={props.isSaving}
-            type="submit"
-          >
-            <Save className="h-4 w-4" aria-hidden="true" />
-            {props.labels.saveAccount}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function ProfileListPanel(props: {
-  canEdit: boolean;
-  labels: AdminCopy;
-  profiles: RecordingProfile[];
-  search: string;
-  selectedProfileId: number | null;
-  showOwner: boolean;
-  sort: ProfileSortKey;
-  total: number;
-  visibleTotal: number;
-  onCreate: () => void;
-  onSearchChange: (value: string) => void;
-  onSelect: (profile: RecordingProfile) => void;
-  onSortChange: (value: ProfileSortKey) => void;
-}) {
-  return (
-    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{props.labels.recordingProfiles}</h2>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</span>
-          {props.canEdit ? (
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white"
-              type="button"
-              onClick={props.onCreate}
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              {props.labels.new}
-            </button>
-          ) : null}
-        </div>
-      </div>
-      <TableToolbar
-        labels={props.labels}
-        search={props.search}
-        sort={props.sort}
-        sortOptions={[
-          { value: "name_asc", label: props.labels.sortName },
-          { value: "room_asc", label: props.labels.sortRoom }
-        ]}
-        onSearchChange={props.onSearchChange}
-        onSortChange={(value) => props.onSortChange(value as ProfileSortKey)}
-      />
-      <div className="mt-4 overflow-hidden rounded-md border border-border">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.name}</th>
-              {props.showOwner ? <th className="px-3 py-2 font-semibold">{props.labels.ownerColumn}</th> : null}
-              <th className="px-3 py-2 font-semibold">{props.labels.room}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.runtime}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.sync}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.profiles.map((profile) => (
-              <tr
-                key={profile.id}
-                className={profile.id === props.selectedProfileId ? "bg-[#f4f7f1]" : "bg-white"}
-              >
-                <td className="px-3 py-3">
-                  <button
-                    className={`font-semibold ${props.canEdit ? "text-ink hover:text-accent" : "cursor-default text-ink"}`}
-                    type="button"
-                    onClick={() => {
-                      if (props.canEdit) {
-                        props.onSelect(profile);
-                      }
-                    }}
-                  >
-                    {profile.name}
-                  </button>
-                  <p className="mt-1 text-xs text-muted">{profile.streamer_name}</p>
-                </td>
-                {props.showOwner ? (
-                  <td className="px-3 py-3 text-muted">{profile.owner_username || profile.owner_user_id}</td>
-                ) : null}
-                <td className="px-3 py-3 text-muted">{profile.room_id}</td>
-                <td className="px-3 py-3 text-muted">{profile.runtime.recorder_status}</td>
-                <td className="px-3 py-3 text-muted">{profile.runtime.sync_status}</td>
-                <td className="px-3 py-3">
-                  {!props.canEdit ? (
-                    <span className="text-xs text-muted">{props.labels.noAction}</span>
-                  ) : profile.archived_at ? (
-                    <span className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted">
-                      {props.labels.archived}
-                    </span>
-                  ) : (
-                    <button
-                      className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                      type="button"
-                      onClick={() => props.onSelect(profile)}
-                    >
-                      {props.labels.edit}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {props.profiles.length === 0 ? (
-              <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={props.showOwner ? 6 : 5}>
-                  {props.profiles.length === 0 && props.search ? props.labels.emptyFiltered : props.labels.noProfiles}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function SongsPanel(props: {
-  acrCredentials: Credential[];
-  credentialCreateError: boolean;
-  credentialCreatePending: boolean;
-  credentialLabel: string;
-  credentialSecret: string;
-  form: SongSettingsForm;
-  labels: AdminCopy;
-  runs: SongAnalysisRun[];
-  songs: RecognizedSong[];
-  saveError: boolean;
-  savePending: boolean;
-  selectedSourceID: string;
-  sources: SongAnalysisSource[];
-  startError: boolean;
-  startPending: boolean;
-  onCreateCredential: (event: FormEvent<HTMLFormElement>) => void;
-  onCredentialLabelChange: (value: string) => void;
-  onCredentialSecretChange: (value: string) => void;
-  onFormChange: (form: SongSettingsForm) => void;
-  onSave: () => void;
-  onSelectedSourceChange: (value: string) => void;
-  onStart: () => void;
-}) {
-  const update = <K extends keyof SongSettingsForm>(key: K, value: SongSettingsForm[K]) => {
-    props.onFormChange({ ...props.form, [key]: value });
-  };
-  return (
-    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <Music2 className="h-5 w-5 text-accent" aria-hidden="true" />
-        <h2 className="text-sm font-semibold">{props.labels.songsTitle}</h2>
-      </div>
-
-      <div className="mt-4 grid gap-5 lg:grid-cols-2">
-        <div className="grid content-start gap-3">
-          <h3 className="text-sm font-semibold">{props.labels.songsSettings}</h3>
-          <ToggleField checked={props.form.enabled} label={props.labels.songsEnabled} onChange={(value) => update("enabled", value)} />
-          <label className="grid gap-1 text-sm font-medium">
-            {props.labels.acrCredential}
-            <select className="h-10 rounded-md border border-border bg-white px-3" value={props.form.credential_id} onChange={(event) => update("credential_id", event.target.value)}>
-              <option value="">{props.labels.noCredentialSelected}</option>
-              {props.acrCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.account_label}</option>)}
-            </select>
-          </label>
-          <TextField label={props.labels.providerRegion} value={props.form.region} onChange={(value) => update("region", value)} />
-          <TextField label={props.labels.providerContainer} value={props.form.container_id} onChange={(value) => update("container_id", value)} />
-          <TextField label={props.labels.destinationCosProfile} type="number" value={props.form.destination_cos_storage_profile_id} onChange={(value) => update("destination_cos_storage_profile_id", value)} />
-          <TextField label={props.labels.songsPrefix} value={props.form.songs_prefix} onChange={(value) => update("songs_prefix", value)} />
-          <TextField label={props.labels.boundaryPadding} type="number" value={String(props.form.boundary_padding_ms)} onChange={(value) => update("boundary_padding_ms", Number(value))} />
-          {props.saveError ? <p className="text-sm text-red-700">{props.labels.songsSettingsFailed}</p> : null}
-          <button className="inline-flex h-9 w-fit items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60" disabled={props.savePending} type="button" onClick={props.onSave}>
-            <Save className="h-4 w-4" aria-hidden="true" />{props.labels.saveSongsSettings}
-          </button>
-        </div>
-
-        <form className="grid content-start gap-3 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0" onSubmit={props.onCreateCredential}>
-          <h3 className="text-sm font-semibold">{props.labels.acrCredential}</h3>
-          <TextField label={props.labels.acrCredentialName} value={props.credentialLabel} onChange={props.onCredentialLabelChange} />
-          <label className="grid gap-1 text-sm font-medium">
-            {props.labels.acrSecret}
-            <textarea className="min-h-28 rounded-md border border-border bg-white p-3 font-mono text-xs" value={props.credentialSecret} onChange={(event) => props.onCredentialSecretChange(event.target.value)} />
-          </label>
-          {props.credentialCreateError ? <p className="text-sm text-red-700">{props.labels.songsCredentialFailed}</p> : null}
-          <button className="inline-flex h-9 w-fit items-center gap-2 rounded-md border border-border px-3 text-sm font-medium disabled:opacity-60" disabled={props.credentialCreatePending} type="submit">
-            <Lock className="h-4 w-4" aria-hidden="true" />{props.labels.saveAcrCredential}
-          </button>
-        </form>
-      </div>
-
-      <div className="mt-5 border-t border-border pt-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="grid min-w-0 flex-1 gap-1 text-sm font-medium">
-            {props.labels.analysisSource}
-            <select className="h-10 min-w-0 rounded-md border border-border bg-white px-3" value={props.selectedSourceID} onChange={(event) => props.onSelectedSourceChange(event.target.value)}>
-              {props.sources.length === 0 ? <option value="">{props.labels.noSongSources}</option> : null}
-              {props.sources.map((source) => <option key={source.cos_object_id} value={source.cos_object_id}>{source.profile_name} · {source.object_key} · {formatBytes(source.size_bytes)}</option>)}
-            </select>
-          </label>
-          <button className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60" disabled={!props.selectedSourceID || props.startPending} type="button" onClick={props.onStart}>
-            <Music2 className="h-4 w-4" aria-hidden="true" />{props.labels.startAnalysis}
-          </button>
-        </div>
-        {props.startError ? <p className="mt-2 text-sm text-red-700">{props.labels.startAnalysisFailed}</p> : null}
-      </div>
-
-      <div className="mt-5 border-t border-border pt-4">
-        <h3 className="text-sm font-semibold">{props.labels.analysisRuns}</h3>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-[#eef1eb] text-xs text-muted"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">COS</th><th className="px-3 py-2">{props.labels.status}</th><th className="px-3 py-2">{props.labels.analysisCreated}</th></tr></thead>
-            <tbody>
-              {props.runs.map((run) => <tr key={run.id} className="border-b border-border last:border-0"><td className="px-3 py-3">{run.id}</td><td className="max-w-xl break-all px-3 py-3"><p>{run.source_object_key}</p><p className="text-xs text-muted">{formatBytes(run.source_size_bytes)}</p></td><td className="px-3 py-3"><p>{run.status}</p>{run.progress_message ? <p className="text-xs text-muted">{run.progress_message}</p> : null}{run.last_error ? <p className="text-xs text-red-700">{run.last_error}</p> : null}</td><td className="px-3 py-3 text-muted">{formatChinaDateParts(run.created_at).date} {formatChinaDateParts(run.created_at).time}</td></tr>)}
-              {props.runs.length === 0 ? <tr><td className="px-3 py-8 text-center text-muted" colSpan={4}>{props.labels.noAnalysisRuns}</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="mt-5 border-t border-border pt-4">
-        <h3 className="text-sm font-semibold">{props.labels.recognizedSongs}</h3>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-[#eef1eb] text-xs text-muted"><tr><th className="px-3 py-2">{props.labels.songAudio}</th><th className="px-3 py-2">{props.labels.title}</th><th className="px-3 py-2">{props.labels.songTimeRange}</th><th className="px-3 py-2">{props.labels.status}</th></tr></thead>
-            <tbody>
-              {props.songs.map((song) => (
-                <tr key={song.id} className="border-b border-border last:border-0">
-                  <td className="px-3 py-3">{song.audio_url ? <audio className="h-9 w-72 max-w-full" controls preload="none" src={song.audio_url} /> : <span className="text-xs text-muted">{song.audio_artifact_status}</span>}</td>
-                  <td className="px-3 py-3"><p className="font-medium">{song.title}</p><p className="text-xs text-muted">{song.artist || "-"}</p></td>
-                  <td className="px-3 py-3 text-muted">{formatSongOffset(song.start_ms)} - {formatSongOffset(song.end_ms)}</td>
-                  <td className="px-3 py-3">{song.status}</td>
-                </tr>
-              ))}
-              {props.songs.length === 0 ? <tr><td className="px-3 py-8 text-center text-muted" colSpan={4}>{props.labels.noRecognizedSongs}</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function formatSongOffset(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function UploadSettingsPanel(props: {
-  bilibiliConfigError: boolean;
-  bilibiliConfigPending: boolean;
-  canEditBilibiliModule: boolean;
-  canEditCosModule: boolean;
-  canReconcileUploadJobs: boolean;
-  cosConfigError: boolean;
-  cosConfigPending: boolean;
-  credentialCreateError: boolean;
-  credentialCreatePending: boolean;
-  credentialForm: CredentialForm;
-  credentials: Credential[];
-  labels: AdminCopy;
-  profiles: RecordingProfile[];
-  reconcileError: boolean;
-  reconcilePending: boolean;
-  reconcileResult?: UploadModuleReconcileResult;
-  selectedProfile?: RecordingProfile;
-  settingsForm: UploadSettingsForm;
-  onCreateCredential: (event: FormEvent<HTMLFormElement>) => void;
-  onCredentialFormChange: (form: CredentialForm) => void;
-  onReconcile: () => void;
-  onSaveBilibiliConfig: () => void;
-  onSaveCosConfig: () => void;
-  onSettingsFormChange: (form: UploadSettingsForm) => void;
-}) {
-  const updateCredential = <K extends keyof CredentialForm>(key: K, value: CredentialForm[K]) => {
-    props.onCredentialFormChange({ ...props.credentialForm, [key]: value });
-  };
-  const updateSettings = <K extends keyof UploadSettingsForm>(key: K, value: UploadSettingsForm[K]) => {
-    props.onSettingsFormChange({ ...props.settingsForm, [key]: value });
-  };
-  const bilibiliCredentials = props.credentials.filter(
-    (credential) => credential.platform === "bilibili" && credential.purpose === "PUBLISHER"
-  );
-  const cosCredentials = props.credentials.filter(
-    (credential) => credential.platform === "tencent_cos" && credential.purpose === "STORAGE"
-  );
-  const selectedProfileMissing =
-    props.settingsForm.profile_id &&
-    !props.profiles.some((profile) => String(profile.id) === props.settingsForm.profile_id);
-
-  if (!props.canEditBilibiliModule && !props.canEditCosModule) {
-    return (
-      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">{props.labels.uploadSettings}</h2>
-        <p className="mt-3 text-sm text-muted">{props.labels.uploadAccessBlocked}</p>
-      </section>
-    );
-  }
-
-  return (
-    <section id="uploads" className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">{props.labels.uploadSettings}</h2>
-            <p className="mt-1 text-sm text-muted">{props.labels.uploadProfileHint}</p>
-          </div>
-          {props.canReconcileUploadJobs ? (
-            <div className="flex flex-col items-end gap-1">
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-                disabled={props.reconcilePending}
-                type="button"
-                onClick={props.onReconcile}
-              >
-                <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                {props.labels.reconcileUploadJobs}
-              </button>
-              <p className="max-w-xs text-right text-xs text-muted">{props.labels.reconcileUploadHint}</p>
-            </div>
-          ) : null}
-        </div>
-
-        {props.reconcileResult ? (
-          <p className="mt-3 text-sm text-muted">
-            {props.labels.uploadReconcileResult(
-              props.reconcileResult.publications_created,
-              props.reconcileResult.bilibili_jobs_created,
-              props.reconcileResult.cos_objects_created,
-              props.reconcileResult.cos_jobs_created,
-              props.reconcileResult.cos_file_objects_created ?? 0,
-              props.reconcileResult.cos_file_jobs_created ?? 0
-            )}
-          </p>
-        ) : null}
-        {props.reconcileError ? <p className="mt-3 text-sm text-red-700">{props.labels.uploadReconcileFailed}</p> : null}
-
-        <label className="mt-4 flex flex-col gap-1 text-sm font-medium">
-          {props.labels.uploadProfile}
-          <select
-            className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-            value={props.settingsForm.profile_id}
-            onChange={(event) => updateSettings("profile_id", event.target.value)}
-          >
-            {selectedProfileMissing ? <option value={props.settingsForm.profile_id}>{props.labels.currentOwner}</option> : null}
-            {props.profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name} - {profile.room_id}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="mt-5 grid gap-4 xl:grid-cols-2">
-          <section className="rounded-md border border-border bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">{props.labels.bilibiliPublishing}</h3>
-                <p className="mt-1 text-xs text-muted">
-                  {props.settingsForm.bilibili_enabled ? props.labels.moduleEnabled : props.labels.moduleDisabled}
-                </p>
-              </div>
-              <CloudUpload className="h-5 w-5 text-accent" aria-hidden="true" />
-            </div>
-            <div className="mt-4 grid gap-3">
-              <ToggleField
-                disabled={!props.canEditBilibiliModule}
-                label={props.labels.enabled}
-                checked={props.settingsForm.bilibili_enabled}
-                onChange={(value) => updateSettings("bilibili_enabled", value)}
-              />
-              <CredentialSelect
-                credentials={bilibiliCredentials}
-                disabled={!props.canEditBilibiliModule}
-                label={props.labels.credential}
-                labels={props.labels}
-                value={props.settingsForm.bilibili_credential_id}
-                onChange={(value) => updateSettings("bilibili_credential_id", value)}
-              />
-              <TextField
-                disabled={!props.canEditBilibiliModule}
-                label={props.labels.bilibiliTitleTemplate}
-                value={props.settingsForm.bilibili_title_template}
-                onChange={(value) => updateSettings("bilibili_title_template", value)}
-              />
-              <TextAreaField
-                disabled={!props.canEditBilibiliModule}
-                label={props.labels.bilibiliDescriptionTemplate}
-                value={props.settingsForm.bilibili_description_template}
-                onChange={(value) => updateSettings("bilibili_description_template", value)}
-              />
-              <TextField
-                disabled={!props.canEditBilibiliModule}
-                label={props.labels.bilibiliTags}
-                value={props.settingsForm.bilibili_tags}
-                onChange={(value) => updateSettings("bilibili_tags", value)}
-              />
-              <label className="flex flex-col gap-1 text-sm font-medium">
-                {props.labels.bilibiliCopyright}
-                <select
-                  className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
-                  disabled={!props.canEditBilibiliModule}
-                  value={props.settingsForm.bilibili_copyright}
-                  onChange={(event) => updateSettings("bilibili_copyright", Number(event.target.value))}
-                >
-                  <option value={1}>{props.labels.bilibiliCopyrightOriginal}</option>
-                  <option value={2}>{props.labels.bilibiliCopyrightRepost}</option>
-                </select>
-              </label>
-              {props.settingsForm.bilibili_copyright === 2 ? (
-                <TextField
-                  disabled={!props.canEditBilibiliModule}
-                  label={props.labels.bilibiliSource}
-                  value={props.settingsForm.bilibili_source}
-                  onChange={(value) => updateSettings("bilibili_source", value)}
-                />
-              ) : null}
-              <label className="flex flex-col gap-1 text-sm font-medium">
-                {props.labels.bilibiliUploadLimit}
-                <input
-                  className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
-                  disabled={!props.canEditBilibiliModule}
-                  min={1}
-                  max={8}
-                  type="number"
-                  value={props.settingsForm.bilibili_upload_limit}
-                  onChange={(event) => updateSettings("bilibili_upload_limit", Number(event.target.value))}
-                />
-              </label>
-              <p className="text-xs leading-5 text-muted">{props.labels.bilibiliTemplateHint}</p>
-              {props.bilibiliConfigError ? (
-                <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p>
-              ) : null}
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-                disabled={!props.canEditBilibiliModule || props.bilibiliConfigPending || !props.selectedProfile}
-                type="button"
-                onClick={props.onSaveBilibiliConfig}
-              >
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {props.labels.saveBilibiliConfig}
-              </button>
-            </div>
-          </section>
-
-          <section className="rounded-md border border-border bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">{props.labels.cosStorage}</h3>
-                <p className="mt-1 text-xs text-muted">
-                  {props.settingsForm.cos_enabled ? props.labels.moduleEnabled : props.labels.moduleDisabled}
-                </p>
-              </div>
-              <HardDrive className="h-5 w-5 text-accent" aria-hidden="true" />
-            </div>
-            <div className="mt-4 grid gap-3">
-              <ToggleField
-                disabled={!props.canEditCosModule}
-                label={props.labels.enabled}
-                checked={props.settingsForm.cos_enabled}
-                onChange={(value) => updateSettings("cos_enabled", value)}
-              />
-              <CredentialSelect
-                credentials={cosCredentials}
-                disabled={!props.canEditCosModule}
-                label={props.labels.credential}
-                labels={props.labels}
-                value={props.settingsForm.cos_credential_id}
-                onChange={(value) => updateSettings("cos_credential_id", value)}
-              />
-              <TextField
-                label={props.labels.cosRegion}
-                value={props.settingsForm.cos_region}
-                onChange={(value) => updateSettings("cos_region", value)}
-              />
-              <TextField
-                label={props.labels.cosBucket}
-                value={props.settingsForm.cos_bucket}
-                onChange={(value) => updateSettings("cos_bucket", value)}
-              />
-              <TextField
-                label={props.labels.cosPrefix}
-                value={props.settingsForm.cos_prefix}
-                onChange={(value) => updateSettings("cos_prefix", value)}
-              />
-              <NumberField
-                label={props.labels.cosMaxManagedGB}
-                min={1}
-                value={props.settingsForm.cos_max_managed_gb}
-                onChange={(value) => updateSettings("cos_max_managed_gb", value)}
-              />
-              {props.cosConfigError ? <p className="text-sm text-red-700">{props.labels.uploadConfigSaveFailed}</p> : null}
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-                disabled={!props.canEditCosModule || props.cosConfigPending || !props.selectedProfile}
-                type="button"
-                onClick={props.onSaveCosConfig}
-              >
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {props.labels.saveCosConfig}
-              </button>
-            </div>
-          </section>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">{props.labels.credentialVault}</h2>
-        <div className="mt-3 grid gap-2">
-          {props.credentials.map((credential) => (
-            <div key={credential.id} className="rounded-md border border-border bg-white px-3 py-2">
-              <p className="text-sm font-semibold">{credential.account_label}</p>
-              <p className="mt-1 text-xs text-muted">
-                {credential.platform} / {credential.purpose} / {credential.status}
-              </p>
-            </div>
-          ))}
-          {props.credentials.length === 0 ? <p className="text-sm text-muted">{props.labels.noCredentials}</p> : null}
-        </div>
-
-        <form className="mt-5 grid gap-3 border-t border-border pt-4" onSubmit={props.onCreateCredential}>
-          <h3 className="text-sm font-semibold">{props.labels.newCredential}</h3>
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            {props.labels.platform}
-            <select
-              className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-              value={props.credentialForm.platform}
-              onChange={(event) => updateCredential("platform", event.target.value as CredentialForm["platform"])}
-            >
-              <option value="bilibili">Bilibili</option>
-              <option value="tencent_cos">Tencent COS</option>
-            </select>
-          </label>
-          <TextField
-            label={props.labels.accountLabel}
-            value={props.credentialForm.account_label}
-            onChange={(value) => updateCredential("account_label", value)}
-          />
-          <TextField
-            label={props.labels.externalUid}
-            value={props.credentialForm.external_uid}
-            onChange={(value) => updateCredential("external_uid", value)}
-          />
-          <JSONTextArea
-            label={props.labels.credentialSecret}
-            value={props.credentialForm.secret}
-            onChange={(value) => updateCredential("secret", value)}
-          />
-          <p className="text-xs text-muted">{props.labels.credentialSecretHint}</p>
-          {props.credentialCreateError ? <p className="text-sm text-red-700">{props.labels.credentialCreateFailed}</p> : null}
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={props.credentialCreatePending}
-            type="submit"
-          >
-            <Save className="h-4 w-4" aria-hidden="true" />
-            {props.labels.createCredential}
-          </button>
-        </form>
-      </section>
-    </section>
-  );
-}
-
-function CredentialSelect(props: {
-  credentials: Credential[];
-  disabled?: boolean;
-  label: string;
-  labels: AdminCopy;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium">
-      {props.label}
-      <select
-        className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
-        disabled={props.disabled}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      >
-        <option value="">{props.labels.noCredentialSelected}</option>
-        {props.credentials.map((credential) => (
-          <option key={credential.id} value={credential.id}>
-            {credential.account_label} ({credential.status})
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function JSONTextArea(props: {
-  disabled?: boolean;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium">
-      {props.label}
-      <textarea
-        className="min-h-28 rounded-md border border-border bg-white px-3 py-2 font-mono text-xs font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
-        disabled={props.disabled}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function SiteTLSPanel(props: {
-  credentialCreateError: boolean;
-  credentialCreatePending: boolean;
-  credentialLabel: string;
-  credentialSecret: string;
-  credentials: Credential[];
-  form: SiteTLSForm;
-  labels: AdminCopy;
-  saveError: boolean;
-  savePending: boolean;
-  settings?: SiteTLSSettings;
-  syncPending: boolean;
-  onCreateCredential: (event: FormEvent<HTMLFormElement>) => void;
-  onCredentialLabelChange: (value: string) => void;
-  onCredentialSecretChange: (value: string) => void;
-  onFormChange: (form: SiteTLSForm) => void;
-  onSave: () => void;
-  onSync: () => void;
-}) {
-  const update = <K extends keyof SiteTLSForm>(key: K, value: SiteTLSForm[K]) => {
-    props.onFormChange({ ...props.form, [key]: value });
-  };
-
-  return (
-    <section className="rounded-md border border-border bg-panel p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <ShieldCheck className="mt-0.5 h-5 w-5 text-accent" aria-hidden="true" />
-        <div>
-          <h2 className="text-sm font-semibold">{props.labels.siteTLS}</h2>
-          <p className="mt-1 text-sm text-muted">{props.labels.siteTLSHint}</p>
-        </div>
-      </div>
-      <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
-        <div className="grid content-start gap-3">
-          <ToggleField label={props.labels.enabled} checked={props.form.enabled} onChange={(value) => update("enabled", value)} />
-          <CredentialSelect credentials={props.credentials} label={props.labels.tlsCredential} labels={props.labels} value={props.form.credential_id} onChange={(value) => update("credential_id", value)} />
-          <TextField disabled label={props.labels.primaryDomain} value={props.form.primary_domain} onChange={(value) => update("primary_domain", value)} />
-          <TextAreaField disabled label={props.labels.additionalDomains} value={props.form.additional_domains} onChange={(value) => update("additional_domains", value)} />
-          <p className="text-xs text-muted">{props.labels.additionalDomainsHint}</p>
-          {props.saveError ? <p className="text-sm text-red-700">{props.labels.siteTLSSaveFailed}</p> : null}
-          <div className="flex flex-wrap gap-2">
-            <button className="inline-flex h-9 items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60" disabled={props.savePending} type="button" onClick={props.onSave}>
-              <Save className="h-4 w-4" aria-hidden="true" />
-              {props.labels.saveSiteTLS}
-            </button>
-            <button className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold disabled:opacity-60" disabled={props.syncPending || !props.settings?.enabled} type="button" onClick={props.onSync}>
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {props.labels.syncSiteTLS}
-            </button>
-          </div>
-        </div>
-        <div className="grid content-start gap-4 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
-          <div className="grid grid-cols-2 gap-3">
-            <Metric label={props.labels.siteTLSStatus} value={props.settings?.status ?? props.labels.unknown} />
-            <Metric label={props.labels.latestCertificate} value={props.settings?.latest_certificate_id ?? "-"} />
-            <Metric label={props.labels.stagedCertificate} value={props.settings?.staged_certificate_id ?? "-"} />
-            <Metric label={props.labels.deployedCertificate} value={props.settings?.deployed_certificate_id ?? "-"} />
-            <Metric label={props.labels.certificateExpires} value={props.settings?.latest_not_after ? formatDateTime(props.settings.latest_not_after, props.labels) : "-"} />
-            <Metric label={props.labels.lastChecked} value={props.settings?.last_checked_at ? formatDateTime(props.settings.last_checked_at, props.labels) : "-"} />
-          </div>
-          {props.settings?.last_error ? <p className="text-sm text-red-700">{props.settings.last_error}</p> : null}
-          <form className="grid gap-3 border-t border-border pt-4" onSubmit={props.onCreateCredential}>
-            <h3 className="text-sm font-semibold">{props.labels.tlsCredential}</h3>
-            <TextField label={props.labels.tlsCredentialLabel} value={props.credentialLabel} onChange={props.onCredentialLabelChange} />
-            <JSONTextArea label={props.labels.tlsCredentialSecret} value={props.credentialSecret} onChange={props.onCredentialSecretChange} />
-            <p className="text-xs text-muted">{props.labels.credentialSecretHint}</p>
-            {props.credentialCreateError ? <p className="text-sm text-red-700">{props.labels.tlsCredentialCreateFailed}</p> : null}
-            <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold disabled:opacity-60" disabled={props.credentialCreatePending} type="submit">
-              <Lock className="h-4 w-4" aria-hidden="true" />
-              {props.labels.createTLSCredential}
-            </button>
-          </form>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function StoragePanel(props: {
-  candidates: CleanupCandidate[];
-  cleanupError: boolean;
-  cleanupPending: boolean;
-  cleanupResult?: CleanupRunResult;
-  form: {
-    maxRecordingGB: number;
-    minFreeGB: number;
-    emergencyFreeGB: number;
-    cleanupTargetPercent: number;
-  };
-  isLoading: boolean;
-  isSaving: boolean;
-  labels: AdminCopy;
-  previewReclaimableBytes: number;
-  saveError: boolean;
-  status?: LocalStorageStatus;
-  onFormChange: (form: {
-    maxRecordingGB: number;
-    minFreeGB: number;
-    emergencyFreeGB: number;
-    cleanupTargetPercent: number;
-  }) => void;
-  onRunCleanup: () => void;
-  onSave: () => void;
-}) {
-  const usedPercent =
-    props.status && props.status.disk_total_bytes > 0
-      ? Math.round(((props.status.disk_total_bytes - props.status.disk_available_bytes) / props.status.disk_total_bytes) * 100)
-      : 0;
-  const update = <K extends keyof typeof props.form>(key: K, value: (typeof props.form)[K]) => {
-    props.onFormChange({ ...props.form, [key]: value });
-  };
-
-  return (
-    <section id="storage" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{props.labels.localStorage}</h2>
-          <p className="mt-1 text-sm text-muted">{props.status?.data_root ?? props.labels.checkingStorage}</p>
-        </div>
-        <HardDrive className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label={props.labels.indexedVideos} value={props.isLoading ? "..." : String(props.status?.indexed_video_files ?? 0)} />
-        <Metric label={props.labels.indexedSize} value={formatBytes(props.status?.indexed_video_bytes ?? 0)} />
-        <Metric label={props.labels.diskAvailable} value={formatBytes(props.status?.disk_available_bytes ?? 0)} />
-        <Metric label={props.labels.protected} value={String(props.status?.protected_recordings ?? 0)} />
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <Metric label={props.labels.health} value={props.status?.health ?? props.labels.checking} />
-        <Metric label={props.labels.needReclaim} value={formatBytes(props.status?.need_reclaim_bytes ?? 0)} />
-        <Metric label={props.labels.previewReclaimable} value={formatBytes(props.previewReclaimableBytes)} />
-      </div>
-
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e6ebe4]">
-        <div className="h-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, usedPercent))}%` }} />
-      </div>
-      <p className="mt-2 text-xs text-muted">
-        {props.labels.diskSummary(
-          usedPercent,
-          formatBytes(props.status?.disk_total_bytes ?? 0),
-          props.status?.completed_recordings ?? 0,
-          Boolean(props.status?.settings_configured)
-        )}
-      </p>
-
-      <div className="mt-5 border-t border-border pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold">{props.labels.storageSettings}</h3>
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={props.isSaving}
-            type="button"
-            onClick={props.onSave}
-          >
-            <Save className="h-4 w-4" aria-hidden="true" />
-            {props.labels.save}
-          </button>
-        </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <NumberField
-            label={props.labels.maxRecordingGB}
-            min={1}
-            value={props.form.maxRecordingGB}
-            onChange={(value) => update("maxRecordingGB", value)}
-          />
-          <NumberField
-            label={props.labels.minFreeGB}
-            min={1}
-            value={props.form.minFreeGB}
-            onChange={(value) => update("minFreeGB", value)}
-          />
-          <NumberField
-            label={props.labels.emergencyFreeGB}
-            min={1}
-            value={props.form.emergencyFreeGB}
-            onChange={(value) => update("emergencyFreeGB", value)}
-          />
-          <NumberField
-            label={props.labels.cleanupTargetPercent}
-            max={99}
-            min={1}
-            value={props.form.cleanupTargetPercent}
-            onChange={(value) => update("cleanupTargetPercent", value)}
-          />
-        </div>
-        {props.saveError ? (
-          <p className="mt-3 text-sm text-red-700">{props.labels.storageSaveFailed}</p>
-        ) : null}
-      </div>
-
-      <div className="mt-5 border-t border-border pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold">{props.labels.cleanupPreview}</h3>
-            <span className="text-xs text-muted">{props.labels.oldestUnprotected}</span>
-          </div>
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-300 px-3 text-sm font-semibold text-red-700 hover:border-red-500 disabled:opacity-50"
-            disabled={props.cleanupPending || props.candidates.length === 0 || (props.status?.need_reclaim_bytes ?? 0) <= 0}
-            type="button"
-            onClick={props.onRunCleanup}
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-            {props.labels.runCleanup}
-          </button>
-        </div>
-        {props.cleanupResult ? (
-          <p className="mt-3 text-sm text-muted">
-            {props.labels.cleanupResult(
-              props.cleanupResult.deleted_recordings,
-              props.cleanupResult.deleted_files,
-              formatBytes(props.cleanupResult.reclaimed_bytes),
-              props.cleanupResult.skipped_recordings
-            )}
-          </p>
-        ) : null}
-        {props.cleanupError ? (
-          <p className="mt-3 text-sm text-red-700">{props.labels.cleanupFailed}</p>
-        ) : null}
-        <div className="mt-3 overflow-hidden rounded-md border border-border">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-              <tr>
-                <th className="px-3 py-2 font-semibold">{props.labels.recording}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.closed}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.files}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.reclaimable}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.candidates.map((candidate) => (
-                <tr key={candidate.recording_id} className="bg-white">
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{candidate.title || candidate.streamer_name || props.labels.untitled}</p>
-                    <p className="mt-1 text-xs text-muted">
-                      {candidate.profile_name} - {candidate.room_id}
-                    </p>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(candidate.completed_at || "", props.labels)}</td>
-                  <td className="px-3 py-3 text-muted">{candidate.file_count}</td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(candidate.reclaimable_bytes)}</td>
-                </tr>
-              ))}
-              {props.candidates.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-6 text-center text-muted" colSpan={4}>
-                    {props.labels.noCleanupCandidates}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Metric(props: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-xs uppercase text-muted">{props.label}</p>
-      <p className="mt-1 text-sm font-semibold text-ink">{props.value}</p>
-    </div>
-  );
-}
-
-function TableToolbar(props: {
-  labels: AdminCopy;
-  search: string;
-  sort: string;
-  sortOptions: Array<{ label: string; value: string }>;
-  onSearchChange: (value: string) => void;
-  onSortChange: (value: string) => void;
-}) {
-  return (
-    <div className="mt-4 flex flex-col gap-3 rounded-md border border-border bg-white p-3 sm:flex-row sm:items-end sm:justify-between">
-      <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium">
-        {props.labels.search}
-        <div className="flex h-10 items-center gap-2 rounded-md border border-border bg-white px-3 focus-within:border-accent">
-          <Search className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
-          <input
-            className="min-w-0 flex-1 text-sm font-normal outline-none"
-            placeholder={props.labels.searchPlaceholder}
-            type="search"
-            value={props.search}
-            onChange={(event) => props.onSearchChange(event.target.value)}
-          />
-        </div>
-      </label>
-      <label className="flex flex-col gap-1 text-sm font-medium sm:w-64">
-        {props.labels.sortBy}
-        <select
-          className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-          value={props.sort}
-          onChange={(event) => props.onSortChange(event.target.value)}
-        >
-          {props.sortOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
-  );
-}
-
-function TableTimeHeader(props: { labels: AdminCopy; title: string }) {
-  return (
-    <span className="block leading-4">
-      <span className="block">{props.title}</span>
-      <span className="block text-[11px] normal-case text-muted">{props.labels.chinaTime}</span>
-    </span>
-  );
-}
-
-function TableDateTime(props: { value: string }) {
-  const parts = formatChinaDateParts(props.value);
-  return (
-    <span className="block text-xs leading-5 text-muted">
-      <span className="block whitespace-nowrap">{parts.date}</span>
-      <span className="block whitespace-nowrap">{parts.time}</span>
-    </span>
-  );
-}
-
-function RecordingsPanel(props: {
-  canManageLocalFiles: boolean;
-  canScanLocalFiles: boolean;
-  cosDownloadPending: boolean;
-  cosDownloadPendingOutputId: number | null;
-  cosFileDownloadPending: boolean;
-  cosFileDownloadPendingFileId: number | null;
-  isLoading: boolean;
-  jobs: JobItem[];
-  labels: AdminCopy;
-  protectPending: boolean;
-  reviewPending: boolean;
-  editDrafts: Record<number, string>;
-  editError: boolean;
-  editPending: boolean;
-  repairError: boolean;
-  repairPending: boolean;
-  repairResult?: UploadSourceRepairResult;
-  regroupError: boolean;
-  regroupPending: boolean;
-  regroupResult?: RecordingRegroupResult;
-  reconcileError: boolean;
-  reconcilePending: boolean;
-  reconcileResult?: RecordingScanResult;
-  recordings: RecordingItem[];
-  search: string;
-  sort: RecordingSortKey;
-  total: number;
-  visibleTotal: number;
-  onApplyEdit: (uploadSourceId: number, draft: string) => void;
-  onApproveReview: (recording: RecordingItem) => void;
-  onDownloadFile: (fileId: number) => void;
-  onDownloadLocalOutput: (uploadSourceId: number, outputId: number) => void;
-  onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
-  onEditDraftChange: (uploadSourceId: number, value: string) => void;
-  onReconcile: () => void;
-  onRegroupToday: () => void;
-  onRepairUploadSources: () => void;
-  onRequireReview: (recording: RecordingItem) => void;
-  onSearchChange: (value: string) => void;
-  onSortChange: (value: RecordingSortKey) => void;
-  onToggleProtect: (recording: RecordingItem) => void;
-}) {
-  const [expandedSourceId, setExpandedSourceId] = useState<number | null>(null);
-  const [expandedSegmentSourceId, setExpandedSegmentSourceId] = useState<number | null>(null);
-  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
-  const toggleSource = (sourceId: number | undefined) => {
-    const nextSourceId = sourceId && expandedSourceId !== sourceId ? sourceId : null;
-    setExpandedSourceId(nextSourceId);
-    setExpandedSegmentSourceId(null);
-  };
-  const visibleSizeBytes = props.recordings.reduce((total, recording) => {
-    return total + totalRecordingBytes(recording);
-  }, 0);
-  const shortSegmentCount = props.recordings.filter((recording) => {
-    return hasShortSegment(recording);
-  }).length;
-  const protectedCount = props.recordings.filter((recording) => recording.local_protected).length;
-  const columns: Array<ColumnDef<RecordingItem>> = [
-    {
-      id: "recording",
-      header: props.labels.recording,
-      size: 300,
-      minSize: 220,
-      cell: ({ row }) => {
-        const recording = row.original;
-        const file = recording.files?.[0];
-        const completedAt = formatChinaDateParts(recording.completed_at || file?.closed_at || "");
-        return (
-          <div className="flex items-start gap-2">
-            <FileVideo className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-            <div>
-              <button
-                className="text-left font-semibold text-ink hover:text-accent"
-                type="button"
-                onClick={() => toggleSource(recording.upload_source_id)}
-              >
-                {recording.title || file?.original_name || props.labels.untitled}
-              </button>
-              <p className="mt-1 text-xs text-muted">
-                {props.labels.completedAt}: {completedAt.date} {completedAt.time}
-              </p>
-            </div>
-          </div>
-        );
-      }
-    },
-    {
-      id: "startedAt",
-      header: () => <TableTimeHeader title={props.labels.startTime} labels={props.labels} />,
-      size: 150,
-      minSize: 140,
-      cell: ({ row }) => <TableDateTime value={row.original.started_at} />
-    },
-    {
-      id: "completedAt",
-      header: () => <TableTimeHeader title={props.labels.completedAt} labels={props.labels} />,
-      size: 150,
-      minSize: 140,
-      cell: ({ row }) => {
-        const file = row.original.files?.[0];
-        return <TableDateTime value={row.original.completed_at || file?.closed_at || ""} />;
-      }
-    },
-    {
-      id: "duration",
-      header: props.labels.duration,
-      size: 100,
-      minSize: 90,
-      cell: ({ row }) => {
-        const file = row.original.files?.[0];
-        return <span className="text-muted">{formatDuration(row.original.duration_ms || file?.duration_ms || 0)}</span>;
-      }
-    },
-    {
-      id: "profile",
-      header: props.labels.profile,
-      size: 140,
-      minSize: 120,
-      cell: ({ row }) => (
-        <div>
-          <p className="font-medium text-ink">{row.original.profile_name}</p>
-          <p className="mt-1 text-xs text-muted">{row.original.room_id}</p>
-        </div>
-      )
-    },
-    {
-      id: "status",
-      header: props.labels.status,
-      size: 130,
-      minSize: 120,
-      cell: ({ row }) => {
-        const recording = row.original;
-        const file = recording.files?.[0];
-        const mergeJob = currentUploadSourceMergeJob(recording, props.jobs);
-        const packageJob = currentUploadSourcePackageJob(recording, props.jobs);
-        const reviewStatus = recording.review_status ?? recording.upload_review_status ?? "NONE";
-        const displayStatus = reviewStatus === "REQUIRED" || recording.edit_decision_json
-          ? "WAITING_REVIEW"
-          : deriveUploadSourceDisplayStatus(recording);
-        return (
-          <div className="text-muted">
-            <p>{formatUploadSourceStatus(displayStatus, props.labels, mergeJob, packageJob)}</p>
-            {recording.upload_source_id ? (
-              <div className="mt-1 space-y-0.5 text-xs">
-                <p>{props.labels.bilibiliStatus}: {formatModuleUploadStatus(recording.bilibili_status, props.labels)}</p>
-                <p>{props.labels.cosStatus}: {formatModuleUploadStatus(recording.cos_status, props.labels)}</p>
-                {recording.bilibili_status === "FAILED" && recording.bilibili_last_error ? (
-                  <p className="break-words text-red-700">{recording.bilibili_last_error}</p>
-                ) : null}
-                {recording.cos_status === "FAILED" && recording.cos_last_error ? (
-                  <p className="break-words text-red-700">{recording.cos_last_error}</p>
-                ) : null}
-                {recording.local_cleanup_status === "DELETED" ? (
-                  <p>{props.labels.uploadSourceLocalCleaned}</p>
-                ) : null}
-              </div>
-            ) : null}
-            {recording.upload_source_id ? null : <p className="mt-1 text-xs">{file?.file_status ?? props.labels.noFile}</p>}
-            {reviewStatus === "REQUIRED" ? <p className="mt-1 text-xs font-medium text-amber-700">{props.labels.reviewPending}</p> : null}
-            {recording.last_error ? <p className="mt-1 break-words text-xs text-red-700">{recording.last_error}</p> : null}
-            {recording.local_protected ? <p className="mt-1 text-xs font-medium text-accent">{props.labels.protected}</p> : null}
-          </div>
-        );
-      }
-    },
-    {
-      id: "size",
-      header: props.labels.size,
-      size: 90,
-      minSize: 80,
-      cell: ({ row }) => <span className="text-muted">{formatBytes(totalRecordingBytes(row.original))}</span>
-    },
-    {
-      id: "actions",
-      header: props.labels.actions,
-      size: 140,
-      minSize: 132,
-      enableResizing: false,
-      cell: ({ row }) => {
-        const recording = row.original;
-        const canUseLocalFile = recording.local_storage_status !== "DELETED";
-        const isSingleSegment = (recording.source_segments?.length ?? 0) <= 1;
-        const bilibiliURL = (recording.source_outputs ?? []).find((output) => output.bilibili_url)?.bilibili_url;
-        const reviewStatus = recording.review_status ?? recording.upload_review_status ?? "NONE";
-        const deliveryComplete = deriveUploadSourceDisplayStatus(recording) === "UPLOAD_COMPLETE";
-        if (!props.canManageLocalFiles) {
-          return <span className="text-xs text-muted">{props.labels.noAction}</span>;
-        }
-        return (
-          <div className="flex flex-col items-start gap-2">
-            {recording.upload_source_id ? (
-              <button
-                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                type="button"
-                onClick={() => toggleSource(recording.upload_source_id)}
-              >
-                {props.labels.details}
-              </button>
-            ) : null}
-            {reviewStatus === "REQUIRED" && recording.upload_source_id ? (
-              <button
-                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-amber-300 px-3 text-xs font-medium text-amber-800 hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.reviewPending}
-                type="button"
-                onClick={() => props.onApproveReview(recording)}
-              >
-                {props.labels.approveReview}
-              </button>
-            ) : deliveryComplete || Boolean(bilibiliURL) ? null : (
-              <button
-                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.reviewPending || reviewStatus === "REQUIRED" || Boolean(bilibiliURL)}
-                type="button"
-                onClick={() => props.onRequireReview(recording)}
-              >
-                {reviewStatus === "APPROVED" ? props.labels.rerequireReview : props.labels.requireReview}
-              </button>
-            )}
-            {canUseLocalFile && isSingleSegment ? (
-              <button
-                className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                disabled={props.protectPending}
-                type="button"
-                onClick={() => props.onToggleProtect(recording)}
-              >
-                {recording.local_protected ? (
-                  <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
-                ) : (
-                  <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                {recording.local_protected ? props.labels.unprotect : props.labels.protect}
-              </button>
-            ) : null}
-            {bilibiliURL ? (
-              <a
-                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                href={bilibiliURL}
-                rel="noreferrer"
-                target="_blank"
-              >
-                {props.labels.openBilibili}
-              </a>
-            ) : null}
-          </div>
-        );
-      }
-    }
-  ];
-  const table = useReactTable({
-    data: props.recordings,
-    columns,
-    columnResizeMode: "onChange",
-    defaultColumn: {
-      minSize: 80,
-      size: 140,
-      maxSize: 640
-    },
-    state: {
-      columnSizing
-    },
-    onColumnSizingChange: setColumnSizing,
-    getCoreRowModel: getCoreRowModel()
-  });
-
-  return (
-    <section id="recordings" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{props.labels.uploadSources}</h2>
-          <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
-        </div>
-        {props.canScanLocalFiles ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-              disabled={props.regroupPending || props.reconcilePending || props.repairPending}
-              type="button"
-              onClick={props.onRegroupToday}
-            >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {props.labels.regroupToday}
-            </button>
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-              disabled={props.regroupPending || props.reconcilePending || props.repairPending}
-              type="button"
-              onClick={props.onRepairUploadSources}
-            >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {props.labels.repairUploadSources}
-            </button>
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-60"
-              disabled={props.reconcilePending || props.regroupPending || props.repairPending}
-              type="button"
-              onClick={props.onReconcile}
-            >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {props.labels.scan}
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <Metric label={props.labels.visibleSize} value={formatBytes(visibleSizeBytes)} />
-        <Metric label={props.labels.shortSegments} value={String(shortSegmentCount)} />
-        <Metric label={props.labels.protectedRecordings} value={String(protectedCount)} />
-      </div>
-
-      {props.reconcileResult ? (
-        <p className="mt-3 text-sm text-muted">
-          {props.labels.scanResult(
-            props.reconcileResult.reconcile.imported,
-            props.reconcileResult.reconcile.updated,
-            props.reconcileResult.reconcile.skipped
-          )}
-          {props.reconcileResult.reconcile.errors ? (
-            <>
-              {" "}
-              Scan errors: {props.reconcileResult.reconcile.errors}
-              {props.reconcileResult.reconcile.last_error ? ` (${props.reconcileResult.reconcile.last_error})` : ""}
-            </>
-          ) : null}
-          {" "}
-          {props.labels.uploadSourceDiscoverResult(
-            props.reconcileResult.discover.created,
-            props.reconcileResult.discover.ignored,
-            props.reconcileResult.discover.merge_jobs_enqueued ?? 0,
-            props.reconcileResult.discover.package_jobs_enqueued ?? 0
-          )}
-        </p>
-      ) : null}
-      {props.reconcileError ? (
-        <p className="mt-3 text-sm text-red-700">{props.labels.scanFailed}</p>
-      ) : null}
-      {props.regroupResult ? (
-        <p className="mt-3 text-sm text-muted">{props.labels.regroupResult(props.regroupResult)}</p>
-      ) : null}
-      {props.regroupError ? (
-        <p className="mt-3 text-sm text-red-700">{props.labels.regroupFailed}</p>
-      ) : null}
-      {props.repairResult ? (
-        <p className="mt-3 text-sm text-muted">{props.labels.repairUploadSourcesResult(props.repairResult)}</p>
-      ) : null}
-      {props.repairError ? (
-        <p className="mt-3 text-sm text-red-700">{props.labels.repairUploadSourcesFailed}</p>
-      ) : null}
-
-      <TableToolbar
-        labels={props.labels}
-        search={props.search}
-        sort={props.sort}
-        sortOptions={[
-          { value: "started_desc", label: props.labels.sortNewest },
-          { value: "started_asc", label: props.labels.sortOldest },
-          { value: "duration_desc", label: props.labels.sortDuration },
-          { value: "size_desc", label: props.labels.sortSize }
-        ]}
-        onSearchChange={props.onSearchChange}
-        onSortChange={(value) => props.onSortChange(value as RecordingSortKey)}
-      />
-
-      <div className="mt-4 overflow-auto rounded-md border border-border">
-        <table className="border-collapse text-left text-sm" style={{ minWidth: table.getTotalSize() }}>
-          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    className={`relative px-3 py-2 font-semibold ${header.column.id === "actions" ? "sticky right-0 z-20 bg-[#eef1eb] shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.6)]" : ""}`}
-                    style={{ width: header.getSize() }}
-                  >
-                    <div className="flex min-w-0 items-center justify-between gap-2">
-                      <span className="min-w-0">
-                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                      </span>
-                      {header.column.getCanResize() ? (
-                        <button
-                          aria-label={`Resize ${header.column.id}`}
-                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-transparent hover:border-accent"
-                          type="button"
-                          onMouseDown={header.getResizeHandler()}
-                          onTouchStart={header.getResizeHandler()}
-                        />
-                      ) : null}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => {
-              const recording = row.original;
-              const isExpanded = expandedSourceId === recording.upload_source_id;
-              const sourceId = recording.upload_source_id ?? 0;
-              const originalSegmentsExpanded = sourceId > 0 && expandedSegmentSourceId === sourceId;
-              return (
-                <Fragment key={row.id}>
-                  <tr key={row.id} className="bg-white">
-                    {row.getVisibleCells().map((cell) => (
-                      <td
-                        key={cell.id}
-                        className={`px-3 py-3 ${cell.column.id === "actions" ? "sticky right-0 z-10 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.6)]" : ""}`}
-                        style={{ width: cell.column.getSize() }}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                  {isExpanded ? (
-                    <tr key={`${row.id}-segments`} className="bg-[#eef7f4]">
-                      <td className="p-0" colSpan={table.getAllLeafColumns().length}>
-                        <div className="mx-3 mb-4 mt-0 rounded-md border border-accent/30 border-l-4 border-l-accent bg-[#f7fbf9] p-3 shadow-inner">
-                          <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-accent/20 pb-3">
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold uppercase text-accent">{props.labels.recordingDetails}</p>
-                              <p className="mt-1 truncate text-sm font-semibold text-ink">
-                                {recording.title || recording.files?.[0]?.original_name || props.labels.untitled}
-                              </p>
-                            </div>
-                            <span className="text-xs text-muted">{recording.profile_name} · {recording.room_id}</span>
-                          </div>
-                          <div className="space-y-3">
-                            {(recording.review_status ?? recording.upload_review_status) === "REQUIRED" && sourceId > 0 ? (
-                              <UploadSourceReviewEditPanel
-                                draft={props.editDrafts[sourceId] ?? ""}
-                                editError={props.editError}
-                                editPending={props.editPending}
-                                labels={props.labels}
-                                uploadSourceId={sourceId}
-                                onApplyEdit={props.onApplyEdit}
-                                onDraftChange={props.onEditDraftChange}
-                              />
-                            ) : null}
-                            <UploadSourceOutputsTable
-                              canDownload={props.canManageLocalFiles}
-                              cosDownloadPending={props.cosDownloadPending}
-                              cosDownloadPendingOutputId={props.cosDownloadPendingOutputId}
-                              labels={props.labels}
-                              outputs={recording.source_outputs ?? []}
-                              reviewRequired={(recording.review_status ?? recording.upload_review_status) === "REQUIRED"}
-                              uploadSourceId={sourceId}
-                              onDownloadLocalOutput={props.onDownloadLocalOutput}
-                              onDownloadOutput={props.onDownloadOutput}
-                            />
-                            <DanmakuFilesTable
-                              canDownload={props.canManageLocalFiles}
-                              cosDownloadPending={props.cosFileDownloadPending}
-                              cosDownloadPendingFileId={props.cosFileDownloadPendingFileId}
-                              files={recording.danmaku_files ?? []}
-                              labels={props.labels}
-                              onDownloadFile={props.onDownloadFile}
-                            />
-                            <UploadSourceSegmentsTable
-                              isExpanded={originalSegmentsExpanded}
-                              labels={props.labels}
-                              segments={recording.source_segments ?? []}
-                              onToggle={() => setExpandedSegmentSourceId(originalSegmentsExpanded ? null : sourceId)}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              );
-            })}
-            {table.getRowModel().rows.length === 0 ? (
-              <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={table.getAllLeafColumns().length}>
-                  {props.isLoading
-                    ? props.labels.loadingRecordings
-                    : props.recordings.length === 0 && props.search
-                      ? props.labels.emptyFiltered
-                      : props.labels.noRecordings}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function DanmakuFilesTable(props: {
-  canDownload: boolean;
-  cosDownloadPending: boolean;
-  cosDownloadPendingFileId: number | null;
-  files: RecordingFile[];
-  labels: AdminCopy;
-  onDownloadFile: (fileId: number) => void;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-white p-3">
-      <h3 className="text-sm font-semibold">{props.labels.danmakuFiles}</h3>
-      <div className="mt-3 overflow-auto">
-        <table className="w-full min-w-[760px] border-collapse text-left text-xs">
-          <thead className="bg-[#eef1eb] uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.completedAt}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.cosStatus}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.files.map((file) => {
-              const cosAvailable = props.canDownload && file.cos_status === "AVAILABLE";
-              return (
-                <tr key={file.id} className="align-top">
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{file.original_name || file.relative_path.split("/").pop() || file.relative_path}</p>
-                    <p className="mt-1 break-all text-muted">{file.relative_path}</p>
-                  </td>
-                  <td className="px-3 py-3"><TableDateTime value={file.closed_at ?? ""} /></td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(file.size_bytes)}</td>
-                  <td className="px-3 py-3 text-muted">{formatModuleUploadStatus(file.cos_status, props.labels)}</td>
-                  <td className="px-3 py-3">
-                    {cosAvailable ? (
-                      <button
-                        className="inline-flex h-8 w-32 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                        disabled={props.cosDownloadPending && props.cosDownloadPendingFileId === file.id}
-                        type="button"
-                        onClick={() => props.onDownloadFile(file.id)}
-                      >
-                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                        {props.labels.downloadDanmakuFromCos}
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-            {props.files.length === 0 ? (
-              <tr>
-                <td className="px-3 py-6 text-center text-muted" colSpan={5}>
-                  {props.labels.noFile}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function UploadSourceSegmentsTable(props: {
-  isExpanded: boolean;
-  labels: AdminCopy;
-  segments: UploadSourceSegment[];
-  onToggle: () => void;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-white p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">{props.labels.sourceSegments}</h3>
-        <button
-          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-          type="button"
-          onClick={props.onToggle}
-        >
-          {props.isExpanded ? (
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-          {props.isExpanded ? props.labels.hideSourceSegments : props.labels.showSourceSegments}
-        </button>
-      </div>
-      {props.isExpanded ? (
-        <div className="mt-3 overflow-auto">
-          <table className="w-full min-w-[720px] border-collapse text-left text-xs">
-            <thead className="bg-[#eef1eb] uppercase text-muted">
-              <tr>
-                <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.startTime}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.completedAt}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
-                <th className="px-3 py-2 font-semibold">{props.labels.size}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.segments.map((segment) => (
-                <tr key={segment.id} className="align-top">
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{segment.relative_path.split("/").pop() ?? segment.relative_path}</p>
-                    <p className="mt-1 break-all text-muted">{segment.relative_path}</p>
-                  </td>
-                  <td className="px-3 py-3"><TableDateTime value={segment.source_started_at} /></td>
-                  <td className="px-3 py-3"><TableDateTime value={segment.source_completed_at} /></td>
-                  <td className="px-3 py-3 text-muted">
-                    {formatTimeline(segment.timeline_start_ms)} - {formatTimeline(segment.timeline_end_ms)}
-                  </td>
-                  <td className="px-3 py-3 text-muted">{formatDuration(segment.duration_ms)}</td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(segment.size_bytes)}</td>
-                </tr>
-              ))}
-              {props.segments.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-6 text-center text-muted" colSpan={6}>
-                    {props.labels.noFile}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function UploadSourceReviewEditPanel(props: {
-  draft: string;
-  editError: boolean;
-  editPending: boolean;
-  labels: AdminCopy;
-  uploadSourceId: number;
-  onApplyEdit: (uploadSourceId: number, draft: string) => void;
-  onDraftChange: (uploadSourceId: number, value: string) => void;
-}) {
-  const cuts = parseEditCutDraft(props.draft);
-  return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="min-w-[280px] flex-1 text-sm font-medium">
-          {props.labels.editCuts}
-          <textarea
-            className="mt-1 min-h-20 w-full rounded-md border border-border bg-white px-3 py-2 text-sm font-normal outline-none focus:border-accent"
-            placeholder={props.labels.editCutsPlaceholder}
-            value={props.draft}
-            onChange={(event) => props.onDraftChange(props.uploadSourceId, event.target.value)}
-          />
-        </label>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-4 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-60"
-          disabled={props.editPending || cuts.length === 0}
-          type="button"
-          onClick={() => props.onApplyEdit(props.uploadSourceId, props.draft)}
-        >
-          <Save className="h-4 w-4" aria-hidden="true" />
-          {props.labels.applyEdit}
-        </button>
-      </div>
-      {props.editPending ? <p className="mt-2 text-xs text-muted">{props.labels.editQueued}</p> : null}
-      {props.editError ? <p className="mt-2 text-xs text-red-700">{props.labels.editFailed}</p> : null}
-    </div>
-  );
-}
-
-function UploadSourceOutputsTable(props: {
-  canDownload: boolean;
-  cosDownloadPending: boolean;
-  cosDownloadPendingOutputId: number | null;
-  labels: AdminCopy;
-  outputs: UploadSourceOutput[];
-  reviewRequired: boolean;
-  uploadSourceId: number;
-  onDownloadLocalOutput: (uploadSourceId: number, outputId: number) => void;
-  onDownloadOutput: (uploadSourceId: number, outputId: number) => void;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-white p-3">
-      <h3 className="text-sm font-semibold">{props.labels.sourceOutputs}</h3>
-      <div className="mt-3 overflow-auto">
-        <table className="w-full min-w-[1040px] border-collapse text-left text-xs">
-          <thead className="bg-[#eef1eb] uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.file}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.timeline}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.duration}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.sourceSize}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.uploadedSize}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.compressionStatus}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.cosStatus}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.bilibiliStatus}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.outputs.map((output) => {
-              const cosAvailable = props.canDownload && output.cos_status === "AVAILABLE";
-              const localAvailable = props.canDownload && props.reviewRequired && output.status === "READY_TO_UPLOAD";
-              const bilibiliURL = output.bilibili_status === "VERIFIED" ? output.bilibili_url : undefined;
-              return (
-                <tr key={output.id} className="align-top">
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-ink">{output.relative_path.split("/").pop() ?? output.relative_path}</p>
-                    <p className="mt-1 break-all text-muted">{output.relative_path}</p>
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    {formatTimeline(output.timeline_start_ms)} - {formatTimeline(output.timeline_end_ms)}
-                  </td>
-                  <td className="px-3 py-3 text-muted">{formatDuration(output.duration_ms)}</td>
-                  <td className="px-3 py-3 text-muted">{formatBytes(output.cos_source_size_bytes || output.size_bytes)}</td>
-                  <td className="px-3 py-3 text-muted">
-                    {output.cos_uploaded_size_bytes ? formatBytes(output.cos_uploaded_size_bytes) : "-"}
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    {formatCompressionStatus(output.cos_compression_status, props.labels)}
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    <p>{formatModuleUploadStatus(output.cos_status, props.labels)}</p>
-                    {output.cos_status === "FAILED" && output.cos_last_error ? (
-                      <p className="mt-1 max-w-56 break-words text-red-700">{output.cos_last_error}</p>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    <p>{formatModuleUploadStatus(output.bilibili_status, props.labels)}</p>
-                    {output.bilibili_status === "FAILED" && output.bilibili_last_error ? (
-                      <p className="mt-1 max-w-56 break-words text-red-700">{output.bilibili_last_error}</p>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-col items-start gap-2">
-                      {cosAvailable ? (
-                        <button
-                          className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                          disabled={props.cosDownloadPending && props.cosDownloadPendingOutputId === output.id}
-                          type="button"
-                          onClick={() => props.onDownloadOutput(props.uploadSourceId, output.id)}
-                        >
-                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                          {props.labels.downloadFromCos}
-                        </button>
-                      ) : null}
-                      {localAvailable ? (
-                        <button
-                          className="inline-flex h-8 w-28 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                          type="button"
-                          onClick={() => props.onDownloadLocalOutput(props.uploadSourceId, output.id)}
-                        >
-                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                          {props.labels.downloadLocal}
-                        </button>
-                      ) : null}
-                      {bilibiliURL ? (
-                        <a
-                          className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
-                          href={bilibiliURL}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {props.labels.openBilibili}
-                        </a>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {props.outputs.length === 0 ? (
-              <tr>
-                <td className="px-3 py-6 text-center text-muted" colSpan={9}>
-                  {props.labels.noFile}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function JobsPanel(props: {
-  cancelPending: boolean;
-  isLoading: boolean;
-  jobs: JobItem[];
-  labels: AdminCopy;
-  loadError: boolean;
-  retryPending: boolean;
-  search: string;
-  sort: JobSortKey;
-  total: number;
-  visibleTotal: number;
-  onCancel: (job: JobItem) => void;
-  onRefresh: () => void;
-  onRetry: (job: JobItem) => void;
-  onSearchChange: (value: string) => void;
-  onSortChange: (value: JobSortKey) => void;
-}) {
-  return (
-    <section id="jobs" className="scroll-mt-6 rounded-md border border-border bg-panel p-4 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{props.labels.jobs}</h2>
-          <p className="mt-1 text-sm text-muted">{props.labels.total(props.visibleTotal)} / {props.total}</p>
-        </div>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-          disabled={props.isLoading}
-          type="button"
-          onClick={props.onRefresh}
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {props.labels.refresh}
-        </button>
-      </div>
-
-      {props.loadError ? <p className="mt-3 text-sm text-red-700">{props.labels.jobsFailed}</p> : null}
-
-      <TableToolbar
-        labels={props.labels}
-        search={props.search}
-        sort={props.sort}
-        sortOptions={[
-          { value: "updated_desc", label: props.labels.sortUpdated },
-          { value: "run_after_asc", label: props.labels.sortRunAfter },
-          { value: "status_asc", label: props.labels.sortStatus }
-        ]}
-        onSearchChange={props.onSearchChange}
-        onSortChange={(value) => props.onSortChange(value as JobSortKey)}
-      />
-
-      <div className="mt-4 overflow-hidden rounded-md border border-border">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead className="bg-[#eef1eb] text-xs uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{props.labels.job}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.profile}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.status}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.attempts}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.runAfter}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.lastError}</th>
-              <th className="px-3 py-2 font-semibold">{props.labels.actions}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.jobs.map((job) => {
-              const canRetry = job.status === "FAILED" || job.status === "CANCELLED";
-              const canCancel = !["SUCCEEDED", "CANCELLED", "RUNNING"].includes(job.status);
-              return (
-                <tr key={job.id} className="bg-white align-top">
-                  <td className="px-3 py-3">
-                    <p className="font-semibold text-ink">{formatJobType(job.type, props.labels)}</p>
-                    <p className="mt-1 text-xs text-muted">{job.resource_class}</p>
-                    {job.business_key ? <p className="mt-1 break-all text-xs text-muted">{job.business_key}</p> : null}
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    <p>{job.profile_name || "-"}</p>
-                    {job.owner_username ? <p className="mt-1 text-xs">{job.owner_username}</p> : null}
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    <p>{formatJobStatus(job.status, props.labels)}</p>
-                    <p className="mt-1 text-xs">{formatDateTime(job.updated_at, props.labels)}</p>
-                    <JobProgress job={job} />
-                  </td>
-                  <td className="px-3 py-3 text-muted">
-                    {job.attempts} / {job.max_attempts}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted">{formatDateTime(job.run_after, props.labels)}</td>
-                  <td className="max-w-md px-3 py-3 text-xs text-muted">
-                    <span className="break-words">{job.last_error || job.last_error_class || "-"}</span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-col items-start gap-2">
-                      {canRetry ? (
-                        <button
-                          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                          disabled={props.retryPending}
-                          type="button"
-                          onClick={() => props.onRetry(job)}
-                        >
-                          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                          {props.labels.retry}
-                        </button>
-                      ) : null}
-                      {canCancel ? (
-                        <button
-                          className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent disabled:opacity-60"
-                          disabled={props.cancelPending}
-                          type="button"
-                          onClick={() => props.onCancel(job)}
-                        >
-                          {props.labels.cancel}
-                        </button>
-                      ) : null}
-                      {!canRetry && !canCancel ? <span className="text-xs text-muted">{props.labels.noAction}</span> : null}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {props.jobs.length === 0 ? (
-              <tr>
-                <td className="px-3 py-8 text-center text-muted" colSpan={7}>
-                  {props.isLoading
-                    ? props.labels.checking
-                    : props.jobs.length === 0 && props.search
-                      ? props.labels.emptyFiltered
-                      : props.labels.noJobs}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function TextField(props: {
-  autoComplete?: string;
-  disabled?: boolean;
-  label: string;
-  type?: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium">
-      {props.label}
-      <input
-        className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-        autoComplete={props.autoComplete}
-        disabled={props.disabled}
-        type={props.type ?? "text"}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function JobProgress(props: { job: JobItem }) {
-  const total = props.job.progress_total_bytes ?? 0;
-  const current = props.job.progress_current_bytes ?? 0;
-  const message = props.job.progress_message ?? "";
-  if (total <= 0 && !message) {
-    return null;
-  }
-  const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((current / total) * 100))) : 0;
-  return (
-    <div className="mt-2 w-36">
-      {total > 0 ? (
-        <>
-          <div className="h-1.5 overflow-hidden rounded-sm bg-[#e5e8e1]">
-            <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            {percent}% - {current > 0 ? formatBytes(current) : "0 B"} / {formatBytes(total)}
-          </p>
-        </>
-      ) : null}
-      {message ? <p className="mt-1 break-words text-xs text-muted">{message}</p> : null}
-    </div>
-  );
-}
-
-function TextAreaField(props: {
-  disabled?: boolean;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium">
-      {props.label}
-      <textarea
-        className="min-h-28 rounded-md border border-border bg-white px-3 py-2 text-sm font-normal outline-none focus:border-accent disabled:bg-[#f3f4f1]"
-        disabled={props.disabled}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function formatBytes(value: number): string {
-  if (!value) {
-    return "-";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
-
-function totalRecordingBytes(recording: RecordingItem): number {
-  if (typeof recording.total_bytes === "number") {
-    return recording.total_bytes;
-  }
-  return (recording.files ?? []).reduce((total, file) => total + file.size_bytes, 0);
-}
-
-function hasShortSegment(recording: RecordingItem): boolean {
-  const segmentDurations = recording.source_segments?.map((segment) => segment.duration_ms).filter((value) => value > 0) ?? [];
-  if (segmentDurations.some((value) => value < 3 * 60 * 1000)) {
-    return true;
-  }
-  const durationMs = recording.duration_ms || recording.files?.[0]?.duration_ms || 0;
-  return durationMs > 0 && durationMs < 3 * 60 * 1000;
-}
-
-function bytesToGB(value: number): number {
-  return Math.max(0, Math.round(value / 1024 / 1024 / 1024));
-}
-
-function gbToBytes(value: number): number {
-  return Math.max(0, Math.round(value * 1024 * 1024 * 1024));
-}
-
-function currentUploadSourceMergeJob(recording: RecordingItem, jobs: JobItem[]): JobItem | undefined {
-  if (!recording.upload_source_id) {
-    return undefined;
-  }
-  const businessKey = `upload-source:${recording.upload_source_id}:merge`;
-  return jobs.find((job) => job.type === "MERGE_UPLOAD_SOURCE" && job.business_key === businessKey);
-}
-
-function currentUploadSourcePackageJob(recording: RecordingItem, jobs: JobItem[]): JobItem | undefined {
-  if (!recording.upload_source_id) {
-    return undefined;
-  }
-  const businessKey = `upload-source:${recording.upload_source_id}:package`;
-  return jobs.find((job) => job.type === "PACKAGE_UPLOAD_SOURCE" && job.business_key === businessKey);
-}
-
-function parseEditCutDraft(value: string): UploadSourceEditCut[] {
-  const cuts: UploadSourceEditCut[] = [];
-  for (const rawLine of value.split(/[\n,;]+/)) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-    const match = line.match(/^(.+?)\s*[-~]\s*(.+)$/);
-    if (!match) {
-      return [];
-    }
-    const start = parseTimelineInput(match[1]);
-    const end = parseTimelineInput(match[2]);
-    if (start === null || end === null || end <= start) {
-      return [];
-    }
-    cuts.push({ start_ms: start, end_ms: end });
-  }
-  return cuts.sort((left, right) => left.start_ms - right.start_ms || left.end_ms - right.end_ms);
-}
-
-function parseTimelineInput(value: string): number | null {
-  const parts = value.trim().split(":");
-  if (parts.length < 2 || parts.length > 3) {
-    return null;
-  }
-  const numbers = parts.map((part) => Number(part));
-  if (numbers.some((part) => !Number.isFinite(part) || part < 0)) {
-    return null;
-  }
-  const [hours, minutes, seconds] = parts.length === 3 ? numbers : [0, numbers[0], numbers[1]];
-  if (minutes >= 60 || seconds >= 60) {
-    return null;
-  }
-  return Math.round(((hours * 60 + minutes) * 60 + seconds) * 1000);
-}
-
-function formatJobType(value: string, labels: AdminCopy): string {
-  if (value === "SYNC_RECORDER_PROFILE") {
-    return labels.jobSyncRecorderProfile;
-  }
-  if (value === "MERGE_UPLOAD_SOURCE") {
-    return labels.jobMergeUploadSource;
-  }
-  if (value === "PACKAGE_UPLOAD_SOURCE") {
-    return labels.jobPackageUploadSource;
-  }
-  if (value === "APPLY_UPLOAD_SOURCE_EDIT") {
-    return labels.jobApplyUploadSourceEdit;
-  }
-  if (value === "UPLOAD_BILIBILI") {
-    return labels.jobUploadBilibili;
-  }
-  if (value === "UPLOAD_COS_OBJECT") {
-    return labels.jobUploadCOS;
-  }
-  if (value === "UPLOAD_COS_RECORDING_FILE") {
-    return labels.jobUploadCOSRecordingFile;
-  }
-  if (value === "SYNC_SITE_TLS") {
-    return labels.jobSyncSiteTLS;
-  }
-  return value;
-}
-
-function formatJobStatus(value: string, labels: AdminCopy): string {
-  if (value === "PENDING") {
-    return labels.jobStatusPending;
-  }
-  if (value === "RUNNING") {
-    return labels.jobStatusRunning;
-  }
-  if (value === "SUCCEEDED") {
-    return labels.jobStatusSucceeded;
-  }
-  if (value === "FAILED") {
-    return labels.jobStatusFailed;
-  }
-  if (value === "CANCELLED") {
-    return labels.jobStatusCancelled;
-  }
-  return value;
-}
-
-function formatUploadSourceStatus(value: string, labels: AdminCopy, mergeJob?: JobItem, packageJob?: JobItem): string {
-  if (value === "ACTIVE_RECORDING" || value === "ACTIVE") {
-    return labels.uploadSourceActiveRecording;
-  }
-  if (value === "READY_TO_UPLOAD") {
-    return labels.uploadSourceReady;
-  }
-  if (value === "UPLOAD_COMPLETE") {
-    return labels.uploadSourceComplete;
-  }
-  if (value === "UPLOAD_FAILED") {
-    return labels.uploadSourceUploadFailed;
-  }
-  if (value === "UPLOADING") {
-    return labels.uploadSourceUploading;
-  }
-  if (value === "WAITING_REVIEW") {
-    return labels.uploadSourceWaitingReview;
-  }
-  if (value === "MERGE_PENDING") {
-    if (mergeJob?.status === "RUNNING") {
-      return labels.uploadSourceMerging;
-    }
-    if (mergeJob?.status === "SUCCEEDED") {
-      return labels.uploadSourceMergeCompleteRefreshing;
-    }
-    return labels.uploadSourcePendingMerge;
-  }
-  if (value === "MERGE_FAILED") {
-    return labels.uploadSourceMergeFailed;
-  }
-  if (value === "PACKAGE_PENDING") {
-    if (packageJob?.status === "RUNNING") {
-      return labels.uploadSourcePackaging;
-    }
-    if (packageJob?.status === "SUCCEEDED") {
-      return labels.uploadSourcePackageCompleteRefreshing;
-    }
-    return labels.uploadSourcePendingPackage;
-  }
-  if (value === "PACKAGE_FAILED") {
-    return labels.uploadSourcePackageFailed;
-  }
-  return value || labels.unknown;
-}
-
-function deriveUploadSourceDisplayStatus(recording: RecordingItem): string {
-  const sourceStatus = recording.upload_source_status ?? recording.recording_status;
-  if (sourceStatus !== "READY_TO_UPLOAD") {
-    return sourceStatus;
-  }
-  const destinationStatuses = [recording.bilibili_status, recording.cos_status].filter(
-    (status): status is string => Boolean(status) && status !== "DISABLED"
-  );
-  if (destinationStatuses.some((status) => status === "FAILED")) {
-    return "UPLOAD_FAILED";
-  }
-  if (destinationStatuses.some((status) => status === "UPLOADING" || status === "VERIFYING")) {
-    return "UPLOADING";
-  }
-  if (
-    destinationStatuses.length > 0 &&
-    destinationStatuses.every((status) => status === "VERIFIED" || status === "AVAILABLE")
-  ) {
-    return "UPLOAD_COMPLETE";
-  }
-  return sourceStatus;
-}
-
-function formatModuleUploadStatus(value: string | undefined, labels: AdminCopy): string {
-  if (value === "WAITING_REVIEW") {
-    return labels.uploadSourceWaitingReview;
-  }
-  if (value === "DISABLED") {
-    return labels.uploadStatusDisabled;
-  }
-  if (value === "WAITING_SOURCE") {
-    return labels.uploadStatusWaitingSource;
-  }
-  if (value === "PENDING") {
-    return labels.uploadStatusPending;
-  }
-  if (value === "UPLOADING" || value === "VERIFYING") {
-    return labels.uploadStatusUploading;
-  }
-  if (value === "AVAILABLE") {
-    return labels.uploadStatusAvailable;
-  }
-  if (value === "VERIFIED") {
-    return labels.uploadStatusVerified;
-  }
-  if (value === "FAILED") {
-    return labels.uploadStatusFailed;
-  }
-  return value || labels.unknown;
-}
-
-function formatCompressionStatus(value: string | undefined, labels: AdminCopy): string {
-  if (value === "DISABLED") {
-    return labels.compressionStatusDisabled;
-  }
-  if (value === "PENDING") {
-    return labels.compressionStatusPending;
-  }
-  if (value === "COMPRESSING") {
-    return labels.compressionStatusCompressing;
-  }
-  if (value === "COMPRESSED") {
-    return labels.compressionStatusCompressed;
-  }
-  if (value === "SKIPPED_LOW_GAIN") {
-    return labels.compressionStatusSkippedLowGain;
-  }
-  if (value === "FAILED") {
-    return labels.compressionStatusFailed;
-  }
-  return value || "-";
-}
-
-function formatTimeline(value: number): string {
-  const totalSeconds = Math.max(0, Math.round(value / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
-}
-
-function formatDuration(value: number): string {
-  if (!value) {
-    return "-";
-  }
-  const totalSeconds = Math.round(value / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
-}
-
-function formatDateTime(value: string, labels: AdminCopy): string {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  const formatted = new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  }).format(date);
-  return `${formatted} ${labels.chinaTime}`;
-}
-
-function formatChinaDateParts(value: string): { date: string; time: string } {
-  if (!value) {
-    return { date: "-", time: "-" };
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return { date: value, time: "-" };
-  }
-  const parts = new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  }).formatToParts(date);
-  const valueFor = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return {
-    date: `${valueFor("year")}/${valueFor("month")}/${valueFor("day")}`,
-    time: `${valueFor("hour")}:${valueFor("minute")}:${valueFor("second")}`
-  };
-}
-
-function currentChinaDate(): string {
-  return chinaDateFromDate(new Date());
-}
-
-function latestRecordingChinaDate(recordings: RecordingItem[]): string | null {
-  let latest: Date | null = null;
-  for (const recording of recordings) {
-    const started = new Date(recording.started_at);
-    if (Number.isNaN(started.getTime())) {
-      continue;
-    }
-    if (!latest || started > latest) {
-      latest = started;
-    }
-  }
-  return latest ? chinaDateFromDate(latest) : null;
-}
-
-function chinaDateFromTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return chinaDateFromDate(date);
-}
-
-function chinaDateFromDate(date: Date): string {
-  const parts = new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(date);
-  const valueFor = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${valueFor("year")}-${valueFor("month")}-${valueFor("day")}`;
-}
-
-function NumberField(props: { label: string; max?: number; min: number; value: number; onChange: (value: number) => void }) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium">
-      {props.label}
-      <input
-        className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-        max={props.max}
-        min={props.min}
-        type="number"
-        value={props.value}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-      />
-    </label>
-  );
-}
-
-function SelectField(props: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium">
-      {props.label}
-      <select
-        className="h-10 rounded-md border border-border bg-white px-3 text-sm font-normal outline-none focus:border-accent"
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      >
-        <option value="original">original</option>
-        <option value="high">high</option>
-        <option value="super">super</option>
-        <option value="hd">hd</option>
-        <option value="smooth">smooth</option>
-        <option value="4k">4k</option>
-        <option value="2k">2k</option>
-        <option value="dolby">dolby</option>
-        <option value="blue_ray_dolby">blue_ray_dolby</option>
-      </select>
-    </label>
-  );
-}
-
-function ToggleField(props: { disabled?: boolean; label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between gap-3 rounded-md border border-border bg-white px-3 py-2 text-sm font-medium">
-      {props.label}
-      <input
-        className="h-4 w-4 accent-[#16867a]"
-        checked={props.checked}
-        disabled={props.disabled}
-        type="checkbox"
-        onChange={(event) => props.onChange(event.target.checked)}
-      />
-    </label>
   );
 }

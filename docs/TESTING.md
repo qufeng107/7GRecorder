@@ -302,6 +302,13 @@ song processing FAILED
 
 ## 12. Frontend
 
+前端模块化迭代新增目标：合成数据开发模式、隔离本地 API 联调、按模块组件测试和 Playwright 浏览器 smoke。
+覆盖独立路由直达/刷新、账号权限、空/错误/加载状态、编辑与审核分离、清理及重复投稿确认。
+公开主播页验证移动端、键盘访问、减弱动画和后台/动画资源加载隔离。
+测试不使用生产凭证或文件，mock 不可向生产透传；UI mock 不能替代 API 契约和联调验证。
+具体实施顺序见 `FRONTEND_UI.md`；Jobs、全部控制台路由、会话与公开路由隔离的浏览器测试及本地隔离环境已实现，
+运行方法见 `FRONTEND_DEVELOPMENT.md`。审核/清理等其余模块的浏览器覆盖随模块迁移补齐。
+
 保持精简：
 
 - TypeScript typecheck；
@@ -441,3 +448,12 @@ System:
   destination is required.
 - Cleanup persists `DELETING` before file removal and ends in `DELETED` or `FAILED`; repair skips all non-`AVAILABLE`
   cleanup states.
+
+
+Frontend migration regression gate additionally covers:
+- Profile creation/editing and draft retention during polling.
+- Review downloads only in expanded output details; applying edits never approves delivery.
+- Failed review requests surface an error; cleanup requests require explicit confirmation.
+- Empty account passwords are omitted and preserve authentication against the real backend.
+- Restricted deep links never mount module queries; real backend permissions still reject unauthorized requests.
+- Built frontend renders every existing module with real API nullability and persists disabled upload configuration.

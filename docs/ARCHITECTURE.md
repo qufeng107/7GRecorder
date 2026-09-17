@@ -881,6 +881,10 @@ Frontend：
 
 前后端代码分离，但 Monorepo，不拆两个 Git Repository。
 
+前端内部按 app/features/shared 组织真实模块，控制台与公开主播页面使用独立布局及按需加载边界。
+控制台页面拥有独立路由；公共页不能挂载后台查询或消费 Admin DTO。保留静态部署，
+公开页预渲染/SEO 在上线前单独评估；模块拆分不引入生产 Node 服务。具体目标见 `FRONTEND_UI.md`。
+
 ---
 
 ## 17. Authentication
@@ -943,7 +947,8 @@ dev  → CI only
 main → CI → GitHub Actions immutable release → SSH production deploy
 ```
 
-不建立测试环境。
+支持与生产数据、凭证、文件及外部集成隔离的测试环境，优先本地运行；远程 staging 位置另行设计。
+`dev` 保持 CI only，不能因新增测试环境自动获得部署行为。
 
 详细 release、migration、backup、rollback、server path 约定见 `DEPLOYMENT.md`；运行配置、Secret、Storage Guard、日志与恢复见 `OPERATIONS.md`。
 

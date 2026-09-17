@@ -738,3 +738,13 @@ These are diagnostic display fields only; clients still use the module status en
 They also expose `local_cleanup_status` and `local_deleted_at`. `DELETED` means local source videos and the
 source-owned derived directory were intentionally reclaimed after all enabled destinations succeeded; it is not an
 upload failure and must not offer local review/download actions.
+
+### Frontend resource contracts
+
+Console resource contracts (session/accounts, jobs, recording profiles/files/upload sources, storage, credentials,
+module settings, TLS and songs) are generated from the backend JSON response structs by
+`go run ./cmd/frontend-contracts`; this is an implementation contract check, not a database design source.
+The current handlers are manually bound and have no usable exported OpenAPI schema for these responses.
+This limited generator is the transitional typed-wrapper route; response envelopes remain explicit in the frontend
+transport. CI regenerates and checks the committed output. UI-only combined rows, forms and response envelopes remain explicit frontend types; request/response validation is
+still owned by the server. The generator preserves optional/null fields and excludes JSON-hidden secrets.

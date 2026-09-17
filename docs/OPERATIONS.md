@@ -808,3 +808,14 @@ FROM upload_sources ORDER BY started_at DESC;
 `DELETING` means the source was durably claimed before filesystem work. `FAILED` means cleanup itself needs inspection;
 it must not be repaired or uploaded as if local disappearance were accidental. `DELETED` is the expected terminal
 local state for an older remotely archived source.
+
+## Local frontend development isolation
+
+`docs/FRONTEND_DEVELOPMENT.md` documents synthetic frontend development and real local backend preview.
+`scripts/dev/local_environment.py` creates a new ignored `data/dev/run-*` root per run, a fresh SQLite database and
+master key, synthetic credentials and a loopback-only backend. It allowlists the backend process environment, disables
+media executables and points Recorder at an unavailable loopback endpoint. Production data/config is never copied.
+The existing backend starts its worker even for `serve`; isolation relies on the fresh unconfigured database. Do not
+add real service credentials to this test instance. This is configuration/data isolation, not network egress isolation.
+Ctrl+C stops its children; data/logs remain for inspection. Cookies are host-scoped, so separate local runs should use
+new browser contexts; they do not share the production hostname.

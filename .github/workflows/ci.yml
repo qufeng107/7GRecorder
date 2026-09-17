@@ -80,7 +80,13 @@ jobs:
           DATA_ROOT=/tmp/7grecorder-ci SQLITE_PATH=/tmp/7grecorder-ci/db/7grecorder.db TEMP_ROOT=/tmp/7grecorder-ci/temp ./dist/7grecorder migrate
 
       - name: Frontend install
-        run: cd frontend && pnpm install --no-frozen-lockfile
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Frontend contract drift
+        run: |
+          cd backend
+          go run ./cmd/frontend-contracts > /tmp/frontend-contracts.ts
+          diff -u ../frontend/src/shared/api/contracts.generated.ts /tmp/frontend-contracts.ts
 
       - name: Frontend lint
         run: |
@@ -104,6 +110,15 @@ jobs:
 
       - name: Frontend build
         run: cd frontend && pnpm build
+
+      - name: Install browser
+        run: cd frontend && pnpm exec playwright install --with-deps chromium
+
+      - name: Frontend browser smoke
+        run: cd frontend && pnpm test:e2e
+
+      - name: Isolated frontend/backend integration
+        run: cd frontend && pnpm test:integration
 
       - name: Compose config
         run: docker compose -f deploy/compose.yaml --env-file .env.example config >/dev/null

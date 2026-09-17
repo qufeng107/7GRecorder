@@ -69,6 +69,8 @@ Docker Compose
 ## 文档
 
 - [当前生产状态与交接](docs/CURRENT_STATUS.md)
+- [直播运营分析调研与 Open API 评审（设计输入）](docs/LIVE_ANALYTICS_RESEARCH.md)
+- [B 站直播与互玩官方文档本地快照](docs/references/bilibili-open-live/README.md)
 - [需求说明](docs/REQUIREMENTS.md)
 - [技术架构](docs/ARCHITECTURE.md)
 - [数据库设计](docs/DATABASE.md)
@@ -131,3 +133,9 @@ Host Nginx + X-Accel-Redirect large-file download
 ```
 
 实现阶段不应再次引入新的大架构，除非真实外部工具验证证明当前设计无法满足需求。
+
+## 前端本地迭代
+
+新任务页：`/admin/jobs`。运行 `bash scripts/dev/frontend.sh dev:mock` 后打开
+`http://127.0.0.1:5173/admin/jobs`；首次工具链准备、真实本地联调与隔离预览见
+[前端开发说明](docs/FRONTEND_DEVELOPMENT.md)。

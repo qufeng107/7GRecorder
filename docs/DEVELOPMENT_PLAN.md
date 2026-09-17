@@ -349,6 +349,17 @@ AI resource class = lowest priority；直播期间默认不启动新 AI Job。
 
 ## 13. Phase 10 — Public / Creative Frontend
 
+当前前端迭代优先完成模块化基础，再推进公开宣传页；保留 React/TypeScript/Vite。
+本地环境、共享布局与全部现有控制台模块已完成迁移；后续推进公开页面及交互细化。当前范围与启动方式见 `FRONTEND_DEVELOPMENT.md`。顺序：
+
+1. 本地工具链、锁文件、合成数据模式、隔离联调配置与浏览器 smoke；
+2. 共享 API 契约、控制台布局、独立页面路由，以 Jobs 为首个迁移候选；
+3. 统一 UI/主题，逐步迁移录像、上传、歌曲、账号和系统模块，保持业务与权限语义；
+4. 公开主播页面独立视觉与动画原型、移动端与减弱动画支持；
+5. 明确公开页 SEO/预渲染及公开数据接入。
+
+范围与验收输入见 `FRONTEND_UI.md`。隔离环境先本地可复现；远程 staging 未部署，`dev` 仍仅 CI。
+
 ```text
 /@streamer
 /@streamer/songs

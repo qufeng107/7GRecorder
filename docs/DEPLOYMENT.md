@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-7GRecorder 不是企业级多环境系统，第一版只维护一台正式服务器。
+7GRecorder 保持轻量部署，当前只维护一台正式服务器。前端迭代增加本地开发与隔离测试能力。
 
 分支：
 
@@ -11,7 +11,9 @@ dev   → 日常集成/测试分支，不部署服务器
 main  → 正式分支，CI 通过后自动部署正式服务器
 ```
 
-不建立独立 test/staging 环境。
+隔离测试优先使用本地独立实例：数据库、数据目录、密钥、Cookie、端口和外部集成与生产分离，
+使用合成数据及 fake/禁用的外部服务，不挂载生产录像、不复制生产凭证。远程 staging 的机器和域名
+另行确定；当前不新增服务器或自动部署流程。详细开发模式见 `FRONTEND_UI.md`。
 
 核心原则：
 
@@ -622,3 +624,10 @@ remote jobs, delete `edited/...` files, or restart BililiveRecorder.
 Automatic delivered-source cleanup additionally requires `00009_upload_source_local_cleanup.sql`. Existing rows
 must default to `local_cleanup_status = 'AVAILABLE'`; the migration itself deletes no files. Reclamation starts only
 when the worker observes disk pressure and an older source satisfies every remote-success and safety gate.
+
+## Frontend iteration validation
+
+Local isolated integration and built-preview commands are available in `FRONTEND_DEVELOPMENT.md`.
+CI uses the committed pnpm lockfile and validates generated Jobs/session types, component tests, the static build,
+Playwright fixture scenarios, and a built frontend against a fresh local backend. No remote staging deployment
+workflow has been added. Production frontend installs now use `--frozen-lockfile` as specified above.

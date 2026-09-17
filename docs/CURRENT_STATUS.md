@@ -129,6 +129,41 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 
 ## Future Design Documents
 
+- Frontend iteration is now the active design direction: retain React/TypeScript/Vite, modularize console features,
+  introduce real page routes and shared modern UI, and support expressive public streamer pages with separate layouts
+  and lazy-loaded animation. `docs/FRONTEND_UI.md` records the target and delivery checkpoints. Local synthetic-data
+  development and isolated integration/testing are required; remote staging location remains undecided and `dev`
+  stays CI-only. All existing console pages now use independent feature modules under the shared layout/theme;
+  production routing does not import the compatibility AdminDashboard test harness. Public handle matching is corrected.
+  See `docs/FRONTEND_DEVELOPMENT.md` for mock, isolated integration and built-preview modes. The pinned pnpm lockfile,
+  generated console resource types and Playwright mock/real-backend tests are included. No production deployment or
+  database schema change occurred. Verification covers permission gates, draft retention, review/download/edit
+  separation, cleanup confirmation, empty-password preservation, and real-backend profile/upload settings persistence.
+  Local verification passed: frontend lint/typecheck/build, 18 unit/component tests, 13 mock browser tests,
+  2 built-frontend/real-backend integration tests, generated contract comparison, backend full tests and vet.
+  Local test deployment is running at `http://127.0.0.1:4173/admin` (built frontend + fresh backend);
+  synthetic account: `local-admin` / `local-test-only-password`. Data: `data/dev/run-myvshbdk`.
+  Fixture demonstration is at `http://127.0.0.1:5173/admin/recordings`, with no login required.
+  These are local processes, not persistent remote services. They use no inherited external integration credentials;
+  production remains unchanged. Recreate with the commands in `FRONTEND_DEVELOPMENT.md` after stopping them.
+
+- `docs/LIVE_ANALYTICS_RESEARCH.md` records the operations-analytics research, metric limitations, Recorder 2.18.0
+  capture gaps, and official Bilibili API options. A normal viewer account is allowed; target-streamer credentials or
+  authorization are not assumed. This is design input only: no collector, schema, production settings, or dependencies
+  have changed. Validate real sanitized XML and event coverage before selecting an implementation. The existing
+  non-goal for secondary real-time danmaku collection remains until an explicit design change.
+  Scope is live-stream data and its retrospective analysis only; uploaded-recording video analytics is excluded.
+  The user already has OpenLive developer Access Key ID/Secret; do not repeat onboarding. AppId, project status, and
+  target-streamer identity code remain unconfirmed. No authenticated API calls have been made; developer credentials
+  alone must not be treated as target-room authorization.
+  On 2026-09-17 the user paused integration and development to change their enterprise account to a personal account.
+  Credentials are reportedly stored in the development machine's `~/.bashrc`; their values have not been read.
+  Do not assume the account change preserves credentials, projects, or permissions. Resume when the user is ready,
+  then recheck these prerequisites. Research sections 7.7–7.8 capture the OpenLive data/function matrix, limitations,
+  candidate delivery order, and resumption checklist; no implementation is scheduled by this research.
+  The dynamic OpenLive documentation can now be read locally via `docs/references/bilibili-open-live/README.md`.
+  Its published directory was discovered using an anonymous Playwright/Chrome session; the manual archive script is
+  `scripts/docs/archive_bilibili_open_live.py`. Reference snapshots do not replace sanitized runtime fixtures.
 - `docs/7GRecorder_Songs_V1_Technical_Design.md` now targets manually selecting one AVAILABLE COS video output, running
   a free local high-recall singing candidate detector, automatically creating permanent COS M4A artifacts with a 5%
   local playback cache, reviewing/labeling worthwhile performances, and creating accurate MP4 exports on demand with

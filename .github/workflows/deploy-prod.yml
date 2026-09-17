@@ -41,7 +41,7 @@ jobs:
         working-directory: frontend
         run: |
           set -euo pipefail
-          pnpm install --no-frozen-lockfile
+          pnpm install --frozen-lockfile
           pnpm build
 
       - name: Build backend binary

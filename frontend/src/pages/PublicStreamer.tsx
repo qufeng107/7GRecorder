@@ -2,7 +2,9 @@ import { Radio } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 export function PublicStreamer() {
-  const { slug } = useParams();
+  const { handle } = useParams();
+  const slug = handle?.startsWith("@") ? handle.slice(1) : "";
+  if (!slug) return <main className="p-8">页面不存在 · <a href="/admin">返回控制台</a></main>;
 
   return (
     <main className="min-h-screen bg-[#f7f8f5] text-ink">

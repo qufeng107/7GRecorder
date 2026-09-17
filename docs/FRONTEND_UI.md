@@ -96,3 +96,113 @@
 - Local scan remains super-admin-only because it reconciles shared server storage.
 - Recording protect/download actions follow `can_manage_local_files`.
 - Destructive local storage actions must require confirmation and show the cleanup result after completion.
+
+
+## Modular Frontend Iteration — 2026-09-17
+
+Status: all existing console routes use feature modules and the shared layout; local/test environments implemented. Retain React, TypeScript, Vite,
+React Router, TanStack Query/Table and Tailwind. Do not upgrade pinned dependencies as part of structural extraction.
+The user wants a modular console, a modern shared UI, local development, and an isolated test environment, with
+room for expressive public streamer pages and additional platform modules.
+
+### Application boundaries
+
+- Keep one frontend project initially, with separate console and public layouts and route bundles.
+- Preserve `/admin` as the console entry. Give each existing page a real nested URL, such as
+  `/admin/recordings`, `/admin/uploads`, `/admin/songs`, and `/admin/jobs`; retain role/policy checks.
+  A platform user's dashboard uses their authorized resources, while super-admin operations remain restricted.
+  This does not introduce self-registration, new roles, or a new backend permission model.
+- Keep `/@:slug/*` for public streamer pages. Public views consume public DTOs only and must not mount
+  authenticated console queries, menus, or credential forms.
+- Each route owns its loading, empty, error, and permission states. Load substantial feature code on demand;
+  public animation dependencies must not be imported by the common console entry.
+- Persist shareable filter/sort/page state in URL search parameters. Keep unsaved form state local and handle
+  navigation away from modified forms deliberately.
+
+### Module structure and data flow
+
+Use `app/` for routing/providers/layouts, `features/` for business modules, and `shared/` for reusable UI,
+API transport, generated contracts, formatting and localization. Create directories only when extracting real code.
+Recording profiles, recordings/review, uploads, songs, jobs, accounts, and system settings own their page components,
+query hooks and forms. A feature must not import another feature's page or private state.
+
+TanStack Query owns server data. Route-level query activation should avoid polling unrelated hidden pages;
+shared health/session queries are explicit exceptions. Query keys and invalidation are defined within each feature.
+Logout clears account-scoped cache. The common API client handles structured errors and the existing session/CSRF
+contract; it does not duplicate backend authorization. Implement the typed-contract workflow in API_DESIGN.md
+instead of moving hand-written duplicate DTOs into a new folder unchanged.
+
+### Shared UI and creative freedom
+
+- Build the console's shared controls using Tailwind and the existing shadcn/ui design direction: buttons, fields,
+  dialogs, tables, status labels, loading/empty/error feedback and notifications.
+- Define semantic color, typography, spacing, radius and motion tokens. Support coherent light/dark themes and
+  keyboard/focus behavior. Extract Chinese/English copy from page implementation.
+- The console favors legibility, navigation and efficient repeated operations; public streamer pages may have
+  independent typography, composition, backgrounds and richer animation while sharing accessible primitives.
+- Begin with CSS for simple transitions. Motion for React is a candidate for public-page gestures, layout and scroll
+  animation; add it only with a concrete page requirement and a reviewed pinned version. Consider a 3D/canvas engine
+  only for an approved scene rather than including it in the baseline.
+- Respect reduced-motion preferences, support touch devices, and offer static fallbacks when animation is disabled
+  or a device cannot render the effect reliably. Verify public-page loading and animation separately from console use.
+- Public-page SEO, per-streamer link previews and first-render HTML require a separate rendering decision before
+  public launch. SPA animation support alone does not satisfy those requirements. Evaluate static pre-rendering first;
+  SSR or a new production Node service needs an explicit deployment design if justified.
+
+### Local development and isolated validation
+
+The baseline has three implemented local modes (commands and limitations in `FRONTEND_DEVELOPMENT.md`):
+
+1. Frontend-only local mode with synthetic API fixtures for roles, populated/empty/error/loading states. No production
+   API access is needed for UI development; fixture handlers must not silently pass unmatched requests to production.
+2. Local integration mode using Vite and a separate local Go backend/SQLite/data root. Use synthetic accounts and
+   test files, no production credentials or production recordings; external integrations are disabled or faked.
+3. Isolated test environment using the built frontend and test backend with independent database, keys, files, ports
+   and cookies. Default to a local reproducible environment. A remotely accessible staging host/domain is a later
+   deployment choice, not created automatically by a push to `dev`.
+
+Add Vitest/Testing Library tests per feature and Playwright browser smoke for navigation, refresh/deep links,
+permissions, review/edit approval, cleanup confirmation and download actions using fixtures/fake integrations.
+UI fixtures aid development; they do not replace API contract checks or real local integration tests.
+Record the Node/pnpm versions and commit a lockfile, then use frozen installs in CI. Existing CI checks remain gates.
+Browser setup and dependencies must use selected fixed versions. Storybook can be evaluated once shared controls
+need independent review; it is not required to begin extracting modules.
+
+### Delivery checkpoints
+
+1. Reproducible local toolchain, lockfile, fixture mode, isolated local integration configuration and browser smoke.
+2. Shared API/contracts, layouts, real page routes and one migrated vertical slice (Jobs is the initial candidate).
+3. Shared visual primitives/theme and incremental migration of the remaining console modules. Preserve the current
+   high-risk confirmations, permission gates, source distinctions and recording timestamp semantics.
+4. Public streamer visual prototype with synthetic content, lazy-loaded animation and accessibility/performance checks.
+5. Public content integration and a rendering/SEO decision; add future analytics only when its paused design resumes.
+
+Each checkpoint should remain runnable and reviewable. No all-at-once rewrite, automatic production deployment,
+production data copy, or new database schema is authorized by this frontend design alone.
+
+### Official references checked 2026-09-17
+
+These establish capabilities, not a dependency upgrade instruction. Check selected package versions before coding.
+
+- React lazy loading: https://react.dev/reference/react/lazy
+- React Router modes: https://reactrouter.com/start/modes
+- Motion for React: https://motion.dev/docs/react
+- Playwright API mocking: https://playwright.dev/docs/mock
+
+### Console migration implementation boundary
+
+All existing console routes use the authenticated layout and lazy feature modules. Each page owns its queries,
+mutations and view state; unrelated modules do not mount in the background. Resource contracts are generated from
+the backend JSON structs. Shared copy, formatting and fields use the scoped console theme.
+
+The previous AdminDashboard remains only as a compatibility harness for existing component tests; production routes
+do not import it. Browser coverage includes profile CRUD/draft retention, review/download/edit separation, account
+password preservation, cleanup confirmation, permission gates and mobile layout. Real-backend tests exercise the
+built application against a fresh database. The isolated preview is local, not a remote staging deployment.
+
+Recording/account editor drafts survive background refresh. Failed review/protection/download requests produce an
+error message without changing the displayed resource state. No new business pipeline or database schema is introduced.
+Full UI interaction polish and public creative content remain later checkpoints.
+
+For this batch, local isolated preview is the default test deployment. A remote host/domain or production release
+requires the user's destination choice; do not infer that test deployment authorizes production data access.

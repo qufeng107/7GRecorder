@@ -22,7 +22,7 @@ frontend-ci: frontend-install
 	cd frontend && pnpm build
 
 frontend-install:
-	cd frontend && pnpm install --no-frozen-lockfile
+	cd frontend && pnpm install --frozen-lockfile
 
 system-ci:
 	docker compose -f deploy/compose.yaml --env-file .env.example config >/dev/null
