@@ -6,7 +6,9 @@ test("built frontend authenticates against a fresh isolated backend", async ({
   expect((await request.get("/api/v1/jobs")).status()).toBe(401);
   await page.goto("/admin/jobs");
   await page.getByLabel("用户名", { exact: true }).fill("local-admin");
-  await page.getByLabel("密码", { exact: true }).fill("local-test-only-password");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("local-test-only-password");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("heading", { name: "任务中心" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "暂无任务" })).toBeVisible();
@@ -22,7 +24,9 @@ test("migrated modules work against real contracts; profile and account changes 
 }) => {
   await page.goto("/admin/profiles");
   await page.getByLabel("用户名", { exact: true }).fill("local-admin");
-  await page.getByLabel("密码", { exact: true }).fill("local-test-only-password");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("local-test-only-password");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await page.getByRole("button", { name: "新建", exact: true }).click();
   const profile = page.getByRole("dialog");
@@ -88,9 +92,40 @@ test("migrated modules work against real contracts; profile and account changes 
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
   await page.getByLabel("用户名", { exact: true }).fill("isolated-viewer");
-  await page.getByLabel("密码", { exact: true }).fill("synthetic-viewer-password");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("synthetic-viewer-password");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("你没有访问此页面的权限");
   expect((await page.request.get("/api/v1/accounts")).status()).toBe(403);
   expect(errors).toEqual([]);
+});
+
+test("storage draft saves and reloads against the isolated backend", async ({
+  page,
+}) => {
+  await page.goto("/admin/system");
+  await page.getByLabel("用户名", { exact: true }).fill("local-admin");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("local-test-only-password");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.getByLabel("录像上限 GB", { exact: true }).fill("10");
+  await page.getByLabel("最低空闲 GB", { exact: true }).fill("2");
+  await page.getByLabel("紧急保留 GB", { exact: true }).fill("1");
+  await page.getByLabel("清理目标 %", { exact: true }).fill("85");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "存储设置" }),
+  ).toContainText("已保存");
+  await page.reload();
+  await expect(page.getByLabel("录像上限 GB", { exact: true })).toHaveValue(
+    "10",
+  );
+  await page.getByLabel("录像上限 GB", { exact: true }).fill("12");
+  await page.getByRole("link", { name: "任务中心", exact: true }).click();
+  await page.getByRole("button", { name: "继续编辑", exact: true }).click();
+  await expect(page.getByLabel("录像上限 GB", { exact: true })).toHaveValue(
+    "12",
+  );
 });

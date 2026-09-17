@@ -457,3 +457,7 @@ Frontend migration regression gate additionally covers:
 - Empty account passwords are omitted and preserve authentication against the real backend.
 - Restricted deep links never mount module queries; real backend permissions still reject unauthorized requests.
 - Built frontend renders every existing module with real API nullability and persists disabled upload configuration.
+
+System-settings draft tests cover polling during edits, failed saves, edits during pending saves, latest-server
+discard, independent TLS/storage state, cancelled/confirmed route departure, and beforeunload registration.
+Secrets must not be persisted in browser storage. Run these locally without production credentials.

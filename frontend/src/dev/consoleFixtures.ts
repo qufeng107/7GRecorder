@@ -139,6 +139,13 @@ export function createConsoleFixtures() {
     cleanup_target_ratio: 0.85,
     absolute_emergency_free_bytes: 536870912,
   };
+  let tls = {
+    enabled: false,
+    primary_domain: "test.invalid",
+    additional_domains: [],
+    status: "DISABLED",
+    updated_at: stamp,
+  };
   let editing = false;
   const list = (items: unknown[], empty: boolean) => ({
     items: empty ? [] : items,
@@ -298,15 +305,10 @@ export function createConsoleFixtures() {
         reclaimed_bytes: 0,
         skipped_recordings: 0,
       });
-    if (path === "/api/v1/system/site-tls")
-      return ok({
-        enabled: false,
-        primary_domain: "test.invalid",
-        additional_domains: [],
-        status: "DISABLED",
-        updated_at: stamp,
-        ...payload,
-      });
+    if (path === "/api/v1/system/site-tls") {
+      if (method === "PUT") tls = { ...tls, ...payload };
+      return ok(tls);
+    }
     if (path === "/api/v1/song-settings")
       return ok({
         enabled: false,

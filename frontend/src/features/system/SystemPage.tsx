@@ -1,6 +1,9 @@
+import { useServerDraft } from "../../shared/forms/useServerDraft";
+import { UnsavedChangesGuard } from "../../shared/forms/UnsavedChangesGuard";
+import { DraftFeedback } from "../../shared/forms/DraftFeedback";
 import { PageStatus } from "../../shared/ui/PageStatus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type SiteTLSForm,
   type MeResponse,
@@ -28,13 +31,6 @@ export default function SystemPage() {
   const language = useLanguage();
   const activePage: string = "system";
   const queryClient = useQueryClient();
-  const [storageForm, setStorageForm] = useState({
-    maxRecordingGB: 0,
-    minFreeGB: 0,
-    emergencyFreeGB: 0,
-    cleanupTargetPercent: 85,
-  });
-  const [siteTLSForm, setSiteTLSForm] = useState<SiteTLSForm>(emptySiteTLSForm);
   const [tlsCredentialLabel, setTLSCredentialLabel] =
     useState("7g.chat SSL sync");
   const [tlsCredentialSecret, setTLSCredentialSecret] = useState(
@@ -99,44 +95,50 @@ export default function SystemPage() {
     () => credentialsQuery.data?.items ?? [],
     [credentialsQuery.data?.items],
   );
-  useEffect(() => {
-    const settings = localStorageSettings;
-    if (!settings) {
-      return;
-    }
-    setStorageForm({
-      maxRecordingGB: bytesToGB(settings.max_recording_bytes),
-      minFreeGB: bytesToGB(settings.min_system_free_bytes),
-      emergencyFreeGB: bytesToGB(settings.absolute_emergency_free_bytes),
-      cleanupTargetPercent: Math.round(settings.cleanup_target_ratio * 100),
-    });
-  }, [localStorageSettings]);
-  useEffect(() => {
-    const settings = siteTLSQuery.data;
-    if (!settings) {
-      return;
-    }
-    setSiteTLSForm({
-      enabled: settings.enabled,
-      credential_id: settings.credential_id
-        ? String(settings.credential_id)
-        : "",
-      primary_domain: settings.primary_domain,
-      additional_domains: (settings.additional_domains ?? []).join("\n"),
-    });
-  }, [siteTLSQuery.data]);
+  const storageDraft = useServerDraft({
+    maxRecordingGB: bytesToGB(localStorageSettings?.max_recording_bytes ?? 0),
+    minFreeGB: bytesToGB(localStorageSettings?.min_system_free_bytes ?? 0),
+    emergencyFreeGB: bytesToGB(
+      localStorageSettings?.absolute_emergency_free_bytes ?? 0,
+    ),
+    cleanupTargetPercent: Math.round(
+      (localStorageSettings?.cleanup_target_ratio ?? 0.85) * 100,
+    ),
+  });
+  const settings = siteTLSQuery.data;
+  const tlsDraft = useServerDraft<SiteTLSForm>(
+    settings
+      ? {
+          enabled: settings.enabled,
+          credential_id: settings.credential_id
+            ? String(settings.credential_id)
+            : "",
+          primary_domain: settings.primary_domain,
+          additional_domains: (settings.additional_domains ?? []).join("\n"),
+        }
+      : emptySiteTLSForm,
+  );
+  const storageForm = storageDraft.form;
+  const siteTLSForm = tlsDraft.form;
+  const setStorageForm = storageDraft.change;
+  const setSiteTLSForm = tlsDraft.change;
   const saveStorageSettingsMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: typeof storageForm) =>
       requestJson<LocalStorageSettings>("/api/v1/storage/local/settings", {
         method: "PUT",
         body: JSON.stringify({
-          max_recording_bytes: gbToBytes(storageForm.maxRecordingGB),
-          min_system_free_bytes: gbToBytes(storageForm.minFreeGB),
-          cleanup_target_ratio: storageForm.cleanupTargetPercent / 100,
-          absolute_emergency_free_bytes: gbToBytes(storageForm.emergencyFreeGB),
+          max_recording_bytes: gbToBytes(submitted.maxRecordingGB),
+          min_system_free_bytes: gbToBytes(submitted.minFreeGB),
+          cleanup_target_ratio: submitted.cleanupTargetPercent / 100,
+          absolute_emergency_free_bytes: gbToBytes(submitted.emergencyFreeGB),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (saved, submitted) => {
+      queryClient.setQueryData<LocalStorageStatus>(
+        ["local-storage"],
+        (current) => (current ? { ...current, settings: saved } : current),
+      );
+      storageDraft.saved(submitted);
       void queryClient.invalidateQueries({ queryKey: ["local-storage"] });
       void queryClient.invalidateQueries({ queryKey: ["cleanup-candidates"] });
     },
@@ -180,20 +182,22 @@ export default function SystemPage() {
     },
   });
   const saveSiteTLSMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: SiteTLSForm) =>
       requestJson<SiteTLSSettings>("/api/v1/system/site-tls", {
         method: "PUT",
         body: JSON.stringify({
-          enabled: siteTLSForm.enabled,
-          credential_id: Number(siteTLSForm.credential_id || 0),
-          primary_domain: siteTLSForm.primary_domain,
-          additional_domains: siteTLSForm.additional_domains
+          enabled: submitted.enabled,
+          credential_id: Number(submitted.credential_id || 0),
+          primary_domain: submitted.primary_domain,
+          additional_domains: submitted.additional_domains
             .split(/\r?\n/)
             .map((value) => value.trim())
             .filter(Boolean),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (saved, submitted) => {
+      queryClient.setQueryData(["site-tls"], saved);
+      tlsDraft.saved(submitted);
       void queryClient.invalidateQueries({ queryKey: ["site-tls"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
@@ -211,10 +215,10 @@ export default function SystemPage() {
   });
   if (!user) return null;
   if (
-    credentialsQuery.isError ||
-    siteTLSQuery.isError ||
-    localStorageQuery.isError ||
-    cleanupCandidatesQuery.isError
+    (credentialsQuery.isError && !credentialsQuery.data) ||
+    (siteTLSQuery.isError && !siteTLSQuery.data) ||
+    (localStorageQuery.isError && !localStorageQuery.data) ||
+    (cleanupCandidatesQuery.isError && !cleanupCandidatesQuery.data)
   )
     return (
       <PageStatus
@@ -235,7 +239,34 @@ export default function SystemPage() {
     return <PageStatus loading />;
   return (
     <div className="feature-page space-y-6">
+      {(credentialsQuery.isError ||
+        siteTLSQuery.isError ||
+        localStorageQuery.isError ||
+        cleanupCandidatesQuery.isError) && (
+        <p role="alert">
+          {language === "zh"
+            ? "后台刷新失败，当前显示上次数据；未保存的修改已保留。"
+            : "Background refresh failed. Showing previous data; unsaved edits are preserved."}
+        </p>
+      )}
+      <UnsavedChangesGuard
+        dirty={
+          storageDraft.dirty ||
+          tlsDraft.dirty ||
+          tlsCredentialSecret !== '{"secret_id":"","secret_key":""}'
+        }
+      />
       <div className="grid gap-4">
+        <DraftFeedback
+          title={ui.siteTLS}
+          dirty={tlsDraft.dirty}
+          saved={saveSiteTLSMutation.isSuccess}
+          pending={saveSiteTLSMutation.isPending}
+          onDiscard={() => {
+            tlsDraft.discard();
+            saveSiteTLSMutation.reset();
+          }}
+        />
         <SiteTLSPanel
           credentials={credentials.filter(
             (item) =>
@@ -260,8 +291,18 @@ export default function SystemPage() {
           onCredentialLabelChange={setTLSCredentialLabel}
           onCredentialSecretChange={setTLSCredentialSecret}
           onFormChange={setSiteTLSForm}
-          onSave={() => saveSiteTLSMutation.mutate()}
+          onSave={() => saveSiteTLSMutation.mutate(siteTLSForm)}
           onSync={() => syncSiteTLSMutation.mutate()}
+        />
+        <DraftFeedback
+          title={ui.storageSettings}
+          dirty={storageDraft.dirty}
+          saved={saveStorageSettingsMutation.isSuccess}
+          pending={saveStorageSettingsMutation.isPending}
+          onDiscard={() => {
+            storageDraft.discard();
+            saveStorageSettingsMutation.reset();
+          }}
         />
         <StoragePanel
           candidates={cleanupCandidatesQuery.data?.items ?? []}
@@ -283,7 +324,7 @@ export default function SystemPage() {
               cleanupMutation.mutate();
             }
           }}
-          onSave={() => saveStorageSettingsMutation.mutate()}
+          onSave={() => saveStorageSettingsMutation.mutate(storageForm)}
         />
       </div>
     </div>

@@ -206,3 +206,15 @@ Full UI interaction polish and public creative content remain later checkpoints.
 
 For this batch, local isolated preview is the default test deployment. A remote host/domain or production release
 requires the user's destination choice; do not infer that test deployment authorizes production data access.
+
+### Settings draft protection
+
+System storage and TLS settings are the first settings forms to use an in-memory draft separate from server state.
+Polling refreshes untouched fields only when there is no local draft. Saving submits a snapshot; success updates
+the query cache and clears only that exact submitted draft, preserving edits made while the request was pending.
+Failed saves retain the draft. Each form shows unsaved/saved feedback and an explicit discard action.
+Discard adopts the latest fetched server state. Route navigation requires a discard confirmation; reload/closing
+uses the browser's native beforeunload warning. Session expiry/logout still clears authenticated state and drafts.
+Credential secrets remain memory-only; no localStorage/sessionStorage draft persistence is introduced.
+The guard also covers typed TLS credential material. No endpoint, payload, database or deployment behavior changes.
+This iteration is local-only at the user's request; do not rerun production deployment.

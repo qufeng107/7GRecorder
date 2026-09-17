@@ -14,6 +14,14 @@ Recommended first-read order:
 ## Production
 
 - Current deployed production commit: `06f27e3e2e0f112bebe4a8b0bd2b3e2589fc11d1`.
+- Pending frontend release: `3e4d72e24328610296a396a663e50050535629c4` is on both main and dev.
+  Dev CI `35277849056`, main CI `35278208544`, and the reusable CI in Production Deploy `35278209327` passed.
+  Production release attempts on 2026-09-17 were refused by the running-job guard: job `108 / UPLOAD_BILIBILI`
+  reported `8291085357 / 11785673465` bytes at 21:51 and 21:55 UTC. No application switch occurred; public readiness
+  still returned the previous SHA. Do not cancel/retry this upload or bypass the guard merely to deploy.
+  The user has now paused deployment. Do not rerun the workflow even if the upload finishes; continue local development
+  and testing until a new deployment instruction.
+  The first reusable CI attempt also exposed an existing Worker TempDir cleanup flake; its full rerun passed.
 - `main` runs the reusable CI gate before the release job; `dev` runs CI only.
 - The current release passed backend format, tidy, vet, tests, build, clean-database migration smoke, frontend
   lint/typecheck/tests/build, Compose validation, and production deployment.
@@ -141,10 +149,10 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
   separation, cleanup confirmation, empty-password preservation, and real-backend profile/upload settings persistence.
   Local verification passed: frontend lint/typecheck/build, 18 unit/component tests, 13 mock browser tests,
   2 built-frontend/real-backend integration tests, generated contract comparison, backend full tests and vet.
-  Local test deployment is running at `http://127.0.0.1:4173/admin` (built frontend + fresh backend);
+  The previous local built preview used `http://127.0.0.1:4173/admin` (built frontend + fresh backend);
   synthetic account: `local-admin` / `local-test-only-password`. Data: `data/dev/run-myvshbdk`.
   Fixture demonstration is at `http://127.0.0.1:5173/admin/recordings`, with no login required.
-  These are local processes, not persistent remote services. They use no inherited external integration credentials;
+  The built preview was stopped to run the next local integration suite. These are local processes, not persistent remote services. They use no inherited external integration credentials;
   production remains unchanged. Recreate with the commands in `FRONTEND_DEVELOPMENT.md` after stopping them.
 
 - `docs/LIVE_ANALYTICS_RESEARCH.md` records the operations-analytics research, metric limitations, Recorder 2.18.0
@@ -190,3 +198,16 @@ normalization failures still use ordered compatibility-boundary parts. Existing 
 rewritten automatically.
 
 Do not introduce Redis, RabbitMQ, Kafka, PostgreSQL, or a workflow engine for these items without a new design review.
+
+
+## Active local-only frontend iteration
+
+Work is on `frontend/settings-drafts`; formal deployment is paused by user instruction.
+System storage/TLS forms now retain local drafts through polling and background errors, preserve newer edits when an
+older save completes, show per-form save feedback, and confirm route departure. Refresh/close uses beforeunload.
+TLS credential material remains in memory only. Other settings modules retain their prior behavior until migrated.
+
+Local validation for this iteration passed: frontend lint/typecheck/build, 20 unit/component tests,
+17 synthetic browser tests and 3 real-backend integration tests. The local fixture UI can be opened at
+`http://127.0.0.1:5173/admin/system`; the isolated integration process shuts down after its tests.
+No remote push or deployment was performed for this iteration.
