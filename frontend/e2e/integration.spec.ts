@@ -5,8 +5,8 @@ test("built frontend authenticates against a fresh isolated backend", async ({
 }) => {
   expect((await request.get("/api/v1/jobs")).status()).toBe(401);
   await page.goto("/admin/jobs");
-  await page.getByLabel("用户名").fill("local-admin");
-  await page.getByLabel("密码").fill("local-test-only-password");
+  await page.getByLabel("用户名", { exact: true }).fill("local-admin");
+  await page.getByLabel("密码", { exact: true }).fill("local-test-only-password");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("heading", { name: "任务中心" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "暂无任务" })).toBeVisible();
@@ -21,8 +21,8 @@ test("migrated modules work against real contracts; profile and account changes 
   page,
 }) => {
   await page.goto("/admin/profiles");
-  await page.getByLabel("用户名").fill("local-admin");
-  await page.getByLabel("密码").fill("local-test-only-password");
+  await page.getByLabel("用户名", { exact: true }).fill("local-admin");
+  await page.getByLabel("密码", { exact: true }).fill("local-test-only-password");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await page.getByRole("button", { name: "新建", exact: true }).click();
   const profile = page.getByRole("dialog");
@@ -86,8 +86,9 @@ test("migrated modules work against real contracts; profile and account changes 
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "退出登录" }).click();
-  await page.getByLabel("用户名").fill("isolated-viewer");
-  await page.getByLabel("密码").fill("synthetic-viewer-password");
+  await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+  await page.getByLabel("用户名", { exact: true }).fill("isolated-viewer");
+  await page.getByLabel("密码", { exact: true }).fill("synthetic-viewer-password");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("你没有访问此页面的权限");
   expect((await page.request.get("/api/v1/accounts")).status()).toBe(403);
