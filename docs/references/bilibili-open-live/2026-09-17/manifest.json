@@ -1,0 +1,900 @@
+{
+  "title": "开放平台-直播&互玩接入文档",
+  "fetched_at_utc": "2026-09-17T18:35:12.779127+00:00",
+  "index_url": "https://member.bilibili.com/arcopen/user/open-doc/view?id=13",
+  "published_tree_sha256": "989011d660b84ce71ef6c90efff39d3f38f48c80b161c8b274ebe2e95cda3ada",
+  "upstream_index_mtime": 1787680138,
+  "method": "Public published directory and original Markdown; discovered with Playwright/Chrome",
+  "complete": true,
+  "articles": [
+    {
+      "id": "bdb1a8e5-a675-5bfe-41a9-7a7163f75dbf",
+      "title": "平台简介",
+      "navigation": [
+        "新手指引",
+        "平台简介"
+      ],
+      "url": "https://open-live.bilibili.com/document/bdb1a8e5-a675-5bfe-41a9-7a7163f75dbf",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/60676a7915c95f744979b9d74e1bd79ba06ae0c3.md",
+      "original_path": "originals/bdb1a8e5-a675-5bfe-41a9-7a7163f75dbf.md",
+      "original_sha256": "9a01ba779591c886e70a46770872dd9f67e00a9e5af5ef2d72f067f4a4b0a3f3",
+      "bytes": 2818,
+      "path": "pages/bdb1a8e5-a675-5bfe-41a9-7a7163f75dbf.md",
+      "sha256": "ec09f2ea50dc34eb6e2a3ebb160330be2ae13ec75e82e6f41dd586443fca6d54"
+    },
+    {
+      "id": "849b924b-b421-8586-3e5e-765a72ec3840",
+      "title": "快速开始",
+      "navigation": [
+        "新手指引",
+        "快速开始"
+      ],
+      "url": "https://open-live.bilibili.com/document/849b924b-b421-8586-3e5e-765a72ec3840",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/84f16bde71e9a3923061d7796e2b607355dd56d5.md",
+      "original_path": "originals/849b924b-b421-8586-3e5e-765a72ec3840.md",
+      "original_sha256": "3d48fc861bdbfc6f3f241a0a6c15bd322cfe9b9d9020a61060c5b9e55360ea67",
+      "bytes": 9063,
+      "path": "pages/849b924b-b421-8586-3e5e-765a72ec3840.md",
+      "sha256": "7993d3aa7abb5837fd3aa03e86f6d68a4bf6d62e45dd7bbccd9c508e4b3bbfb8"
+    },
+    {
+      "id": "5dffc297-6fd2-41ff-bd45-6e8b89e2a68e",
+      "title": "常见问题",
+      "navigation": [
+        "新手指引",
+        "常见问题"
+      ],
+      "url": "https://open-live.bilibili.com/document/5dffc297-6fd2-41ff-bd45-6e8b89e2a68e",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/4b9fdabac53a0343deca0999e738d9653b68231b.md",
+      "original_path": "originals/5dffc297-6fd2-41ff-bd45-6e8b89e2a68e.md",
+      "original_sha256": "77494dd41f61bc474927632e549106df01ffee5cea89a9ed473f96fff8d43339",
+      "bytes": 9316,
+      "path": "pages/5dffc297-6fd2-41ff-bd45-6e8b89e2a68e.md",
+      "sha256": "46c133c25333dc5ca96e32672a70d125b0ddb120fc328cc560e3746dfac6c6bc"
+    },
+    {
+      "id": "74eec767-e594-7ddd-6aba-257e8317c05d",
+      "title": "统一鉴权 & 错误码",
+      "navigation": [
+        "开放能力",
+        "统一鉴权 & 错误码"
+      ],
+      "url": "https://open-live.bilibili.com/document/74eec767-e594-7ddd-6aba-257e8317c05d",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/65cbf1652fb741c6bcf22d7ac9f9d3659c6e466f.md",
+      "original_path": "originals/74eec767-e594-7ddd-6aba-257e8317c05d.md",
+      "original_sha256": "87409bf4d769b97192c6aef5f5890ecb6ad48e173b470aef47b94c85f6472aec",
+      "bytes": 7106,
+      "path": "pages/74eec767-e594-7ddd-6aba-257e8317c05d.md",
+      "sha256": "db415b971db6c99761d6924bd64cbfce871719daca9bca39fbeb4a769575762c"
+    },
+    {
+      "id": "eba8e2e1-847d-e908-2e5c-7a1ec7d9266f",
+      "title": "应用API列表",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "应用API列表"
+      ],
+      "url": "https://open-live.bilibili.com/document/eba8e2e1-847d-e908-2e5c-7a1ec7d9266f",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/a38d6fa68db4e906cfd286cbf82c863b2f4c7558.md",
+      "original_path": "originals/eba8e2e1-847d-e908-2e5c-7a1ec7d9266f.md",
+      "original_sha256": "2ce9cab079e3eed035429e419fe1d92ce813faf4e45cb5205d3e36672937d14b",
+      "bytes": 7324,
+      "path": "pages/eba8e2e1-847d-e908-2e5c-7a1ec7d9266f.md",
+      "sha256": "835fdf9d4fe5c471f9d0248df1bb29907cf4bdd157166fc48539e4b9060a504f"
+    },
+    {
+      "id": "ad4901b8-c13e-7a20-e07e-410ad182564a",
+      "title": "H5插件API列表",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "H5插件API列表"
+      ],
+      "url": "https://open-live.bilibili.com/document/ad4901b8-c13e-7a20-e07e-410ad182564a",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/b50e742ded6063a2247630b72b640ce4acdc950f.md",
+      "original_path": "originals/ad4901b8-c13e-7a20-e07e-410ad182564a.md",
+      "original_sha256": "4ff1bd8265ca20d61bdb74516e1554fabeba8cddb030c9d8b180fcfbd5218118",
+      "bytes": 4706,
+      "path": "pages/ad4901b8-c13e-7a20-e07e-410ad182564a.md",
+      "sha256": "4fff71cb3464dad7faaaef125e5955c5fbb4ebb8cb6b078dd9fee7c1b52a9f2a"
+    },
+    {
+      "id": "657d8e34-f926-a133-16c0-300c1afc6e6b",
+      "title": "长链数据协议",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "消息长链",
+        "长链数据协议"
+      ],
+      "url": "https://open-live.bilibili.com/document/657d8e34-f926-a133-16c0-300c1afc6e6b",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/cfea091398fecdc6e5ec3c9d7f9a7be17c6ca79c.md",
+      "original_path": "originals/657d8e34-f926-a133-16c0-300c1afc6e6b.md",
+      "original_sha256": "833e801bd3b6a6b1cd2669a1b0e4bc6955f7696131b057856f68cf3a3890847a",
+      "bytes": 3334,
+      "path": "pages/657d8e34-f926-a133-16c0-300c1afc6e6b.md",
+      "sha256": "b2027256aec3dc30baaa1d735824c1e66a5a29de74782e7b2a36448f91950fec"
+    },
+    {
+      "id": "f9ce25be-312e-1f4a-85fd-fef21f1637f8",
+      "title": "长链命令说明",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "消息长链",
+        "长链命令说明"
+      ],
+      "url": "https://open-live.bilibili.com/document/f9ce25be-312e-1f4a-85fd-fef21f1637f8",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/5bf3c6d23bbd0e4005ccdf4fb290ccf98aad3ce3.md",
+      "original_path": "originals/f9ce25be-312e-1f4a-85fd-fef21f1637f8.md",
+      "original_sha256": "49a992111c3a5232c389014eeeff59e9ed820bc56c2795c3eedc694e0e37cd7e",
+      "bytes": 18819,
+      "path": "pages/f9ce25be-312e-1f4a-85fd-fef21f1637f8.md",
+      "sha256": "c5e66e4069bdc6eb455e1b294657a9f1c441023e9102f5a224bcd06d3d2f3fcb"
+    },
+    {
+      "id": "ba5bdccd-3096-d9eb-baee-d1b224f3c5f2",
+      "title": "功能介绍",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "互动面板",
+        "功能介绍"
+      ],
+      "url": "https://open-live.bilibili.com/document/ba5bdccd-3096-d9eb-baee-d1b224f3c5f2",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/3a3b04d3731d3861ebfb277825c141e6dcc2eacb.md",
+      "original_path": "originals/ba5bdccd-3096-d9eb-baee-d1b224f3c5f2.md",
+      "original_sha256": "af401c060cf0f416acf4bc78c825140493fb759f57730c9ab29f7131bf2c56e5",
+      "bytes": 3031,
+      "path": "pages/ba5bdccd-3096-d9eb-baee-d1b224f3c5f2.md",
+      "sha256": "3e18ab291bca7cf2b7123f8e79b0d147a654ae8a55744153bd066a42564d598e"
+    },
+    {
+      "id": "bf5e438f-3bce-3c8c-3bd4-e9526ace16ec",
+      "title": "定制面板",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "互动面板",
+        "定制面板"
+      ],
+      "url": "https://open-live.bilibili.com/document/bf5e438f-3bce-3c8c-3bd4-e9526ace16ec",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/ecbe5bf3c6411e14d7c6a697689ec74fedfc83b0.md",
+      "original_path": "originals/bf5e438f-3bce-3c8c-3bd4-e9526ace16ec.md",
+      "original_sha256": "f19a1be8f2b859f05f7e098a4404f497a972e93611ab5c8c87d4b41497cdabff",
+      "bytes": 2219,
+      "path": "pages/bf5e438f-3bce-3c8c-3bd4-e9526ace16ec.md",
+      "sha256": "8f1d1e0aa8f5f4594dc885b0dadb74428ceffb8471d52c2afddc347ca891c34a"
+    },
+    {
+      "id": "ea150c95-ed18-ed1c-6f8e-72ce6ddea962",
+      "title": "定制面板接口",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "互动面板",
+        "定制面板接口"
+      ],
+      "url": "https://open-live.bilibili.com/document/ea150c95-ed18-ed1c-6f8e-72ce6ddea962",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/42efb406c27dfb963b2a215cc11852b39b557209.md",
+      "original_path": "originals/ea150c95-ed18-ed1c-6f8e-72ce6ddea962.md",
+      "original_sha256": "ed21bccf01a90bc26a909c5cc8e1ed6037e3b0cc9606a3f11e15d43cda9d6ca3",
+      "bytes": 2126,
+      "path": "pages/ea150c95-ed18-ed1c-6f8e-72ce6ddea962.md",
+      "sha256": "b70cb94d3337495e8ed1d8831ff3bae40fa6828cdd3b8191dba033e6f4ca26fa"
+    },
+    {
+      "id": "cc0d62d0-6c1c-12fa-b830-6384e8e6b49b",
+      "title": "用前须知",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "站内版权授权曲库",
+        "用前须知"
+      ],
+      "url": "https://open-live.bilibili.com/document/cc0d62d0-6c1c-12fa-b830-6384e8e6b49b",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/67c4f41d35a02bb0c0f520d2c375294eb1aef36e.md",
+      "original_path": "originals/cc0d62d0-6c1c-12fa-b830-6384e8e6b49b.md",
+      "original_sha256": "555702d4c69e068425e62c944dc5c2bf7634b1efe872ce3a1c0765501aaafedc",
+      "bytes": 1529,
+      "path": "pages/cc0d62d0-6c1c-12fa-b830-6384e8e6b49b.md",
+      "sha256": "7ad2bfc5a6598e202eab6495279e3fbcb71c2b5023a72bbc4dd7b189c04f7ac4"
+    },
+    {
+      "id": "dd1bcb5c-2e6e-4fc2-c7c1-83cb856c5c94",
+      "title": "搜索媒体列表",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "站内版权授权曲库",
+        "接口列表",
+        "搜索媒体列表"
+      ],
+      "url": "https://open-live.bilibili.com/document/dd1bcb5c-2e6e-4fc2-c7c1-83cb856c5c94",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/9c0e360cb3278526add89aca9a7b53d8ecc53bb6.md",
+      "original_path": "originals/dd1bcb5c-2e6e-4fc2-c7c1-83cb856c5c94.md",
+      "original_sha256": "09937e8869cb648fc0cdb02810059bd9bfbeb7ccfcf00abde2355a68c30aecd1",
+      "bytes": 1538,
+      "path": "pages/dd1bcb5c-2e6e-4fc2-c7c1-83cb856c5c94.md",
+      "sha256": "ac53b60104f4fb45331468c9467c0bb1b802c95e65e47c15363cb70c66177774"
+    },
+    {
+      "id": "f2177aae-8a8c-2a5e-f4d1-0728a2383b07",
+      "title": "获取媒体元数据",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "站内版权授权曲库",
+        "接口列表",
+        "获取媒体元数据"
+      ],
+      "url": "https://open-live.bilibili.com/document/f2177aae-8a8c-2a5e-f4d1-0728a2383b07",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/2107d1da815debe6941bc72f67e205c292072353.md",
+      "original_path": "originals/f2177aae-8a8c-2a5e-f4d1-0728a2383b07.md",
+      "original_sha256": "6a7544aea3a8fd6f300c29ea95bf458dba56f58d211491dddffd7c0850986a7f",
+      "bytes": 1700,
+      "path": "pages/f2177aae-8a8c-2a5e-f4d1-0728a2383b07.md",
+      "sha256": "0c37041019262685a4fc92abe463520158c01e1bbef8cca4cb2ca24349cfac57"
+    },
+    {
+      "id": "73446f91-88dd-b937-c436-b58d08063c47",
+      "title": "获取媒体资源信息",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "站内版权授权曲库",
+        "接口列表",
+        "获取媒体资源信息"
+      ],
+      "url": "https://open-live.bilibili.com/document/73446f91-88dd-b937-c436-b58d08063c47",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/bb7377be99ad84f2733898bec13cae31a7fc0cd2.md",
+      "original_path": "originals/73446f91-88dd-b937-c436-b58d08063c47.md",
+      "original_sha256": "963991b4abe7a6692a64b38c2eb658041c4e2932ff0789283b81c8e5d410fb3b",
+      "bytes": 2046,
+      "path": "pages/73446f91-88dd-b937-c436-b58d08063c47.md",
+      "sha256": "8c2758610eb98a677d1f72754bc3c95ad26bc8db44a81cab63c67a0d6e54a726"
+    },
+    {
+      "id": "8fab0079-def7-56f0-8b52-49f2167d6b11",
+      "title": "订阅拓展(DLC)",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "拓展订阅功能",
+        "订阅拓展(DLC)"
+      ],
+      "url": "https://open-live.bilibili.com/document/8fab0079-def7-56f0-8b52-49f2167d6b11",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/e3502438b5e9302cb330aa7eff2f5d8321e5650d.md",
+      "original_path": "originals/8fab0079-def7-56f0-8b52-49f2167d6b11.md",
+      "original_sha256": "a37e8e3deb4563b646e40237cf1b40ef50a5a7e5555227b19bc67c52e93c7170",
+      "bytes": 4921,
+      "path": "pages/8fab0079-def7-56f0-8b52-49f2167d6b11.md",
+      "sha256": "0576e468a9ae7156dd1c2f150d7f024de3439f18a80c62b6c844f6e9b81a8b46"
+    },
+    {
+      "id": "b887f3ef-855e-b313-9b24-9e3cdd6cb827",
+      "title": "订阅事件接口",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "拓展订阅功能",
+        "订阅事件接口"
+      ],
+      "url": "https://open-live.bilibili.com/document/b887f3ef-855e-b313-9b24-9e3cdd6cb827",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/2102c81bb4f5c78b04f9df108a9bc1d47295303b.md",
+      "original_path": "originals/b887f3ef-855e-b313-9b24-9e3cdd6cb827.md",
+      "original_sha256": "c10d84fc25bea9f19d6c12173593f4f491426510ba4765dbd3d5aa41b9122ad9",
+      "bytes": 4993,
+      "path": "pages/b887f3ef-855e-b313-9b24-9e3cdd6cb827.md",
+      "sha256": "25173a9f4f1dea25dde476ba02acc664464638c93d8f793ac30404248689cc03"
+    },
+    {
+      "id": "f7dddeae-f47c-b5b5-0173-c9784ba38ee1",
+      "title": "订阅记录查询",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "拓展订阅功能",
+        "订阅记录查询"
+      ],
+      "url": "https://open-live.bilibili.com/document/f7dddeae-f47c-b5b5-0173-c9784ba38ee1",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/7f1f72f883c12c5e07570aeb29d6a1f9450042d6.md",
+      "original_path": "originals/f7dddeae-f47c-b5b5-0173-c9784ba38ee1.md",
+      "original_sha256": "b841e9de4620d9e852edde22dbb157a753a706149c3cca672974ff819e07d905",
+      "bytes": 3653,
+      "path": "pages/f7dddeae-f47c-b5b5-0173-c9784ba38ee1.md",
+      "sha256": "fb07adb44b02e2918bc91f727759e87b810330455a600a8e6279eef76e09708d"
+    },
+    {
+      "id": "63a33aa9-1f6f-a33c-cd8a-30dcc43db16d",
+      "title": "拓展订阅相关问题",
+      "navigation": [
+        "开放能力",
+        "互动玩法",
+        "拓展订阅功能",
+        "拓展订阅相关问题"
+      ],
+      "url": "https://open-live.bilibili.com/document/63a33aa9-1f6f-a33c-cd8a-30dcc43db16d",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/8510b32e13e30b372ac09d0ed203295dad3f48ed.md",
+      "original_path": "originals/63a33aa9-1f6f-a33c-cd8a-30dcc43db16d.md",
+      "original_sha256": "9929f0a1fc77fc7152a7a6d2bb0acfbc7e6a160859156e3987fbf2c973c12a45",
+      "bytes": 1848,
+      "path": "pages/63a33aa9-1f6f-a33c-cd8a-30dcc43db16d.md",
+      "sha256": "df7b2a5b9713a1479c47cc6319e6139f63fb6b675ea6c09dc0ffdf136b767872"
+    },
+    {
+      "id": "ce859769-9357-f1c4-a611-7a2964890e0b",
+      "title": "获取用户union_id信息",
+      "navigation": [
+        "开放能力",
+        "其他能力",
+        "获取用户union_id信息"
+      ],
+      "url": "https://open-live.bilibili.com/document/ce859769-9357-f1c4-a611-7a2964890e0b",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/ec00c976334bf834ee568950c6144e1121b62b20.md",
+      "original_path": "originals/ce859769-9357-f1c4-a611-7a2964890e0b.md",
+      "original_sha256": "ce7ca2b1e18c034aa2687264f062bff7826d9d76d5bdda2031c93ce1afc54695",
+      "bytes": 1215,
+      "path": "pages/ce859769-9357-f1c4-a611-7a2964890e0b.md",
+      "sha256": "46626d3f351b1708b5708801c5715917c58b9f2eef95068a8d0c9272abd6ab16"
+    },
+    {
+      "id": "14bdc86a-6d0d-41eb-92bd-322bd8f6d761",
+      "title": "直播内容嵌套",
+      "navigation": [
+        "开放能力",
+        "其他能力",
+        "直播内容嵌套"
+      ],
+      "url": "https://open-live.bilibili.com/document/14bdc86a-6d0d-41eb-92bd-322bd8f6d761",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/7efb4b3acab832cfa5f162d15e466b5f40835d60.md",
+      "original_path": "originals/14bdc86a-6d0d-41eb-92bd-322bd8f6d761.md",
+      "original_sha256": "48f573c52ab41daae52bfaefcace5f346973381289e06ebe84d5cc2178e81dce",
+      "bytes": 18516,
+      "path": "pages/14bdc86a-6d0d-41eb-92bd-322bd8f6d761.md",
+      "sha256": "6d7169cebfa4445b9840e5e8fcde94c891a68a42ac72afbfa700e1e526f41f2b"
+    },
+    {
+      "id": "755bdbb4-d173-dbd7-4900-1944210a4f42",
+      "title": "赛事信息获取",
+      "navigation": [
+        "开放能力",
+        "其他能力",
+        "赛事信息获取"
+      ],
+      "url": "https://open-live.bilibili.com/document/755bdbb4-d173-dbd7-4900-1944210a4f42",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/959202ea82d2883ead8553fc60ede129070a95b9.md",
+      "original_path": "originals/755bdbb4-d173-dbd7-4900-1944210a4f42.md",
+      "original_sha256": "85d6f20f4244b1520c9f5432db40f21842d88ef1ea40333945bfa227c6d17ba5",
+      "bytes": 2754,
+      "path": "pages/755bdbb4-d173-dbd7-4900-1944210a4f42.md",
+      "sha256": "38dcac0a78f947eda38080fc082d6b1ecaba8d6b5c5e74c72d6b548fc2ed6aa1"
+    },
+    {
+      "id": "cca272c5-e49d-6bea-0fbe-23c37288a08a",
+      "title": "For Unity",
+      "navigation": [
+        "SDK & demo",
+        "For Unity"
+      ],
+      "url": "https://open-live.bilibili.com/document/cca272c5-e49d-6bea-0fbe-23c37288a08a",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/7a719465c81a60dd68ed9ae6c2d3b7fac70a5931.md",
+      "original_path": "originals/cca272c5-e49d-6bea-0fbe-23c37288a08a.md",
+      "original_sha256": "d1c871b76bdac96101802f3d8ea7d211dfa18c93a350b5c2d348fbd6034375a5",
+      "bytes": 1564,
+      "path": "pages/cca272c5-e49d-6bea-0fbe-23c37288a08a.md",
+      "sha256": "2d607da2773c4f09c1078f5717ce65fe3a6b2fb9b36105124d985ac310117525"
+    },
+    {
+      "id": "67d15b4d-c693-0941-64ca-7232565a5172",
+      "title": "For .NET (dotnet6)",
+      "navigation": [
+        "SDK & demo",
+        "For .NET (dotnet6)"
+      ],
+      "url": "https://open-live.bilibili.com/document/67d15b4d-c693-0941-64ca-7232565a5172",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/329eab9bcf66c1ad8c3c6de64313804ffdd06008.md",
+      "original_path": "originals/67d15b4d-c693-0941-64ca-7232565a5172.md",
+      "original_sha256": "f6257601a3f7193ead87239df49bddc1fdcaf4aa8efe17da801eef23f0116a35",
+      "bytes": 2031,
+      "path": "pages/67d15b4d-c693-0941-64ca-7232565a5172.md",
+      "sha256": "3d5b7f55e6c95727c98a146a9ea076a7efd954bb6382be2fa1efed24f76cd0b9"
+    },
+    {
+      "id": "a7bd5377-ad7d-a273-25ae-28caf37a7a85",
+      "title": "For JavaScript",
+      "navigation": [
+        "SDK & demo",
+        "For JavaScript"
+      ],
+      "url": "https://open-live.bilibili.com/document/a7bd5377-ad7d-a273-25ae-28caf37a7a85",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/4db890683e072da0f7b4610ba1b4fcfa0fe89efa.md",
+      "original_path": "originals/a7bd5377-ad7d-a273-25ae-28caf37a7a85.md",
+      "original_sha256": "d8d8c186451de731443ad8f7f02e54ce84414326f0037ee475a6a9b97bd58f63",
+      "bytes": 4551,
+      "path": "pages/a7bd5377-ad7d-a273-25ae-28caf37a7a85.md",
+      "sha256": "559ec3fc0407c949d37a28bc34b7518420bdf33fb5acd93b36c7741b23e0b2f3"
+    },
+    {
+      "id": "90512caa-056e-f78a-4b61-098a18301724",
+      "title": "For Golang",
+      "navigation": [
+        "SDK & demo",
+        "For Golang"
+      ],
+      "url": "https://open-live.bilibili.com/document/90512caa-056e-f78a-4b61-098a18301724",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/a0744834a26fbbcee9cc8a27bbaeca152bc46d12.md",
+      "original_path": "originals/90512caa-056e-f78a-4b61-098a18301724.md",
+      "original_sha256": "519a44f7aab33938bff26f4210d60ad572b657152d47de1339e5c842f72fd633",
+      "bytes": 347,
+      "path": "pages/90512caa-056e-f78a-4b61-098a18301724.md",
+      "sha256": "2ccfa221586801d1e85d527ac2e1886a774d0c8cec17ec38e296f0293f05c1f4"
+    },
+    {
+      "id": "1218ec2c-15f0-ff03-d1f6-f81e9a4eeba3",
+      "title": "For Python",
+      "navigation": [
+        "SDK & demo",
+        "For Python"
+      ],
+      "url": "https://open-live.bilibili.com/document/1218ec2c-15f0-ff03-d1f6-f81e9a4eeba3",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/ff5215c9c8e7c35388526ae927f185038258b1c0.md",
+      "original_path": "originals/1218ec2c-15f0-ff03-d1f6-f81e9a4eeba3.md",
+      "original_sha256": "3f1c50ef6077ad7329af28a81a46e88106396fe9c59bb2a81224ecd04172c5a1",
+      "bytes": 347,
+      "path": "pages/1218ec2c-15f0-ff03-d1f6-f81e9a4eeba3.md",
+      "sha256": "98ffcae1c3cf84145c4559f3bc73c877eeb823cf84aa33e8ce37eda1db9fa401"
+    },
+    {
+      "id": "7afa07a5-beb7-82c6-2136-79871c55c22f",
+      "title": "本目录说明",
+      "navigation": [
+        "社区合作提供",
+        "本目录说明"
+      ],
+      "url": "https://open-live.bilibili.com/document/7afa07a5-beb7-82c6-2136-79871c55c22f",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/cbc72c387fc644c4db087873fe56f8dd05a12a28.md",
+      "original_path": "originals/7afa07a5-beb7-82c6-2136-79871c55c22f.md",
+      "original_sha256": "841d68d58d3eee730cd1f906ce1aa00c730c3f21574957ed26285e2c7167b98f",
+      "bytes": 247,
+      "path": "pages/7afa07a5-beb7-82c6-2136-79871c55c22f.md",
+      "sha256": "897a37c6156cfc5b3526b56bcfc0c3234a2d313d1748b11e197c45f98126d242"
+    },
+    {
+      "id": "2af6d5ae-6491-1660-f50b-d5d7d9039c55",
+      "title": "BOpenliveSDK-UE4",
+      "navigation": [
+        "社区合作提供",
+        "BOpenliveSDK-UE4"
+      ],
+      "url": "https://open-live.bilibili.com/document/2af6d5ae-6491-1660-f50b-d5d7d9039c55",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/1a8ce86135d7916c68c4e186d132778623fa742f.md",
+      "original_path": "originals/2af6d5ae-6491-1660-f50b-d5d7d9039c55.md",
+      "original_sha256": "7f9949217696cbb678fd2f1beb6a242462d03b3cdc693de271180f16a8190214",
+      "bytes": 3262,
+      "path": "pages/2af6d5ae-6491-1660-f50b-d5d7d9039c55.md",
+      "sha256": "ae34d098be864d8affc9a357cbc30fe88bfe5f5bf4f57a0339b85e55059b5839"
+    },
+    {
+      "id": "ecd05938-884f-06d7-f152-fdeb70e1dd59",
+      "title": "Bianka_go-sdk",
+      "navigation": [
+        "社区合作提供",
+        "Bianka_go-sdk"
+      ],
+      "url": "https://open-live.bilibili.com/document/ecd05938-884f-06d7-f152-fdeb70e1dd59",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/22a92b7650d7d7a782ee580946a5965a7668dc99.md",
+      "original_path": "originals/ecd05938-884f-06d7-f152-fdeb70e1dd59.md",
+      "original_sha256": "6d88e4c987738495396201236af7d7cd1bb8f8e1882b1f8cf78e886cd39da398",
+      "bytes": 6957,
+      "path": "pages/ecd05938-884f-06d7-f152-fdeb70e1dd59.md",
+      "sha256": "60dd0330ca5d45bfb28b93a8967e4ff8c0fe06ff315e6ec0a0368996d380c6b2"
+    },
+    {
+      "id": "206422a1-8109-a06b-259c-16a3f85a8479",
+      "title": "哔哩哔哩创作者开放平台资源申请",
+      "navigation": [
+        "推广资源相关",
+        "哔哩哔哩创作者开放平台资源申请"
+      ],
+      "url": "https://open-live.bilibili.com/document/206422a1-8109-a06b-259c-16a3f85a8479",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/9c639912cc672a4ff6a75f7cda825cca73ce5cbf.md",
+      "original_path": "originals/206422a1-8109-a06b-259c-16a3f85a8479.md",
+      "original_sha256": "01f42507c171bd117023bce8925a9d857c64a75e4b25e07189604193699a9d96",
+      "bytes": 108,
+      "path": "pages/206422a1-8109-a06b-259c-16a3f85a8479.md",
+      "sha256": "85c317aebeed95a56bd1b0bb738b202a18080886933cfe04f61b1404a75c69cb"
+    },
+    {
+      "id": "f6017467-1182-fd2b-7a96-793b9afb911a",
+      "title": "开放平台管理规范（细则）",
+      "navigation": [
+        "相关协议",
+        "开放平台管理规范（细则）"
+      ],
+      "url": "https://open-live.bilibili.com/document/f6017467-1182-fd2b-7a96-793b9afb911a",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/6f4f7c0bae31d948d82404267865e31b6dac9c97.md",
+      "original_path": "originals/f6017467-1182-fd2b-7a96-793b9afb911a.md",
+      "original_sha256": "498e8f279a47f8b7e98206b4c175336786f25776d78253c9ff23d7658b4e97d7",
+      "bytes": 37701,
+      "path": "pages/f6017467-1182-fd2b-7a96-793b9afb911a.md",
+      "sha256": "5c7eb74eb28c37c513d839a0633232a6925836cd17a9ada46966a68190181543"
+    },
+    {
+      "id": "5253757c-00a5-83e8-19ed-107d95fca355",
+      "title": "开放平台信用分管理规范（试行）",
+      "navigation": [
+        "相关协议",
+        "开放平台信用分管理规范（试行）"
+      ],
+      "url": "https://open-live.bilibili.com/document/5253757c-00a5-83e8-19ed-107d95fca355",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/d035950dff00d256ca0f71f72ebe3728d08e9a89.md",
+      "original_path": "originals/5253757c-00a5-83e8-19ed-107d95fca355.md",
+      "original_sha256": "9a6302ba5664c92671e3b9956016b06b38be85224617748c7b221b2ab787f214",
+      "bytes": 8545,
+      "path": "pages/5253757c-00a5-83e8-19ed-107d95fca355.md",
+      "sha256": "f6b70427e3018ee1b887365d7dfbc15f3bddb6c663f8650456bb82fe2e32c6e2"
+    },
+    {
+      "id": "e8338bc6-8a9e-ee24-e865-8b146315620b",
+      "title": "开放平台应用等级管理规则",
+      "navigation": [
+        "相关协议",
+        "开放平台应用等级管理规则"
+      ],
+      "url": "https://open-live.bilibili.com/document/e8338bc6-8a9e-ee24-e865-8b146315620b",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/6f43a62e0debc2a6770a125b8ecd144a02407d20.md",
+      "original_path": "originals/e8338bc6-8a9e-ee24-e865-8b146315620b.md",
+      "original_sha256": "99121b069122d2b95bd5791a5af6899b28b904afc8567a0ca08f31402b77c2e8",
+      "bytes": 10450,
+      "path": "pages/e8338bc6-8a9e-ee24-e865-8b146315620b.md",
+      "sha256": "8b06ac2a66dafb5e0f54c4308c623484a5ef1563f40206d03a75d429186b2d15"
+    },
+    {
+      "id": "b3260cf3-bb78-7ffe-58b6-27c0902b0498",
+      "title": "对公结算说明",
+      "navigation": [
+        "相关协议",
+        "对公结算说明"
+      ],
+      "url": "https://open-live.bilibili.com/document/b3260cf3-bb78-7ffe-58b6-27c0902b0498",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/167b08e5219700de2307c78c4ce812e6ba026566.md",
+      "original_path": "originals/b3260cf3-bb78-7ffe-58b6-27c0902b0498.md",
+      "original_sha256": "349f6a356576ebdf40f51c7ec304928e8390e02245f1323e2f502acfc8847a4b",
+      "bytes": 923,
+      "path": "pages/b3260cf3-bb78-7ffe-58b6-27c0902b0498.md",
+      "sha256": "4e6f9c3d7f7d882e21ce797361cb0e3b23f5047a4eb5dd6c03bf50cd3f86de02"
+    },
+    {
+      "id": "d4e4e672-5fec-c4b6-5cab-b69df58409c5",
+      "title": "互动玩法自动订阅服务规则",
+      "navigation": [
+        "相关协议",
+        "互动玩法自动订阅服务规则"
+      ],
+      "url": "https://open-live.bilibili.com/document/d4e4e672-5fec-c4b6-5cab-b69df58409c5",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/88733b140f3d366832852d40b17efcf6cd6461dc.md",
+      "original_path": "originals/d4e4e672-5fec-c4b6-5cab-b69df58409c5.md",
+      "original_sha256": "af028932e84a2b71d6da22d19d5065bdbca366ace5353acaf458e1193aea12c0",
+      "bytes": 3279,
+      "path": "pages/d4e4e672-5fec-c4b6-5cab-b69df58409c5.md",
+      "sha256": "344a20a7a83f5a412ce96aa89a69b237e29e07313c56a156a46c0f1e5047188a"
+    },
+    {
+      "id": "ba3f45f5-a83a-468b-3b50-4e1c21643086",
+      "title": "互动玩法服务规则",
+      "navigation": [
+        "相关协议",
+        "互动玩法服务规则"
+      ],
+      "url": "https://open-live.bilibili.com/document/ba3f45f5-a83a-468b-3b50-4e1c21643086",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/6a643e37c289fe5f993ac63e2dc6cc6cfefff378.md",
+      "original_path": "originals/ba3f45f5-a83a-468b-3b50-4e1c21643086.md",
+      "original_sha256": "be2372ddb494fce6c6ceda5ac988e0ebbcfbe713ef477fd8198c3f807e707ba1",
+      "bytes": 4542,
+      "path": "pages/ba3f45f5-a83a-468b-3b50-4e1c21643086.md",
+      "sha256": "2889af5bb558074944cbc266cc830fd59695192e53042d35b1ae4d49935704d7"
+    },
+    {
+      "id": "80bbc65e-06c2-c82e-5956-fb2eec4a7c8f",
+      "title": "哔哩哔哩创作者开放平台付费扩展（DLC）内容管理细则",
+      "navigation": [
+        "相关协议",
+        "哔哩哔哩创作者开放平台付费扩展（DLC）内容管理细则"
+      ],
+      "url": "https://open-live.bilibili.com/document/80bbc65e-06c2-c82e-5956-fb2eec4a7c8f",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/ff7eab01b0655784d21536d5eb4a2d1759943094.md",
+      "original_path": "originals/80bbc65e-06c2-c82e-5956-fb2eec4a7c8f.md",
+      "original_sha256": "f9fa104fb9cc52ed6ff8dbb83eea05496c28f78fdd88bf84da5b20ceca093d3a",
+      "bytes": 8783,
+      "path": "pages/80bbc65e-06c2-c82e-5956-fb2eec4a7c8f.md",
+      "sha256": "e9bf86e62d9878306dc42b84c0f5e3e7abdd4610c0b1eed0a7d7d24985af99d0"
+    },
+    {
+      "id": "de707b0d-e66c-2033-3611-17fa59912e7c",
+      "title": "运营推广",
+      "navigation": [
+        "其他",
+        "运营推广"
+      ],
+      "url": "https://open-live.bilibili.com/document/de707b0d-e66c-2033-3611-17fa59912e7c",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/7f06b113798ad30057e5681f5dbe3ee76d9e00e5.md",
+      "original_path": "originals/de707b0d-e66c-2033-3611-17fa59912e7c.md",
+      "original_sha256": "bf2743efe7b5a7afee7636f133ed97e08afcf17dcc5dfeded1323f7517d86c74",
+      "bytes": 502,
+      "path": "pages/de707b0d-e66c-2033-3611-17fa59912e7c.md",
+      "sha256": "492f7f2857705a7fd16fcf977eb7840fa3d9042f88607deba5d613841c897daf"
+    },
+    {
+      "id": "0fa3120b-7a58-0138-07d9-10fef70913b6",
+      "title": "关于我们",
+      "navigation": [
+        "其他",
+        "关于我们"
+      ],
+      "url": "https://open-live.bilibili.com/document/0fa3120b-7a58-0138-07d9-10fef70913b6",
+      "markdown_url": "https://i0.hdslb.com/bfs/station_gw/33f0736211b89b7503eeed7634ea5605a54259f7.md",
+      "original_path": "originals/0fa3120b-7a58-0138-07d9-10fef70913b6.md",
+      "original_sha256": "1e3c3c15655e2ed1130b2920e17ef7e0db1cce5628ebab65a1be5d345d933f43",
+      "bytes": 630,
+      "path": "pages/0fa3120b-7a58-0138-07d9-10fef70913b6.md",
+      "sha256": "ced9a89ed37602fea143a378485f0f5b297fb9cb6905eb81ef315544a44d2496"
+    }
+  ],
+  "assets": [
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230507/cc51945399520f91bb65629803b43743/live.png",
+      "path": "assets/597b8ed3ba0b33120651a89c3db139f8de0ba4892bdb978181f01ec81f3a892a.png",
+      "sha256": "597b8ed3ba0b33120651a89c3db139f8de0ba4892bdb978181f01ec81f3a892a",
+      "bytes": 28043
+    },
+    {
+      "url": "https://activity.hdslb.com/blackboard/static/4f244c24d65ec532db06d95b9a6d83c3/giftOutputTutorial.jpg",
+      "path": "assets/f68761f236e6785d8c18d012c6819f7c1c1589bc7d9cb2dcc80f27f019f1950c.jpg",
+      "sha256": "f68761f236e6785d8c18d012c6819f7c1c1589bc7d9cb2dcc80f27f019f1950c",
+      "bytes": 477312
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/3963ced9eba405a79a2b9d0948d8ef50e948d692.png",
+      "path": "assets/634fa1472b21dc74e073779bee9e5b92a20b056fc08cb188317700625c3e3575.png",
+      "sha256": "634fa1472b21dc74e073779bee9e5b92a20b056fc08cb188317700625c3e3575",
+      "bytes": 99216
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/2462d2590680b737d90577ef7ba331beca51c6aa.png",
+      "path": "assets/626acc2eb38e50d3df1ffbb1a0d4466fa7ed0a3e70f819b92c413cd8c92f753e.png",
+      "sha256": "626acc2eb38e50d3df1ffbb1a0d4466fa7ed0a3e70f819b92c413cd8c92f753e",
+      "bytes": 16776
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/e9032901b1a46abaf009d5a8690444497889f963.png",
+      "path": "assets/2aec3a6c7819f6f60955014a2e5c02f45e3d9ea172bab6736217393091d7c917.png",
+      "sha256": "2aec3a6c7819f6f60955014a2e5c02f45e3d9ea172bab6736217393091d7c917",
+      "bytes": 41460
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230427/cc51945399520f91bb65629803b43743/interactPlayV2.png",
+      "path": "assets/fa96f21c8e972a4d08305817223790fce40d98a787614d643409f0c671b65092.png",
+      "sha256": "fa96f21c8e972a4d08305817223790fce40d98a787614d643409f0c671b65092",
+      "bytes": 99539
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/de3168c781d14ca86518a279de1c9c3f86cebd95.png",
+      "path": "assets/eec060c0405ec68dd7fb6f54af7d4095d7f73b894b33935100e50984ba73278c.png",
+      "sha256": "eec060c0405ec68dd7fb6f54af7d4095d7f73b894b33935100e50984ba73278c",
+      "bytes": 34586
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/134aa87fbaf1a0d0af03fe75e63bc4fe9c55d6b3.png",
+      "path": "assets/988d74049cc83c4c1af4d471f44f1a1f0a0b92562c655eddc27082df9d742cf9.png",
+      "sha256": "988d74049cc83c4c1af4d471f44f1a1f0a0b92562c655eddc27082df9d742cf9",
+      "bytes": 34316
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/plugImg.png",
+      "path": "assets/9d9c8c26f12dfe7af5296fe0cc543efd92bc77b97c95041cd1cfc350b38f80d5.png",
+      "sha256": "9d9c8c26f12dfe7af5296fe0cc543efd92bc77b97c95041cd1cfc350b38f80d5",
+      "bytes": 201151
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/plugenv1.png",
+      "path": "assets/0657e599fb9b62680d93aef6a5a72b48f890602b6f58737115f97c3761c56b61.png",
+      "sha256": "0657e599fb9b62680d93aef6a5a72b48f890602b6f58737115f97c3761c56b61",
+      "bytes": 185029
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/plugenv0.png",
+      "path": "assets/078def43db70ec010364f723609197e722ac0468aea3f488fbba0cdca2832cc7.png",
+      "sha256": "078def43db70ec010364f723609197e722ac0468aea3f488fbba0cdca2832cc7",
+      "bytes": 106122
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230427/cc51945399520f91bb65629803b43743/agreement.png",
+      "path": "assets/864f99b6e5b1d073592729d775f76f084c19004aaebec63c516942699ab0a98f.png",
+      "sha256": "864f99b6e5b1d073592729d775f76f084c19004aaebec63c516942699ab0a98f",
+      "bytes": 50925
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230427/cc51945399520f91bb65629803b43743/proto.png",
+      "path": "assets/e2f09a016880a91e52be73f6b41d3636bd0121cde6815d64870446a19924b689.png",
+      "sha256": "e2f09a016880a91e52be73f6b41d3636bd0121cde6815d64870446a19924b689",
+      "bytes": 13871
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/introduce.png",
+      "path": "assets/820924a7886126cd2b213c087169c881c3eceabb837797ea541052788511eb8f.png",
+      "sha256": "820924a7886126cd2b213c087169c881c3eceabb837797ea541052788511eb8f",
+      "bytes": 35587
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240508/987dea895599a5c4df55fa2287156a94/nrpKb0xGcE.jpg",
+      "path": "assets/daec726bd42fdf3c28c577912dcf23ff08f6c821b44819d2eaf80b4e5fa5c64c.jpg",
+      "sha256": "daec726bd42fdf3c28c577912dcf23ff08f6c821b44819d2eaf80b4e5fa5c64c",
+      "bytes": 60082
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/dm.png",
+      "path": "assets/466a07353a753c909fd230f0067a873ae1fcff4701e2ce464a4b2f41593e030f.png",
+      "sha256": "466a07353a753c909fd230f0067a873ae1fcff4701e2ce464a4b2f41593e030f",
+      "bytes": 5910
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240508/987dea895599a5c4df55fa2287156a94/eBsRyHEd8s.jpg",
+      "path": "assets/0652c831e0993b6daa5cfaaa729b356506772462f6e4b4a08ce998154c944eda.jpg",
+      "sha256": "0652c831e0993b6daa5cfaaa729b356506772462f6e4b4a08ce998154c944eda",
+      "bytes": 6070
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/gift.png",
+      "path": "assets/02430ce84bfc97f3be758ec24dcda9e50c0883236ac7994ca065716fe0de42bf.png",
+      "sha256": "02430ce84bfc97f3be758ec24dcda9e50c0883236ac7994ca065716fe0de42bf",
+      "bytes": 4978
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240508/987dea895599a5c4df55fa2287156a94/YDRLlacilp.jpg",
+      "path": "assets/5673c3b699d0172555fc31eff44dc53410e36dbc451c27f3d2445b6b6913862b.jpg",
+      "sha256": "5673c3b699d0172555fc31eff44dc53410e36dbc451c27f3d2445b6b6913862b",
+      "bytes": 9900
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/2862c3681052b83317d12ff2996bd87a3f8ccbaf.png",
+      "path": "assets/01259f1432a97d7ed82fc9ef9d0252e6feceffb5cb8b9bc02fe4676f69df4673.png",
+      "sha256": "01259f1432a97d7ed82fc9ef9d0252e6feceffb5cb8b9bc02fe4676f69df4673",
+      "bytes": 156836
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240611/ded97441444adb3f0b32e68add9f2708/vpZmV9AxA3.jpeg",
+      "path": "assets/12bbb4e81c51b9becf3b6d6a050fb4af371174fc152ad3fcd35f3be686b43d5e.jpeg",
+      "sha256": "12bbb4e81c51b9becf3b6d6a050fb4af371174fc152ad3fcd35f3be686b43d5e",
+      "bytes": 43307
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/55f44ac79ccae101a3331a174aae39b3fc34c821.png",
+      "path": "assets/b98d6cc385b15b6e085db68f1286e047a6c9f0d55a6691ef59a8ccf0df184fd0.png",
+      "sha256": "b98d6cc385b15b6e085db68f1286e047a6c9f0d55a6691ef59a8ccf0df184fd0",
+      "bytes": 67993
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240508/987dea895599a5c4df55fa2287156a94/YSVbjcd08O.jpg",
+      "path": "assets/fed48bb7af8e1d517904003a3cf6589a314092c73a413a1e79861d038686feb1.jpg",
+      "sha256": "fed48bb7af8e1d517904003a3cf6589a314092c73a413a1e79861d038686feb1",
+      "bytes": 6492
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240508/987dea895599a5c4df55fa2287156a94/HGHVq5vRmq.jpg",
+      "path": "assets/ae76f68a35ba4bac36d968b5266ea7b407ae4a270a2167f8408c69d183e69d50.jpg",
+      "sha256": "ae76f68a35ba4bac36d968b5266ea7b407ae4a270a2167f8408c69d183e69d50",
+      "bytes": 3602
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240508/987dea895599a5c4df55fa2287156a94/ds6wSMwiIL.jpg",
+      "path": "assets/b7fbaadbffe251ee191a58c36c1a7ed06395a09f70605c9baed165f699a877c8.jpg",
+      "sha256": "b7fbaadbffe251ee191a58c36c1a7ed06395a09f70605c9baed165f699a877c8",
+      "bytes": 6308
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20240611/ded97441444adb3f0b32e68add9f2708/geBPMEjwhP.jpg",
+      "path": "assets/9faf88511b220175d7d1473429cd598dbcda7ecbc60d0240d7dd4c3bf6283067.jpg",
+      "sha256": "9faf88511b220175d7d1473429cd598dbcda7ecbc60d0240d7dd4c3bf6283067",
+      "bytes": 76173
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/2b62f80b1df5558edbf6bf6fef11ddc886c1186e.png",
+      "path": "assets/0bc4ffb41081fd21fae82d1f683eec97bb1d29d43b13596cc2a94f334027a81e.png",
+      "sha256": "0bc4ffb41081fd21fae82d1f683eec97bb1d29d43b13596cc2a94f334027a81e",
+      "bytes": 70728
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/4b9115cf8242186d8b28df78f184ed4d47a445bc.png",
+      "path": "assets/2da2867b51ecc0c840c797fbf63ec794c3a0b48833185a4c96a2a26828e14961.png",
+      "sha256": "2da2867b51ecc0c840c797fbf63ec794c3a0b48833185a4c96a2a26828e14961",
+      "bytes": 66680
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/778318230dec2865554519270f5e7ccc47a5dea5.png",
+      "path": "assets/12c47c59fde4de18b19c8c68cbb5768af55fefc4ede951d685f79a973479ab61.png",
+      "sha256": "12c47c59fde4de18b19c8c68cbb5768af55fefc4ede951d685f79a973479ab61",
+      "bytes": 33951
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/006a042cd18c44d342c20f449929e162f0dc27f7.png",
+      "path": "assets/4f1e3fe08c05953089e983f01ddb60a5e12e9cd73f32a63cda752e76009cc08b.png",
+      "sha256": "4f1e3fe08c05953089e983f01ddb60a5e12e9cd73f32a63cda752e76009cc08b",
+      "bytes": 191682
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/templar/open-static/32779299f2a7e202fae1103ad220a3625ba95e67.png",
+      "path": "assets/4d386710006ceddc22ef887c0bb421081fc13b86ce9af442fd2a7f341fe3caa7.png",
+      "sha256": "4d386710006ceddc22ef887c0bb421081fc13b86ce9af442fd2a7f341fe3caa7",
+      "bytes": 578898
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230507/cc51945399520f91bb65629803b43743/2.png",
+      "path": "assets/13ff4d5cfd59e8a2d8509a9b6afc441a7661b3a27ccf8fe6b2e304ae1e113c74.png",
+      "sha256": "13ff4d5cfd59e8a2d8509a9b6afc441a7661b3a27ccf8fe6b2e304ae1e113c74",
+      "bytes": 1609380
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230507/cc51945399520f91bb65629803b43743/3.png",
+      "path": "assets/34dcbe3a38c1e79a188e5511200f878e67d387c834ee555a5e903e5a6d8f4486.png",
+      "sha256": "34dcbe3a38c1e79a188e5511200f878e67d387c834ee555a5e903e5a6d8f4486",
+      "bytes": 125628
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230507/cc51945399520f91bb65629803b43743/4.1.png",
+      "path": "assets/32732ed542b57397c566a40101d8a0a73dd20f556e898fc23289fc24a981fc4d.png",
+      "sha256": "32732ed542b57397c566a40101d8a0a73dd20f556e898fc23289fc24a981fc4d",
+      "bytes": 157228
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230507/cc51945399520f91bb65629803b43743/5.2.png",
+      "path": "assets/4330284611ffe22abcdf2ad57425632877695ad375045f54e9132a3668cdc931.png",
+      "sha256": "4330284611ffe22abcdf2ad57425632877695ad375045f54e9132a3668cdc931",
+      "bytes": 119173
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/unitySDK1.png",
+      "path": "assets/a2c8537e9137126b96ec2ecc5e69b7038d6ba0fb2ede4916e62ffbcc1cdbd778.png",
+      "sha256": "a2c8537e9137126b96ec2ecc5e69b7038d6ba0fb2ede4916e62ffbcc1cdbd778",
+      "bytes": 18045
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/unitySDK2.png",
+      "path": "assets/bff024b11a92d5fa5e3dc5366ff55a15aba52d180eef815d615c721f83179749.png",
+      "sha256": "bff024b11a92d5fa5e3dc5366ff55a15aba52d180eef815d615c721f83179749",
+      "bytes": 86669
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/SDK1.png",
+      "path": "assets/f9322ad169ed17751db2a559478d5af13f8c7442d4380c042e96a94441c5674c.png",
+      "sha256": "f9322ad169ed17751db2a559478d5af13f8c7442d4380c042e96a94441c5674c",
+      "bytes": 3196
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/SDK2.png",
+      "path": "assets/f0462b9867dcf251b3d39896cdf3289de5cf48ccdb12122c9a52f49c99301ecf.png",
+      "sha256": "f0462b9867dcf251b3d39896cdf3289de5cf48ccdb12122c9a52f49c99301ecf",
+      "bytes": 384005
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/SDK3.png",
+      "path": "assets/531abdc5f7ed037d96b181d1ec714daaa0e79b4565e08f452eba7e059c4ece19.png",
+      "sha256": "531abdc5f7ed037d96b181d1ec714daaa0e79b4565e08f452eba7e059c4ece19",
+      "bytes": 240389
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/SDK4.png",
+      "path": "assets/edab398ec52040017889792b087512608927cdf52dcddd57a18301a1473de7c4.png",
+      "sha256": "edab398ec52040017889792b087512608927cdf52dcddd57a18301a1473de7c4",
+      "bytes": 100883
+    },
+    {
+      "url": "https://i0.hdslb.com/bfs/activity-plat/static/20230506/cc51945399520f91bb65629803b43743/SDK5.png",
+      "path": "assets/b1a9ee536b478cd1aa1a1962fd33f10cd3e0602c95f8d19b3dc941dec947cc22.png",
+      "sha256": "b1a9ee536b478cd1aa1a1962fd33f10cd3e0602c95f8d19b3dc941dec947cc22",
+      "bytes": 43406
+    }
+  ],
+  "asset_failures": []
+}
