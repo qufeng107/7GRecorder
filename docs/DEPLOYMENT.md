@@ -631,3 +631,5 @@ Local isolated integration and built-preview commands are available in `FRONTEND
 CI uses the committed pnpm lockfile and validates generated Jobs/session types, component tests, the static build,
 Playwright fixture scenarios, and a built frontend against a fresh local backend. No remote staging deployment
 workflow has been added. Production frontend installs now use `--frozen-lockfile` as specified above.
+
+OpenLive 发布前，SQLite 备份必须使用在线 backup API（含 WAL 已提交数据），并执行 quick_check；禁止直接 cp 活动数据库。

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -45,7 +46,9 @@ func (m *CollectorManager) Run(ctx context.Context) {
 		return
 	}
 	m.reconcile(ctx)
-	_, _ = m.store.EnforceRawQuota(ctx)
+	if _, err := m.store.EnforceRawQuota(ctx); err != nil {
+		log.Printf("live analytics quota maintenance failed: %v", err)
+	}
 	ticker := time.NewTicker(reconcileInterval)
 	defer ticker.Stop()
 	quotaTicker := time.NewTicker(quotaInterval)
@@ -58,7 +61,9 @@ func (m *CollectorManager) Run(ctx context.Context) {
 		case <-ticker.C:
 			m.reconcile(ctx)
 		case <-quotaTicker.C:
-			_, _ = m.store.EnforceRawQuota(ctx)
+			if _, err := m.store.EnforceRawQuota(ctx); err != nil {
+				log.Printf("live analytics quota maintenance failed: %v", err)
+			}
 		}
 	}
 }
@@ -161,6 +166,14 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 	var total, unknown, gaps int64
 	var lastEvent time.Time
 	var lastStatsWrite time.Time
+	minutes := map[string]map[string]int64{}
+	flush := func(writeCtx context.Context) error {
+		if err := m.store.flushStats(writeCtx, sessionID, counts, total, unknown, gaps, lastEvent, minutes); err != nil {
+			return err
+		}
+		clear(minutes)
+		return nil
+	}
 	finalized := false
 	defer func() {
 		if finalized {
@@ -169,7 +182,7 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 		gaps++
 		finalCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = m.store.UpdateStats(finalCtx, sessionID, counts, total, unknown, gaps, lastEvent)
+		_ = flush(finalCtx)
 		_ = m.store.FinishSession(finalCtx, sessionID, "FAILED", safeCollectorError(captureErr))
 	}()
 	raw, err := NewRawWriter(m.cfg.DataRoot, req.RecordingProfileID, sessionID, time.Now())
@@ -189,6 +202,7 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 	if err := conn.SetReadDeadline(time.Now().Add(3 * heartbeatInterval)); err != nil {
 		return err
 	}
+	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if err := conn.WriteMessage(websocket.BinaryMessage, EncodePacket(OpAuth, []byte(start.AuthBody))); err != nil {
 		_ = m.store.FinishSession(context.WithoutCancel(ctx), sessionID, "FAILED", "OpenLive WebSocket authentication write failed")
 		return err
@@ -205,7 +219,7 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 		select {
 		case heartbeatErr := <-heartbeatErrors:
 			gaps++
-			_ = m.store.UpdateStats(context.WithoutCancel(ctx), sessionID, counts, total, unknown, gaps, lastEvent)
+			_ = flush(context.WithoutCancel(ctx))
 			_ = m.store.FinishSession(context.WithoutCancel(ctx), sessionID, "FAILED", safeCollectorError(heartbeatErr))
 			finalized = true
 			return heartbeatErr
@@ -219,7 +233,7 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 			} else {
 				gaps++
 			}
-			_ = m.store.UpdateStats(context.WithoutCancel(ctx), sessionID, counts, total, unknown, gaps, lastEvent)
+			_ = flush(context.WithoutCancel(ctx))
 			_ = m.store.FinishSession(context.WithoutCancel(ctx), sessionID, status, message)
 			finalized = true
 			if ctx.Err() != nil {
@@ -233,7 +247,7 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 		packets, decodeErr := DecodePackets(frame)
 		if decodeErr != nil {
 			gaps++
-			_ = m.store.UpdateStats(context.WithoutCancel(ctx), sessionID, counts, total, unknown, gaps, lastEvent)
+			_ = flush(context.WithoutCancel(ctx))
 			continue
 		}
 		for _, packet := range packets {
@@ -261,6 +275,11 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 				if err := raw.Write(now, envelope.CMD, packet.Body); err != nil {
 					return err
 				}
+				minute := now.Truncate(time.Minute).Format(time.RFC3339)
+				if minutes[minute] == nil {
+					minutes[minute] = map[string]int64{}
+				}
+				minutes[minute][envelope.CMD]++
 				counts[envelope.CMD]++
 				total++
 				if !isKnownCommand(envelope.CMD) {
@@ -268,7 +287,9 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 				}
 				lastEvent = now
 				if lastStatsWrite.IsZero() || total%25 == 0 || time.Since(lastStatsWrite) >= 2*time.Second {
-					_ = m.store.UpdateStats(ctx, sessionID, counts, total, unknown, gaps, lastEvent)
+					if err := flush(ctx); err != nil {
+						return err
+					}
 					lastStatsWrite = now
 				}
 				if envelope.CMD == "LIVE_OPEN_PLATFORM_INTERACTION_END" {
@@ -280,6 +301,7 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 }
 
 func (m *CollectorManager) heartbeatLoop(ctx context.Context, client APIClient, conn *websocket.Conn, gameID string, sessionID int64, raw *RawWriter, errorsOut chan<- error) {
+	defer conn.Close()
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -287,6 +309,7 @@ func (m *CollectorManager) heartbeatLoop(ctx context.Context, client APIClient, 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(websocket.BinaryMessage, EncodePacket(OpHeartbeat, nil)); err != nil {
 				select {
 				case errorsOut <- err:

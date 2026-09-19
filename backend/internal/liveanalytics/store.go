@@ -305,16 +305,37 @@ func (s Store) MarkHeartbeat(ctx context.Context, id int64) error {
 }
 
 func (s Store) UpdateStats(ctx context.Context, id int64, counts map[string]int, total, unknown, gaps int64, lastEvent time.Time) error {
-	encoded, _ := json.Marshal(counts)
-	lastEventValue := any(nil)
+	return s.flushStats(ctx, id, counts, total, unknown, gaps, lastEvent, nil)
+}
+
+func (s Store) flushStats(ctx context.Context, id int64, counts map[string]int, total, unknown, gaps int64, lastEvent time.Time, minutes map[string]map[string]int64) error {
+	encoded, err := json.Marshal(counts)
+	if err != nil {
+		return err
+	}
+	var lastEventValue any
 	if !lastEvent.IsZero() {
 		lastEventValue = lastEvent.UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET event_count = ?, unknown_event_count = ?,
-		gap_count = ?, event_counts_json = ?, last_event_at = COALESCE(?, last_event_at),
-		updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		total, unknown, gaps, string(encoded), lastEventValue, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE live_capture_sessions SET event_count = ?, unknown_event_count = ?,
+  gap_count = ?, event_counts_json = ?, last_event_at = COALESCE(?, last_event_at), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		total, unknown, gaps, string(encoded), lastEventValue, id); err != nil {
+		return err
+	}
+	for minute, commands := range minutes {
+		for cmd, count := range commands {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO live_capture_minutes(session_id,minute,cmd,event_count) VALUES(?,?,?,?)
+    ON CONFLICT(session_id,minute,cmd) DO UPDATE SET event_count=event_count+excluded.event_count`, id, minute, cmd, count); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 func (s Store) FinishSession(ctx context.Context, id int64, status, message string) error {

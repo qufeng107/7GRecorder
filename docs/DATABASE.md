@@ -1048,3 +1048,11 @@ history and remote download metadata while marking associated closed source vide
 deleted.
 
 Migration `00009_upload_source_local_cleanup.sql` introduces these fields and an index. It does not delete data.
+
+### live_capture_minutes
+
+运营分钟趋势保存接收时间的 UTC 分钟和 CMD 数量，不保存弹幕正文或用户标识。
+字段：session_id FK、minute TEXT（RFC3339 UTC 分钟）、cmd TEXT、event_count INTEGER >= 0；
+主键 (session_id, minute, cmd)。与会话累计计数在同一个事务中提交增量。
+进程异常退出可能使最后一批尚未入库事件仅存在于 JSONL，INTERRUPTED/缺口用于提示统计不完整。
+原文滚动清理不删除分钟汇总。该表统计收到的事件包，不声称已去重用户互动或观看人数。

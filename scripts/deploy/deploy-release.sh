@@ -113,7 +113,11 @@ bash "${release_root}/source/scripts/deploy/preflight.sh"
 HOUSEKEEPING_DEPLOY_SHA="${RELEASE_SHA}" bash "${release_root}/source/scripts/deploy/housekeeping.sh"
 
 if [ -f "/data/7grecorder/db/7grecorder.db" ]; then
-  cp "/data/7grecorder/db/7grecorder.db" "/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db"
+  [[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid release SHA" >&2; exit 1; }
+  sqlite3 /data/7grecorder/db/7grecorder.db ".timeout 10000" \
+    ".backup '/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db'"
+  test "$(sqlite3 "/data/7grecorder/backups/db/predeploy-${RELEASE_SHA}.db" "PRAGMA quick_check;")" = "ok" \
+    || { echo "database backup integrity check failed" >&2; exit 1; }
 fi
 
 image_archive="${release_root}/7grecorder-image.tar.gz"

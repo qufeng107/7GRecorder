@@ -726,7 +726,7 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 	}
 	var request COSUploadRequest
 	var encryptedSecret []byte
-	var sourceRelativePath string
+	var sourceRelativePath, cleanupStatus string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT co.id,
 			co.upload_source_id,
@@ -738,7 +738,8 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 			co.object_key,
 			uso.relative_path,
 			uso.size_bytes,
-			c.encrypted_secret
+			c.encrypted_secret,
+            COALESCE(us.local_cleanup_status, 'AVAILABLE')
 		FROM upload_source_cos_objects co
 		JOIN upload_sources us ON us.id = co.upload_source_id
 		JOIN upload_source_outputs uso ON uso.id = co.upload_source_output_id
@@ -751,7 +752,6 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 			AND us.status = 'READY_TO_UPLOAD'
 			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
 			AND COALESCE(us.edit_decision_json, '') = ''
-			AND COALESCE(us.local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 			AND csp.enabled = 1
 	`, payload.COSObjectID).Scan(
 		&request.ObjectID,
@@ -765,12 +765,16 @@ func (s Store) COSUploadRequest(ctx context.Context, payload COSJobPayload) (COS
 		&sourceRelativePath,
 		&request.SourceSizeBytes,
 		&encryptedSecret,
+		&cleanupStatus,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return COSUploadRequest{}, ErrNotFound
 	}
 	if err != nil {
 		return COSUploadRequest{}, fmt.Errorf("load cos upload request: %w", err)
+	}
+	if cleanupStatus != "AVAILABLE" {
+		return COSUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "local upload source was reclaimed or is being reclaimed")
 	}
 	if payload.UploadSourceID > 0 && payload.UploadSourceID != request.UploadSourceID {
 		return COSUploadRequest{}, ErrValidation

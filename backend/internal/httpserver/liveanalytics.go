@@ -14,6 +14,35 @@ import (
 )
 
 func bindLiveAnalyticsHandlers(cfg config.Config, s *ghttp.Server) {
+	s.BindHandler("/api/v1/live-analytics/sessions/{id}/timeline", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withLiveAnalyticsStore(r, cfg, func(actor account.User, store liveanalytics.Store) {
+			result, err := store.Timeline(r.Context(), actor, r.Get("id").Int64())
+			if err != nil {
+				writeLiveAnalyticsError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
+	s.BindHandler("/api/v1/live-analytics/sessions/{id}/events", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withLiveAnalyticsStore(r, cfg, func(actor account.User, store liveanalytics.Store) {
+			limit := r.Get("limit", 100).Int()
+			page, err := store.Events(r.Context(), actor, r.Get("id").Int64(), r.Get("offset", 0).Int64(), limit)
+			if err != nil {
+				writeLiveAnalyticsError(r, err)
+				return
+			}
+			r.Response.WriteJson(page)
+		})
+	})
+
 	s.BindHandler("/api/v1/recording-profiles/{id}/live-analytics", func(r *ghttp.Request) {
 		profileID := r.Get("id").Int64()
 		switch r.Method {
@@ -100,6 +129,8 @@ func withLiveAnalyticsStore(r *ghttp.Request, cfg config.Config, fn func(account
 
 func writeLiveAnalyticsError(r *ghttp.Request, err error) {
 	switch {
+	case errors.Is(err, liveanalytics.ErrEvidenceUnavailable):
+		writeAPIError(r, http.StatusGone, "EVIDENCE_UNAVAILABLE", "Raw evidence is unavailable or has been cleaned.", nil)
 	case errors.Is(err, liveanalytics.ErrValidation):
 		writeAPIError(r, http.StatusBadRequest, "VALIDATION_FAILED", "Live analytics request is invalid.", nil)
 	case errors.Is(err, liveanalytics.ErrForbidden):

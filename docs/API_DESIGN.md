@@ -776,3 +776,15 @@ still owned by the server. The generator preserves optional/null fields and excl
 COS disabled updates retain their existing API semantics: `enabled=false` disables an existing configuration but does
 not persist the other supplied fields or create a new COS profile. The frontend must display the returned state,
 retain any unpersisted edits as a draft and explain this result rather than reporting those fields saved.
+
+### OpenLive evidence explorer
+
+`GET /api/v1/live-analytics/sessions/{id}/events?offset=0&limit=100` follows Profile ownership.
+Returns `items[{received_at,cmd,payload}]`, `next_offset`, `has_more`; offset is a byte cursor at a
+JSONL line boundary. Maximum page size 100, maximum line 1 MiB. No host paths or credential data is returned.
+Deleted/missing evidence returns 410 EVIDENCE_UNAVAILABLE; it must not render as an empty successful capture.
+This explicit authenticated evidence endpoint returns retained platform event bodies; session-list DTOs do not.
+
+`GET /api/v1/live-analytics/sessions/{id}/timeline` 返回 `items[{minute,cmd,event_count}]`，
+按 UTC 分钟、CMD 排序，受 Profile ownership 保护。时间使用本地接收时间，计数是观测到的消息包，
+不等于消息去重后互动次数。返回最新 1440 分钟；响应 `truncated` 提示更早数据省略。

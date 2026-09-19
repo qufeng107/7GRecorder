@@ -272,7 +272,8 @@ export function createConsoleFixtures() {
     if (path.endsWith("/policy")) return ok({ ...payload, updated_at: stamp });
     if (path === "/api/v1/upload-sources") return ok(list([source], empty));
     if (path === "/api/v1/upload-sources/20") return ok(source);
-    if (path.startsWith("/api/v1/live-analytics/sessions")) return ok(list([], empty));
+    if (path.endsWith("/timeline") && path.startsWith("/api/v1/live-analytics/sessions/")) return ok({ items: [], truncated: false });
+    if (path === "/api/v1/live-analytics/sessions") return ok(list([], empty));
     if (path === "/api/v1/recordings") return ok(list([], empty));
     if (path === "/api/v1/upload-sources/20/actions/require-review") {
       source.review_status = "REQUIRED";

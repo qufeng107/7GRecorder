@@ -1076,3 +1076,6 @@ then apply the normal part duration/size policy. This keeps PK transitions from 
 All other video or audio signature changes partition consecutive inputs into stream-copy compatibility groups. The
 same grouping is the failure fallback for normalization, and completed outputs are promoted from temporary storage
 only after FFmpeg succeeds. This remains an adapter concern and adds no cross-module workflow state.
+
+运营分钟趋势是原始采集的轻量投影：每批与会话总计数事务提交，按接收时间而非平台事件时间分桶。
+清理原文不影响已保存的分钟趋势；异常停机会明确显示可能未投影尾部，不伪装完整覆盖。

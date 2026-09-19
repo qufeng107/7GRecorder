@@ -271,6 +271,17 @@ func TestBilibiliUploadRequestDefaultsRepostSourceToLiveRoom(t *testing.T) {
 	if request.Source != "https://live.bilibili.com/1741048619" {
 		t.Fatalf("unexpected repost source: %q", request.Source)
 	}
+	for _, status := range []string{"DELETING", "DELETED", "FAILED"} {
+		if _, err := database.ExecContext(ctx, "UPDATE upload_sources SET local_cleanup_status = ? WHERE id = 1", status); err != nil {
+			t.Fatal(err)
+		}
+		_, err := store.BilibiliUploadRequest(ctx, BilibiliJobPayload{PublicationID: 1, UploadSourceID: 1})
+		var classified interface{ ErrorClass() string }
+		if !errors.As(err, &classified) || classified.ErrorClass() != "SOURCE_MISSING" {
+			t.Fatalf("cleanup=%s error=%v", status, err)
+		}
+	}
+
 }
 
 func TestReconcileSkipsUploadSourceWithAdjacentRecordingOutsideSource(t *testing.T) {

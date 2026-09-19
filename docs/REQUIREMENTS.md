@@ -29,7 +29,7 @@ Recording 是基础能力；其余能力均为可选模块。
 - COS 上传/删除失败：不影响本地和 Bilibili；
 - AI/Songs 失败：不影响完整录播归档；
 - 网易云失效：不影响 Songs 本地播放；
-- 本地业务视频滚动清理必须等待所有已启用远端目的地确认成功；未配置的可选模块不构成阻塞，Songs 等不持有视频副本的模块不参与视频删除判定。
+- 本地业务视频滚动清理不要求 Bilibili/COS 上传成功；上传模块不得阻塞录播与运营采集。活动、写入中、受保护及运行中任务使用的文件不能删除。
 
 可选模块只共享 Recording/File 元数据和基础 Job Runtime，不形成跨模块 Pipeline。
 
@@ -330,7 +330,7 @@ SOURCE_MISSING
 - 进程中断后不得盲目重复投稿；
 - 任一必要视频分段已经滚动删除时标记 `SOURCE_MISSING`，第一版不投稿残缺半场；
 - Bilibili 成功/失败都不改变 Recording 完成状态；
-- Bilibili 模块启用时，只有 `VERIFIED` 才允许该 Upload Source 进入本地业务视频清理候选；Bilibili 失败仍不改变 Recording 完成状态，也不阻塞其他模块；
+- Bilibili 状态不参与本地清理资格；源文件被滚动回收后，后续上传按 SOURCE_MISSING 处理，不影响录播与运营采集；
 - 第一版只从 Local Source 投稿，不自动从 COS 回源。
 
 Bilibili 是长期观看归档，不视为原始文件 bit-for-bit 备份。
@@ -823,18 +823,19 @@ Workflow Engine / Job DAG
 - Bilibili and COS failure details must be visible from the upload-source detail view without requiring direct SQLite
   access.
 
-## Automatic local reclamation after delivery
+## Automatic local rolling reclamation
 
 - Disk-pressure cleanup runs automatically from the maintenance loop; it does not require an operator to notice a full
   disk or press the manual cleanup button.
-- An upload source is reclaimable only when it is complete, not protected, not under review/edit, has no running job,
-  and every currently enabled remote destination has reached confirmed success (`VERIFIED` for Bilibili and
-  `AVAILABLE` for every current COS output).
-- At least one remote destination must be enabled and successful. Disabled modules are ignored, but a pending or failed
-  enabled module blocks cleanup.
+- An upload source is reclaimable when complete, not protected, not under review/edit, and not used by a running job.
+- Remote modules may be disabled, pending or failed; remote delivery success never gates rolling cleanup.
+  Remote metadata remains intact; a later upload attempt must report missing local input without regenerating it.
 - The newest non-replaced upload source for each recording profile is retained locally even after successful delivery.
   Active/writing recordings and all files belonging to them are never candidates.
 - Reclamation deletes only database-indexed closed source video files and the controlled derived directory belonging to
   that upload source. It preserves database rows, publication/COS metadata, danmaku assets, and remote objects.
 - Cleanup state is persisted before filesystem deletion so periodic repair cannot mistake intentional removal for
   damage and regenerate or re-upload the source.
+
+运营首轮验收包含原始事件浏览器：获授权账号可分页查看所辖采集会话的事件、接收时间和原始字段。
+原文已清理或意外缺失时明确提示不可用，不显示为零互动；不允许跨 Profile 读取。

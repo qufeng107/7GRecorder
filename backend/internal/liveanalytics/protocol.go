@@ -21,6 +21,8 @@ const (
 	defaultSequenceID = 1
 )
 
+const maxDecodedBytes = 16 << 20
+
 var ErrUnsupportedProtocol = errors.New("unsupported OpenLive protocol version")
 
 type Packet struct {
@@ -41,6 +43,14 @@ func EncodePacket(operation uint32, body []byte) []byte {
 }
 
 func DecodePackets(data []byte) ([]Packet, error) {
+	budget := maxDecodedBytes
+	return decodePackets(data, 0, &budget)
+}
+
+func decodePackets(data []byte, depth int, budget *int) ([]Packet, error) {
+	if depth > 4 || len(data) > maxDecodedBytes {
+		return nil, fmt.Errorf("OpenLive decode limit exceeded")
+	}
 	var packets []Packet
 	for len(data) > 0 {
 		if len(data) < HeaderLength {
@@ -62,7 +72,7 @@ func DecodePackets(data []byte) ([]Packet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("open OpenLive zlib payload: %w", err)
 			}
-			decoded, readErr := io.ReadAll(reader)
+			decoded, readErr := io.ReadAll(io.LimitReader(reader, int64(*budget)+1))
 			closeErr := reader.Close()
 			if readErr != nil {
 				return nil, fmt.Errorf("read OpenLive zlib payload: %w", readErr)
@@ -70,7 +80,11 @@ func DecodePackets(data []byte) ([]Packet, error) {
 			if closeErr != nil {
 				return nil, fmt.Errorf("close OpenLive zlib payload: %w", closeErr)
 			}
-			nested, err := DecodePackets(decoded)
+			if len(decoded) > *budget {
+				return nil, fmt.Errorf("OpenLive decoded payload exceeds budget")
+			}
+			*budget -= len(decoded)
+			nested, err := decodePackets(decoded, depth+1, budget)
 			if err != nil {
 				return nil, err
 			}

@@ -110,7 +110,7 @@ func (s Store) BilibiliUploadRequest(ctx context.Context, payload BilibiliJobPay
 
 	var request BilibiliUploadRequest
 	var encryptedSecret []byte
-	var settingsJSON string
+	var settingsJSON, cleanupStatus string
 	var source struct {
 		ProfileName  string
 		RoomID       string
@@ -135,7 +135,8 @@ func (s Store) BilibiliUploadRequest(ctx context.Context, payload BilibiliJobPay
 			us.started_at,
 			us.completed_at,
 			us.duration_ms,
-			us.total_bytes
+			us.total_bytes,
+            COALESCE(us.local_cleanup_status, 'AVAILABLE')
 		FROM publications p
 		JOIN upload_sources us ON us.id = p.upload_source_id
 		JOIN recording_profiles rp ON rp.id = p.recording_profile_id
@@ -151,7 +152,6 @@ func (s Store) BilibiliUploadRequest(ctx context.Context, payload BilibiliJobPay
 			AND us.status = 'READY_TO_UPLOAD'
 			AND COALESCE(us.review_status, 'NONE') != 'REQUIRED'
 			AND COALESCE(us.edit_decision_json, '') = ''
-			AND COALESCE(us.local_cleanup_status, 'AVAILABLE') = 'AVAILABLE'
 	`, payload.PublicationID, payload.UploadSourceID).Scan(
 		&request.PublicationID,
 		&request.UploadSourceID,
@@ -167,12 +167,16 @@ func (s Store) BilibiliUploadRequest(ctx context.Context, payload BilibiliJobPay
 		&source.CompletedAt,
 		&source.DurationMs,
 		&source.TotalBytes,
+		&cleanupStatus,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return BilibiliUploadRequest{}, ErrNotFound
 	}
 	if err != nil {
 		return BilibiliUploadRequest{}, fmt.Errorf("load bilibili upload request: %w", err)
+	}
+	if cleanupStatus != "AVAILABLE" {
+		return BilibiliUploadRequest{}, NewClassifiedError("SOURCE_MISSING", "local upload source was reclaimed or is being reclaimed")
 	}
 
 	secret, err := s.decryptSecret(encryptedSecret)

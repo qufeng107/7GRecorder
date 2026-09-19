@@ -822,7 +822,7 @@ func TestRunLocalCleanupDeletesOldestUnprotectedCompletedRecording(t *testing.T)
 	}
 }
 
-func TestAutomaticCleanupRequiresAllEnabledDestinationsAndRetainsNewestSource(t *testing.T) {
+func TestAutomaticCleanupIgnoresFailedDeliveryAndRetainsNewestSource(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
 	actor := bootstrapTestAdmin(t, ctx, database)
@@ -849,18 +849,15 @@ func TestAutomaticCleanupRequiresAllEnabledDestinationsAndRetainsNewestSource(t 
 	if err != nil {
 		t.Fatalf("RunAutomaticUploadSourceCleanup returned error: %v", err)
 	}
-	if result.DeletedRecordings != 0 {
-		t.Fatalf("expected failed Bilibili delivery to block cleanup, got %#v", result)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE publications SET status = 'VERIFIED' WHERE id = 1`); err != nil {
-		t.Fatalf("mark publication verified returned error: %v", err)
-	}
-	result, err = store.RunAutomaticUploadSourceCleanup(ctx, 10)
-	if err != nil {
-		t.Fatalf("second RunAutomaticUploadSourceCleanup returned error: %v", err)
-	}
 	if result.DeletedRecordings != 1 {
-		t.Fatalf("expected delivered old source cleanup, got %#v", result)
+		t.Fatalf("failed delivery must not block cleanup: %#v", result)
+	}
+	var publicationStatus string
+	if err := database.QueryRowContext(ctx, "SELECT status FROM publications WHERE id = 1").Scan(&publicationStatus); err != nil {
+		t.Fatal(err)
+	}
+	if publicationStatus != "FAILED" {
+		t.Fatalf("cleanup changed remote state: %s", publicationStatus)
 	}
 	var newestStatus string
 	if err := database.QueryRowContext(ctx, `SELECT local_cleanup_status FROM upload_sources WHERE id = 2`).Scan(&newestStatus); err != nil {
@@ -868,6 +865,46 @@ func TestAutomaticCleanupRequiresAllEnabledDestinationsAndRetainsNewestSource(t 
 	}
 	if newestStatus != "AVAILABLE" {
 		t.Fatalf("expected newest source to remain available, got %q", newestStatus)
+	}
+}
+
+func TestRollingCleanupEligibilityIsIndependentOfDelivery(t *testing.T) {
+	cases := []struct {
+		name, setup string
+		eligible    bool
+	}{
+		{"pending delivery", "UPDATE publications SET status = 'PENDING'", true},
+		{"disabled upload", "UPDATE publishing_profiles SET enabled = 0", true},
+		{"no upload module", "DELETE FROM publications; DELETE FROM publishing_profiles", true},
+		{"protected", "UPDATE recordings SET local_protected = 1", false},
+		{"writing", "UPDATE recording_files SET file_status = 'WRITING'", false},
+		{"under review", "UPDATE upload_sources SET review_status = 'REQUIRED' WHERE id = 1", false},
+		{"running source job", "INSERT INTO jobs (type, resource_class, status, upload_source_id) VALUES ('UPLOAD_BILIBILI', 'NETWORK', 'RUNNING', 1)", false},
+		{"running recording job", "INSERT INTO jobs (type, resource_class, status, recording_id) VALUES ('ANALYZE_SONGS', 'CPU', 'RUNNING', 1)", false},
+		{"running file job", "INSERT INTO jobs (type, resource_class, status, recording_file_id) VALUES ('PROBE', 'CPU', 'RUNNING', 1)", false},
+		{"queued source job", "INSERT INTO jobs (type, resource_class, status, upload_source_id) VALUES ('UPLOAD_BILIBILI', 'NETWORK', 'PENDING', 1)", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			cfg, database := openTestDB(t, ctx)
+			actor := bootstrapTestAdmin(t, ctx, database)
+			if _, err := profile.NewStore(database).Create(ctx, actor, profile.CreateRequest{Name: "7G", RoomID: "1741048619", StreamerName: "Streamer"}); err != nil {
+				t.Fatal(err)
+			}
+			insertRecordingMetadata(t, ctx, database, insertRecordingRequest{Title: "old", StartedAt: "2026-09-05T10:00:00Z", CompletedAt: "2026-09-05T10:30:00Z", DurationMs: 1800000, SizeBytes: 5})
+			seedDeliveredCleanupSource(t, ctx, database, actor.ID, 1, 1)
+			if _, err := database.ExecContext(ctx, tc.setup); err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := NewStore(database, cfg).uploadSourceCleanupCandidates(ctx, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(candidates) == 1) != tc.eligible {
+				t.Fatalf("eligible=%v candidates=%#v", tc.eligible, candidates)
+			}
+		})
 	}
 }
 

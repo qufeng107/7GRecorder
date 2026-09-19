@@ -215,7 +215,7 @@ Current implementation note:
 
 - 未配置时无任何 Bilibili Job；
 - 上传失败不影响 Recording；
-- 本地业务视频滚动删除等待所有已启用远端目的地确认成功；模块失败不改变 Recording 状态，但会阻止该 Upload Source 被回收；
+- 本地业务视频滚动删除不依赖 Bilibili/COS 状态；仅保护活动、写入中、手动保护、审核编辑中及运行中任务使用的文件，并保留每个配置最新源；
 - retry 不重复投稿。
 
 ---
@@ -490,3 +490,6 @@ the normal two-hour/size-aware part policy. Other stream changes still create co
 - surface staged/deployed IDs, expiry, timestamps, and errors in the System page.
 
 DNS mutation, certificate purchasing, and replacing Tencent Cloud's renewal lifecycle are non-goals.
+
+当前运营增量：先提供接收事件分钟趋势、可保留的 CMD 汇总和授权事件浏览器。
+用户去重、礼物/盲盒金额、SC 撤回后的净额仍需要真实场景样本验收，不能把包计数直接当业务指标。

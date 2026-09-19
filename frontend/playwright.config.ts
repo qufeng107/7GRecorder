@@ -4,6 +4,7 @@ export default defineConfig({
   outputDir: "test-results/mock",
   testMatch: [
     "jobs.spec.ts",
+    "analytics.spec.ts",
     "console.spec.ts",
     "settings.spec.ts",
     "completion.spec.ts",

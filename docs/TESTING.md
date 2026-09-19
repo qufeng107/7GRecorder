@@ -460,12 +460,11 @@ System:
 ## Automatic upload-source cleanup tests
 
 - No disk pressure means no files or metadata change.
-- The oldest fully delivered source is reclaimed under pressure; its raw videos and controlled derived directory are
+- The oldest eligible source is reclaimed under pressure; its raw videos and controlled derived directory are
   deleted while publication/COS rows remain.
 - The newest source per profile is retained even when fully delivered.
-- Active/writing, protected, reviewed, editing, pending, uploading, failed, and running-job sources are excluded.
-- Every enabled destination must succeed, while disabled destinations do not block cleanup; at least one successful
-  destination is required.
+- Active/writing, protected, reviewed, editing and running-job sources are excluded.
+- Remote success is not required; failed/pending/disabled remote destinations do not block cleanup.
 - Cleanup persists `DELETING` before file removal and ends in `DELETED` or `FAILED`; repair skips all non-`AVAILABLE`
   cleanup states.
 
@@ -488,3 +487,8 @@ submission target stability, pending-save edits, song save failure/recovery, pro
 unapplied review cuts blocking approval, credential clearing, and every console module at a 390px dark viewport.
 Real-backend integration verifies disabled COS only persists the disabled state (other edits remain dirty), plus
 song prefix normalization and reload persistence. Synthetic fixtures must match these API semantics.
+
+OpenLive evidence browser regression: ownership before filesystem access, cursor boundary/limit validation,
+bounded record reads, deleted evidence 410, malformed/partial JSONL reported without exposing host paths.
+
+Rolling cleanup regression cases include failed/pending/disabled/absent upload modules, queued versus running jobs, recording/file job references, protected/writing inputs, and review gates. Reclaimed upload inputs must report `SOURCE_MISSING` before invoking external upload adapters.

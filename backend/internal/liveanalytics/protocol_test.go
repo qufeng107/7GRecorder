@@ -41,3 +41,30 @@ func TestDecodePacketsRejectsTruncatedAndUnknownProtocol(t *testing.T) {
 		t.Fatalf("expected unsupported protocol error, got %v", err)
 	}
 }
+
+func TestDecodePacketsBoundsExpansionAndNesting(t *testing.T) {
+	compress := func(body []byte) []byte {
+		var buf bytes.Buffer
+		w := zlib.NewWriter(&buf)
+		if _, err := w.Write(body); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		packet := EncodePacket(OpMessage, buf.Bytes())
+		binary.BigEndian.PutUint16(packet[6:8], ProtocolZlib)
+		return packet
+	}
+	oversized := compress(bytes.Repeat([]byte{0}, maxDecodedBytes+1))
+	if _, err := DecodePackets(oversized); err == nil {
+		t.Fatal("unbounded expansion")
+	}
+	nested := EncodePacket(OpMessage, []byte("{}"))
+	for i := 0; i < 6; i++ {
+		nested = compress(nested)
+	}
+	if _, err := DecodePackets(nested); err == nil {
+		t.Fatal("unbounded nesting")
+	}
+}

@@ -354,34 +354,13 @@ const uploadSourceCleanupEligibleCondition = `
 			AND NOT EXISTS (
 				SELECT 1 FROM jobs j
 				WHERE j.status = 'RUNNING'
-					AND (j.upload_source_id = us.id OR j.business_key LIKE 'upload-source:' || us.id || ':%')
-			)
-			AND (
-				EXISTS (SELECT 1 FROM publishing_profiles pp WHERE pp.recording_profile_id = us.recording_profile_id AND pp.platform = 'bilibili' AND pp.enabled = 1 AND pp.credential_id IS NOT NULL)
-				OR EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1)
-			)
-			AND (
-				NOT EXISTS (SELECT 1 FROM publishing_profiles pp WHERE pp.recording_profile_id = us.recording_profile_id AND pp.platform = 'bilibili' AND pp.enabled = 1 AND pp.credential_id IS NOT NULL)
-				OR EXISTS (SELECT 1 FROM publications pub WHERE pub.upload_source_id = us.id AND pub.platform = 'bilibili' AND pub.status = 'VERIFIED')
-			)
-			AND (
-				NOT EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1)
-				OR (
-					EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD')
-					AND NOT EXISTS (
-						SELECT 1
-						FROM upload_source_outputs uso
-						JOIN cos_storage_profiles csp ON csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1
-						WHERE uso.upload_source_id = us.id
-							AND uso.status = 'READY_TO_UPLOAD'
-							AND NOT EXISTS (
-								SELECT 1 FROM upload_source_cos_objects co
-								WHERE co.upload_source_output_id = uso.id
-									AND co.cos_storage_profile_id = csp.id
-									AND co.status = 'AVAILABLE'
-							)
-					)
-				)
+					AND (j.upload_source_id = us.id OR j.business_key LIKE 'upload-source:' || us.id || ':%'
+                        OR EXISTS (
+                            SELECT 1 FROM upload_source_segments busy_segment
+                            WHERE busy_segment.upload_source_id = us.id
+                                AND (busy_segment.recording_id = j.recording_id
+                                    OR busy_segment.recording_file_id = j.recording_file_id)
+                        ))
 			)`
 
 type Store struct {
@@ -3052,10 +3031,10 @@ func (s Store) RunLocalCleanup(ctx context.Context, actor account.User, req Clea
 		return CleanupRunResult{}, nil
 	}
 
-	return s.runDeliveredUploadSourceCleanup(ctx, limit)
+	return s.runRollingUploadSourceCleanup(ctx, limit)
 }
 
-// RunAutomaticUploadSourceCleanup reclaims complete, remotely delivered sources only while
+// RunAutomaticUploadSourceCleanup reclaims complete sources independently of remote delivery while
 // the configured storage policy reports pressure. The newest source for every profile is
 // deliberately retained so cleanup cannot race the current recording/discovery boundary.
 func (s Store) RunAutomaticUploadSourceCleanup(ctx context.Context, limit int) (CleanupRunResult, error) {
@@ -3068,10 +3047,10 @@ func (s Store) RunAutomaticUploadSourceCleanup(ctx context.Context, limit int) (
 		return CleanupRunResult{}, nil
 	}
 
-	return s.runDeliveredUploadSourceCleanup(ctx, normalizeCleanupLimit(limit))
+	return s.runRollingUploadSourceCleanup(ctx, normalizeCleanupLimit(limit))
 }
 
-func (s Store) runDeliveredUploadSourceCleanup(ctx context.Context, limit int) (CleanupRunResult, error) {
+func (s Store) runRollingUploadSourceCleanup(ctx context.Context, limit int) (CleanupRunResult, error) {
 	actor := account.User{Role: account.RoleSuperAdmin}
 	candidates, err := s.uploadSourceCleanupCandidates(ctx, limit)
 	if err != nil {
@@ -3079,7 +3058,7 @@ func (s Store) runDeliveredUploadSourceCleanup(ctx context.Context, limit int) (
 	}
 	result := CleanupRunResult{}
 	for _, candidate := range candidates {
-		deletedRecordings, deletedFiles, reclaimedBytes, deleted, err := s.deleteDeliveredUploadSource(ctx, candidate)
+		deletedRecordings, deletedFiles, reclaimedBytes, deleted, err := s.deleteRollingUploadSource(ctx, candidate)
 		if err != nil {
 			return CleanupRunResult{}, err
 		}
@@ -3129,7 +3108,7 @@ func (s Store) uploadSourceCleanupCandidates(ctx context.Context, limit int) ([]
 	return items, nil
 }
 
-func (s Store) deleteDeliveredUploadSource(ctx context.Context, candidate uploadSourceCleanupCandidate) (int, int, int64, bool, error) {
+func (s Store) deleteRollingUploadSource(ctx context.Context, candidate uploadSourceCleanupCandidate) (int, int, int64, bool, error) {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE upload_sources AS us
 		SET local_cleanup_status = 'DELETING', updated_at = CURRENT_TIMESTAMP

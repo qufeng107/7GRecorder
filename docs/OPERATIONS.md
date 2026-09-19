@@ -364,7 +364,7 @@ Disk housekeeping 是独立的运维清理，不替代 Local Storage Guard，也
 - 不删除 SQLite WAL/SHM 文件来“清理空间”；
 - 不扫描 COS Bucket 删除数据库未登记对象。
 
-Worker 已实现磁盘压力自动回收：只有 Upload Source 的全部 enabled 远端模块确认成功、审核已结束、没有运行中任务，
+Worker 已实现磁盘压力自动回收：只要 Upload Source 审核已结束、没有运行中任务，
 并且该来源不是对应录制配置最新一场时，才删除其已关闭原始视频和 `DATA_ROOT/upload-sources/<profile>/<source>`
 受控派生目录。数据库历史、弹幕、Publication/COS 元数据和远端下载信息继续保留。
 
@@ -802,8 +802,8 @@ the service is not the normal review mechanism and does not replace the persiste
 The worker checks local storage pressure during its periodic reconciliation loop. It reclaims oldest eligible upload
 sources until the configured target is met, while retaining the newest source for every recording profile.
 
-Eligibility requires all enabled remote modules to be confirmed successful. Consequently, a source with Bilibili or
-COS `FAILED`, `PENDING`, or `UPLOADING`, a source waiting for review, and the current active recording are never deleted.
+Remote delivery status does not gate cleanup. Failed or pending deliveries may lose local sources under pressure.
+Active/writing/protected files, running jobs and sources waiting for review remain protected.
 The cleanup keeps SQLite history and remote metadata; only local closed source videos and the source-owned derived
 directory are removed.
 
@@ -816,7 +816,7 @@ FROM upload_sources ORDER BY started_at DESC;
 
 `DELETING` means the source was durably claimed before filesystem work. `FAILED` means cleanup itself needs inspection;
 it must not be repaired or uploaded as if local disappearance were accidental. `DELETED` is the expected terminal
-local state for an older remotely archived source.
+local state for an older eligible source regardless of remote delivery.
 
 ## Local frontend development isolation
 

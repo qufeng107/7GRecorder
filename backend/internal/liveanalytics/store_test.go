@@ -74,12 +74,55 @@ func TestConfigUsesEncryptedOpenLiveCredentialAndOwnership(t *testing.T) {
 	if _, err := store.CreateSession(t.Context(), requests[0], StartResult{GameID: "game-2", RoomID: 1741048619}); err == nil {
 		t.Fatal("expected the active-session uniqueness guard to reject a second session")
 	}
+
+	writer, err := NewRawWriter(root, createdProfile.ID, sessionID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if err := store.SetRawPath(t.Context(), sessionID, writer.RelativePath()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := writer.Write(time.Now(), "LIVE_OPEN_PLATFORM_DM", []byte(`{"cmd":"LIVE_OPEN_PLATFORM_DM","data":{"msg":"sample"}}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.Events(t.Context(), admin, sessionID, 0, 2)
+	if err != nil || len(first.Items) != 2 || !first.HasMore {
+		t.Fatalf("first page: %#v %v", first, err)
+	}
+	second, err := store.Events(t.Context(), admin, sessionID, first.NextOffset, 2)
+	if err != nil || len(second.Items) != 1 || second.HasMore {
+		t.Fatalf("second page: %#v %v", second, err)
+	}
+	if _, err := store.Events(t.Context(), admin, sessionID, 1, 2); !errors.Is(err, ErrValidation) {
+		t.Fatalf("invalid cursor: %v", err)
+	}
+	if _, err := store.Events(t.Context(), manager, sessionID, 0, 2); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ownership: %v", err)
+	}
 	if err := store.MarkConnected(t.Context(), sessionID); err != nil {
 		t.Fatal(err)
 	}
 	lastEvent := time.Date(2026, 9, 19, 2, 3, 4, 0, time.UTC)
 	if err := store.UpdateStats(t.Context(), sessionID, map[string]int{"LIVE_OPEN_PLATFORM_DM": 3}, 3, 0, 2, lastEvent); err != nil {
 		t.Fatal(err)
+	}
+	if err := store.flushStats(t.Context(), sessionID, map[string]int{"LIVE_OPEN_PLATFORM_DM": 3}, 3, 0, 2, lastEvent,
+		map[string]map[string]int64{"2026-09-19T02:03:00Z": {"LIVE_OPEN_PLATFORM_DM": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.flushStats(t.Context(), sessionID, map[string]int{"LIVE_OPEN_PLATFORM_DM": 3}, 3, 0, 2, lastEvent,
+		map[string]map[string]int64{"2026-09-19T02:03:00Z": {"LIVE_OPEN_PLATFORM_DM": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	timeline, err := store.Timeline(t.Context(), admin, sessionID)
+	if err != nil || len(timeline.Items) != 1 || timeline.Items[0].EventCount != 3 {
+		t.Fatalf("timeline %#v %v", timeline, err)
+	}
+	if _, err := store.Timeline(t.Context(), manager, sessionID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("timeline permission %v", err)
 	}
 	if err := store.InterruptActive(t.Context()); err != nil {
 		t.Fatal(err)

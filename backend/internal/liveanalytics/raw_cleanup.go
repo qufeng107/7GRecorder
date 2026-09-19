@@ -53,6 +53,10 @@ func (s Store) EnforceRawQuota(ctx context.Context) (RawCleanupResult, error) {
 		}
 		candidates = append(candidates, item)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return result, err
+	}
 	if err := rows.Close(); err != nil {
 		return result, err
 	}
@@ -125,6 +129,10 @@ func (s Store) recoverRawCleanupClaims(ctx context.Context) error {
 			return err
 		}
 		claims = append(claims, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -222,5 +230,27 @@ func (s Store) resolveRawPath(relative string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("live analytics raw path escapes data root")
 	}
+	if err := rejectRawSymlinks(s.cfg.DataRoot, relative); err != nil {
+		return "", err
+	}
 	return resolved, nil
+}
+
+// Refuse symlinks in every component, including the evidence root itself.
+func rejectRawSymlinks(dataRoot, relative string) error {
+	current := dataRoot
+	for _, part := range strings.Split(filepath.Clean(relative), string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("live analytics path contains a symlink")
+		}
+	}
+	return nil
 }

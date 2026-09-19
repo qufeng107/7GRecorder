@@ -241,3 +241,14 @@ capture gaps remain in SQLite. The System page shows raw/subquota and combined m
 show raw evidence state. Focused backend tests, backend build, frontend lint/typecheck, 22 component tests, frontend
 build, and 26 mock browser tests pass. Deployment still requires saving and validating the production Profile's
 OpenLive credential before relying on the migration that disables new BililiveRecorder XML capture.
+
+Local operations follow-up (not deployed): retained per-minute CMD counts, authenticated bounded event pagination,
+capture-session detail route with accessible chart/table, and OpenLive draft guards. Protocol decompression now has
+a shared 16 MiB expansion budget and nesting limit; evidence paths reject symlink parents. Release DB backup uses
+SQLite online backup and quick_check instead of copying an active WAL database.
+The operator resolved the storage policy: remote upload success must not block local rolling cleanup or live capture.
+Active/writing/protected/in-use files remain protected; pending and failed remote deliveries do not gate cleanup.
+
+Validation for this local batch: focused Go tests for recording/upload/liveanalytics/db/httpserver passed; backend build passed. Frontend lint/typecheck/build, 22 component tests, 8 console browser tests and the analytics browser test passed. No full backend environment was started and no deployment/push was performed.
+
+Remaining readiness work: a long-running active JSONL is protected from cleanup and can exceed the 2 GiB target; implement file rotation without breaking the OpenLive connection before treating the raw cap as bounded. Minute counters count received messages, not deduplicated viewers or settled revenue.

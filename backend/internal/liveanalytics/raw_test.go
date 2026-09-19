@@ -2,6 +2,7 @@ package liveanalytics
 
 import (
 	"encoding/json"
+	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,5 +37,23 @@ func TestRawWriterPreservesKnownAndUnknownCommands(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, `"msg":"hello"`) || !strings.Contains(text, `"future":true`) {
 		t.Fatalf("raw events were not preserved: %s", text)
+	}
+}
+
+func TestRawPathsRejectSymlinkedParent(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "live-analytics")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRawWriter(root, 1, 1, time.Now()); err == nil {
+		t.Fatal("writer accepted symlink")
+	}
+	store := Store{cfg: config.Config{DataRoot: root}}
+	if _, err := store.resolveRawPath("live-analytics/session.jsonl"); err == nil {
+		t.Fatal("cleanup accepted symlink")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("outside directory modified")
 	}
 }

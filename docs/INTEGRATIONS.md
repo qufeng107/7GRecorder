@@ -470,3 +470,5 @@ testdata/
 - 不含真实 Cookie/Secret/用户敏感数据；
 - 升级外部组件时先更新 fixture/test，再改 Adapter；
 - Coding Agent 不凭记忆猜外部 payload。
+
+OpenLive 解码每帧最多展开 16 MiB，压缩嵌套最多 4 层；超限按解析缺口处理。原文读写/清理拒绝符号链接路径。

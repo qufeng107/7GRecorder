@@ -36,6 +36,9 @@ func NewRawWriter(dataRoot string, profileID, sessionID int64, now time.Time) (*
 	if err != nil || relToRoot == ".." || (len(relToRoot) > 3 && relToRoot[:3] == ".."+string(filepath.Separator)) {
 		return nil, fmt.Errorf("live analytics raw path escapes data root")
 	}
+	if err := rejectRawSymlinks(dataRoot, relative); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(resolved), 0o750); err != nil {
 		return nil, fmt.Errorf("create live analytics directory: %w", err)
 	}

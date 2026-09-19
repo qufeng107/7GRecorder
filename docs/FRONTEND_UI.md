@@ -232,3 +232,7 @@ This completes migration of the existing console, not development of new public 
 
 COS disabling preserves the existing API contract: only the enabled state is saved. Other edited fields stay dirty
 until explicitly discarded or saved with COS enabled; the UI must not report those fields as saved.
+
+运营会话页：从采集状态列表或录像详情进入独立路由，展示消息分钟柱状图、可访问的数据表、
+按 CMD 汇总和有界分页原始事件。JSON 只作为文本展示，已清理状态不提供翻页。
+OpenLive 配置保存保留更新中的草稿，切换 Profile/离开页面提示未保存配置和凭证。

@@ -14,6 +14,7 @@ const RecordingDetail = lazy(() => import("../features/recordings/RecordingDetai
 const Uploads = lazy(() => import("../features/uploads/UploadsPage"));
 const Songs = lazy(() => import("../features/songs/SongsPage"));
 const Jobs = lazy(() => import("../features/jobs/JobsPage"));
+const CaptureSession = lazy(() => import("../features/liveAnalytics/CaptureSessionPage"));
 const LiveAnalytics = lazy(() => import("../features/liveAnalytics/LiveAnalyticsPage"));
 const System = lazy(() => import("../features/system/SystemPage"));
 const Accounts = lazy(() => import("../features/accounts/AccountsPage"));
@@ -86,6 +87,10 @@ export const router = createBrowserRouter([
             </Suspense>
           </FeatureGate>
         ),
+      },
+      {
+        path: "live-analytics/sessions/:sessionId",
+        element: <FeatureGate><Suspense fallback={pending}><CaptureSession /></Suspense></FeatureGate>,
       },
       {
         path: "live-analytics",
