@@ -235,7 +235,7 @@ build, the existing 24-browser-test suite, and 8 focused console browser tests p
 performed.
 
 `live-analytics/` raw JSONL is now included in managed local-storage accounting with a fixed 2 GiB rolling subquota.
-The collector checks it every minute, protects active-session files, and deletes the oldest ended-session evidence
+The collector checks it every minute, protects current writing files, and deletes the oldest closed evidence chunks
 until usage returns below the cap. Session totals, the last observed raw size, deletion timestamp, event counts, and
 capture gaps remain in SQLite. The System page shows raw/subquota and combined managed usage; session/detail pages
 show raw evidence state. Focused backend tests, backend build, frontend lint/typecheck, 22 component tests, frontend
@@ -251,4 +251,6 @@ Active/writing/protected/in-use files remain protected; pending and failed remot
 
 Validation for this local batch: focused Go tests for recording/upload/liveanalytics/db/httpserver passed; backend build passed. Frontend lint/typecheck/build, 22 component tests, 8 console browser tests and the analytics browser test passed. No full backend environment was started and no deployment/push was performed.
 
-Remaining readiness work: a long-running active JSONL is protected from cleanup and can exceed the 2 GiB target; implement file rotation without breaking the OpenLive connection before treating the raw cap as bounded. Minute counters count received messages, not deduplicated viewers or settled revenue.
+Raw evidence now rotates locally at approximately 32 MiB without breaking the OpenLive connection. Closed chunks in active sessions are reclaimable, current writing chunks remain protected, and the evidence browser exposes individual chunk availability. Migration 14 imports existing raw paths. Minute counters count received messages, not deduplicated viewers or settled revenue.
+
+Chunk rotation validation: frontend lint/typecheck/build and browser regression passed, including resetting the cursor on file selection. Focused persistence tests cover active-session closed-chunk reclamation and continued writes, and migration 14 preserves legacy evidence metadata. No deployment performed.

@@ -327,7 +327,7 @@ Profile 维护至多一个长连接采集循环。HTTP 项目心跳和 WebSocket
 完整保存，分析器以后从原始文件幂等重算，不依赖录像、投稿或 COS 成功。
 
 Raw Storage Reconciler 每分钟核对 `DATA_ROOT/live-analytics/`。该目录计入全局 managed local usage，并具有固定
-2 GiB 子上限；超过子上限时只删除最旧的已结束会话 JSONL，绝不删除活动会话文件。删除后保留 Session 汇总、
+2 GiB 子上限；超过子上限时只删除最旧的已关闭 JSONL 分片，绝不删除当前写入分片。删除后保留 Session 汇总、
 事件类型计数和采集缺口，并明确标记原始证据已删除。
 
 BililiveRecorder XML 不再作为新运营分析的数据源。Recorder 同步固定关闭其弹幕写入；历史 XML 文件保持可见，
@@ -1079,3 +1079,7 @@ only after FFmpeg succeeds. This remains an adapter concern and adds no cross-mo
 
 运营分钟趋势是原始采集的轻量投影：每批与会话总计数事务提交，按接收时间而非平台事件时间分桶。
 清理原文不影响已保存的分钟趋势；异常停机会明确显示可能未投影尾部，不伪装完整覆盖。
+
+OpenLive 原文按约 32 MiB 分片（单条事件不跨文件，允许超出一个事件大小），轮换仅更换本地文件，
+不重连平台会话。关闭并 fsync 后，旧分片可被 2 GiB 配额按创建顺序回收，包括仍在直播的会话。
+WRITING 分片永不删除。2 GiB 为滚动目标，维护间隔和各 Profile 当前分片会造成暂时超额；磁盘不可写时报告采集缺口。

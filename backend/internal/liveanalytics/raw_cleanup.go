@@ -2,6 +2,7 @@ package liveanalytics
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -29,13 +30,12 @@ func (s Store) EnforceRawQuota(ctx context.Context) (RawCleanupResult, error) {
 	}
 	result := RawCleanupResult{BeforeBytes: used, AfterBytes: used}
 	if used <= storagepolicy.LiveAnalyticsRawBytes {
-		return result, nil
+		return result, s.refreshRawSummary(ctx)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, raw_relative_path, raw_status
-		FROM live_capture_sessions
-		WHERE raw_relative_path IS NOT NULL AND raw_status IN ('WRITING', 'AVAILABLE', 'DELETING', 'MISSING')
-			AND status NOT IN ('STARTING', 'CONNECTED', 'RECONNECTING')
-		ORDER BY COALESCE(ended_at, started_at) ASC, id ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, relative_path, status
+		FROM live_capture_raw_files
+		WHERE relative_path IS NOT NULL AND status IN ('AVAILABLE', 'DELETING', 'MISSING')
+        ORDER BY id ASC`)
 	if err != nil {
 		return result, fmt.Errorf("list live analytics cleanup candidates: %w", err)
 	}
@@ -74,9 +74,8 @@ func (s Store) EnforceRawQuota(ctx context.Context) (RawCleanupResult, error) {
 			if item.status == "DELETING" {
 				status = "DELETED"
 			}
-			_, _ = s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = ?,
-				raw_deleted_at = CASE WHEN ? = 'DELETED' THEN COALESCE(raw_deleted_at, CURRENT_TIMESTAMP) ELSE raw_deleted_at END,
-				updated_at = CURRENT_TIMESTAMP WHERE id = ?`, status, status, item.id)
+			_, _ = s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = ?,
+				deleted_at = CASE WHEN ? = 'DELETED' THEN COALESCE(deleted_at, CURRENT_TIMESTAMP) ELSE deleted_at END WHERE id = ?`, status, status, item.id)
 			continue
 		}
 		if err != nil {
@@ -85,9 +84,9 @@ func (s Store) EnforceRawQuota(ctx context.Context) (RawCleanupResult, error) {
 		if !info.Mode().IsRegular() {
 			return result, fmt.Errorf("live analytics cleanup target is not a regular file")
 		}
-		claimed, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'DELETING', raw_size_bytes = ?,
-			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('STARTING', 'CONNECTED', 'RECONNECTING')
-			AND raw_status IN ('WRITING', 'AVAILABLE', 'DELETING', 'MISSING')`, info.Size(), item.id)
+		claimed, err := s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'DELETING', size_bytes = ?,
+			closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP) WHERE id = ?
+            AND status IN ('AVAILABLE', 'DELETING', 'MISSING')`, info.Size(), item.id)
 		if err != nil {
 			return result, fmt.Errorf("claim live analytics raw cleanup: %w", err)
 		}
@@ -95,25 +94,31 @@ func (s Store) EnforceRawQuota(ctx context.Context) (RawCleanupResult, error) {
 		if err != nil || rowsAffected != 1 {
 			continue
 		}
-		if err := os.Remove(absolute); err != nil {
-			_, _ = s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
-				WHERE id = ? AND raw_status = 'DELETING'`, item.id)
+		root, err := os.OpenRoot(s.cfg.DataRoot)
+		if err != nil {
+			return result, err
+		}
+		removeErr := root.Remove(filepath.FromSlash(item.path))
+		root.Close()
+		if err := removeErr; err != nil {
+			_, _ = s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'AVAILABLE'
+				WHERE id = ? AND status = 'DELETING'`, item.id)
 			return result, fmt.Errorf("delete live analytics raw file: %w", err)
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'DELETED', raw_size_bytes = ?,
-			raw_deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, info.Size(), item.id); err != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'DELETED', size_bytes = ?,
+			deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, info.Size(), item.id); err != nil {
 			return result, fmt.Errorf("mark live analytics raw file deleted: %w", err)
 		}
 		result.AfterBytes -= info.Size()
 		result.DeletedBytes += info.Size()
 		result.DeletedFiles++
 	}
-	return result, nil
+	return result, s.refreshRawSummary(ctx)
 }
 
 func (s Store) recoverRawCleanupClaims(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, raw_relative_path FROM live_capture_sessions
-		WHERE raw_status = 'DELETING' AND raw_relative_path IS NOT NULL`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, relative_path FROM live_capture_raw_files
+		WHERE status = 'DELETING' AND relative_path IS NOT NULL`)
 	if err != nil {
 		return fmt.Errorf("list interrupted live analytics cleanup claims: %w", err)
 	}
@@ -145,12 +150,12 @@ func (s Store) recoverRawCleanupClaims(ctx context.Context) error {
 		_, statErr := os.Lstat(absolute)
 		switch {
 		case statErr == nil:
-			_, err = s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
-				WHERE id = ? AND raw_status = 'DELETING'`, item.id)
+			_, err = s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'AVAILABLE'
+				WHERE id = ? AND status = 'DELETING'`, item.id)
 		case errors.Is(statErr, os.ErrNotExist):
-			_, err = s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'DELETED',
-				raw_deleted_at = COALESCE(raw_deleted_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
-				WHERE id = ? AND raw_status = 'DELETING'`, item.id)
+			_, err = s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'DELETED',
+				deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP)
+				WHERE id = ? AND status = 'DELETING'`, item.id)
 		default:
 			return fmt.Errorf("recover live analytics raw cleanup: %w", statErr)
 		}
@@ -162,12 +167,25 @@ func (s Store) recoverRawCleanupClaims(ctx context.Context) error {
 }
 
 func (s Store) refreshRawMetadata(ctx context.Context, id int64) error {
-	var relative, status string
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(raw_relative_path, ''), raw_status FROM live_capture_sessions WHERE id = ?`, id).Scan(&relative, &status); err != nil {
+	if err := s.refreshRawSize(ctx, id); err != nil {
 		return err
 	}
-	if relative == "" || status == "DELETING" || status == "DELETED" {
+	if _, err := s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'AVAILABLE', closed_at = CURRENT_TIMESTAMP
+        WHERE session_id = ? AND status = 'WRITING'`, id); err != nil {
+		return err
+	}
+	return s.refreshRawSummary(ctx, id)
+}
+
+func (s Store) refreshRawSize(ctx context.Context, id int64) error {
+	var relative string
+	var fileID int64
+	err := s.db.QueryRowContext(ctx, `SELECT id,relative_path FROM live_capture_raw_files WHERE session_id = ? AND status = 'WRITING'`, id).Scan(&fileID, &relative)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil
+	}
+	if err != nil {
+		return err
 	}
 	absolute, err := s.resolveRawPath(relative)
 	if err != nil {
@@ -175,9 +193,8 @@ func (s Store) refreshRawMetadata(ctx context.Context, id int64) error {
 	}
 	info, err := os.Lstat(absolute)
 	if errors.Is(err, os.ErrNotExist) {
-		_, updateErr := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'MISSING', updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND raw_status != 'DELETED'`, id)
-		return updateErr
+		_, err = s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'MISSING', closed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'WRITING'`, fileID)
+		return err
 	}
 	if err != nil {
 		return err
@@ -185,32 +202,29 @@ func (s Store) refreshRawMetadata(ctx context.Context, id int64) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("live analytics raw path is not a regular file")
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_status = 'AVAILABLE', raw_size_bytes = ?,
-		updated_at = CURRENT_TIMESTAMP WHERE id = ? AND raw_status != 'DELETED'`, info.Size(), id)
-	return err
+	if _, err := s.db.ExecContext(ctx, `UPDATE live_capture_raw_files SET size_bytes = ? WHERE id = ? AND status = 'WRITING'`, info.Size(), fileID); err != nil {
+		return err
+	}
+	return s.refreshRawSummary(ctx, id)
 }
 
-func (s Store) refreshRawSize(ctx context.Context, id int64) error {
-	var relative string
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(raw_relative_path, '') FROM live_capture_sessions WHERE id = ?`, id).Scan(&relative); err != nil {
-		return err
+func (s Store) refreshRawSummary(ctx context.Context, sessionIDs ...int64) error {
+	query := `UPDATE live_capture_sessions AS s SET
+        raw_size_bytes = (SELECT COALESCE(SUM(size_bytes),0) FROM live_capture_raw_files WHERE session_id = s.id),
+        raw_status = CASE
+            WHEN EXISTS(SELECT 1 FROM live_capture_raw_files WHERE session_id = s.id AND status = 'WRITING') THEN 'WRITING'
+            WHEN EXISTS(SELECT 1 FROM live_capture_raw_files WHERE session_id = s.id AND status = 'AVAILABLE') THEN 'AVAILABLE'
+            WHEN EXISTS(SELECT 1 FROM live_capture_raw_files WHERE session_id = s.id AND status = 'DELETING') THEN 'DELETING'
+            WHEN EXISTS(SELECT 1 FROM live_capture_raw_files WHERE session_id = s.id AND status = 'MISSING') THEN 'MISSING'
+            ELSE 'DELETED' END,
+        raw_deleted_at = (SELECT MAX(deleted_at) FROM live_capture_raw_files WHERE session_id = s.id)
+        WHERE EXISTS(SELECT 1 FROM live_capture_raw_files WHERE session_id = s.id)`
+	var args []any
+	if len(sessionIDs) > 0 {
+		query += " AND s.id = ?"
+		args = append(args, sessionIDs[0])
 	}
-	if relative == "" {
-		return nil
-	}
-	absolute, err := s.resolveRawPath(relative)
-	if err != nil {
-		return err
-	}
-	info, err := os.Lstat(absolute)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("live analytics raw path is not a regular file")
-	}
-	_, err = s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_size_bytes = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND raw_status = 'WRITING'`, info.Size(), id)
+	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
 }
 

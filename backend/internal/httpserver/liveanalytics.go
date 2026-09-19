@@ -14,6 +14,20 @@ import (
 )
 
 func bindLiveAnalyticsHandlers(cfg config.Config, s *ghttp.Server) {
+	s.BindHandler("/api/v1/live-analytics/sessions/{id}/raw-files", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withLiveAnalyticsStore(r, cfg, func(actor account.User, store liveanalytics.Store) {
+			result, err := store.RawFiles(r.Context(), actor, r.Get("id").Int64())
+			if err != nil {
+				writeLiveAnalyticsError(r, err)
+				return
+			}
+			r.Response.WriteJson(result)
+		})
+	})
+
 	s.BindHandler("/api/v1/live-analytics/sessions/{id}/timeline", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodGet) {
 			return
@@ -34,7 +48,7 @@ func bindLiveAnalyticsHandlers(cfg config.Config, s *ghttp.Server) {
 		}
 		withLiveAnalyticsStore(r, cfg, func(actor account.User, store liveanalytics.Store) {
 			limit := r.Get("limit", 100).Int()
-			page, err := store.Events(r.Context(), actor, r.Get("id").Int64(), r.Get("offset", 0).Int64(), limit)
+			page, err := store.Events(r.Context(), actor, r.Get("id").Int64(), r.Get("offset", 0).Int64(), limit, r.Get("file_id", 0).Int64())
 			if err != nil {
 				writeLiveAnalyticsError(r, err)
 				return

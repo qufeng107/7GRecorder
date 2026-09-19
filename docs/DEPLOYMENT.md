@@ -633,3 +633,7 @@ Playwright fixture scenarios, and a built frontend against a fresh local backend
 workflow has been added. Production frontend installs now use `--frozen-lockfile` as specified above.
 
 OpenLive 发布前，SQLite 备份必须使用在线 backup API（含 WAL 已提交数据），并执行 quick_check；禁止直接 cp 活动数据库。
+
+OpenLive 分片迁移 `00014` 会导入已有会话的原文路径，保留原文件和计数。发布后原文改为约 32 MiB 分片；
+确认会话详情能列出分片且滚动清理只操作已关闭分片。回滚涉及分片清单时使用发布前数据库备份，
+不要只降级二进制使旧版本忽略新分片。常规发布仍不得停止 BililiveRecorder。

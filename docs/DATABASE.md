@@ -1056,3 +1056,12 @@ Migration `00009_upload_source_local_cleanup.sql` introduces these fields and an
 主键 (session_id, minute, cmd)。与会话累计计数在同一个事务中提交增量。
 进程异常退出可能使最后一批尚未入库事件仅存在于 JSONL，INTERRUPTED/缺口用于提示统计不完整。
 原文滚动清理不删除分钟汇总。该表统计收到的事件包，不声称已去重用户互动或观看人数。
+
+### `live_capture_raw_files`
+
+每个 OpenLive 会话的 JSONL 分片清单：`id` PK、`session_id` FK、`relative_path` UNIQUE、
+`status` (`WRITING/AVAILABLE/DELETING/DELETED/MISSING`)、`size_bytes`、`created_at`、`closed_at`、`deleted_at`。
+每个会话最多一个 WRITING 分片。迁移把原 `raw_relative_path` 导入首个分片。
+会话原路径保留为当前/最后分片指针；会话大小为所有分片最后观测大小之和（含已删除历史）。
+会话 raw_status 为 WRITING（有活动分片）、AVAILABLE（仍有可读分片）、DELETED（全部正常清理）或 MISSING。
+部分清理通过分片清单明确展示，AVAILABLE 不保证整场原文完整。分钟计数独立保留。

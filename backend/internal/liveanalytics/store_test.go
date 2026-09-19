@@ -1,6 +1,7 @@
 package liveanalytics
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -223,7 +224,7 @@ func TestRawQuotaDeletesOldestEndedSessionAndProtectsActiveSession(t *testing.T)
 	if oldSession.RawStatus != "DELETED" || oldSession.RawSizeBytes != fileSize || oldSession.RawDeletedAt == "" {
 		t.Fatalf("unexpected cleaned session metadata %#v", oldSession)
 	}
-	if _, err := database.ExecContext(t.Context(), `UPDATE live_capture_sessions SET raw_status = 'DELETING', raw_deleted_at = NULL WHERE id = ?`, oldID); err != nil {
+	if _, err := database.ExecContext(t.Context(), `UPDATE live_capture_raw_files SET status = 'DELETING', deleted_at = NULL WHERE session_id = ?`, oldID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.EnforceRawQuota(t.Context()); err != nil {
@@ -235,5 +236,87 @@ func TestRawQuotaDeletesOldestEndedSessionAndProtectsActiveSession(t *testing.T)
 	}
 	if recovered.RawStatus != "DELETED" || recovered.RawDeletedAt == "" {
 		t.Fatalf("interrupted cleanup claim was not recovered: %#v", recovered)
+	}
+}
+
+func TestActiveSessionClosedChunkCanBeReclaimed(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{DataRoot: root, SQLitePath: filepath.Join(root, "test.db"), TempRoot: filepath.Join(root, "temp")}
+	if err := databasepkg.Migrate(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	database, err := databasepkg.Open(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	admin, err := account.NewStore(database).BootstrapSuperAdmin(t.Context(), "admin", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := profile.NewStore(database).Create(t.Context(), admin, profile.CreateRequest{Name: "test", RoomID: "123", StreamerName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database, cfg)
+	id, err := store.CreateSession(t.Context(), CaptureRequest{RecordingProfileID: p.ID}, StartResult{RoomID: 123})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewRawWriter(root, p.ID, id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	first := writer.RelativePath()
+	if err := store.SetRawPath(t.Context(), id, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Rotate(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRawPath(t.Context(), id, writer.RelativePath()); err != nil {
+		t.Fatal(err)
+	}
+	// Sparse logical size exercises the quota without allocating gigabytes.
+	if err := os.Truncate(filepath.Join(root, first), storagepolicy.LiveAnalyticsRawBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.EnforceRawQuota(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DeletedFiles != 1 {
+		t.Fatalf("closed part not reclaimed: %#v", result)
+	}
+	files, err := store.RawFiles(t.Context(), admin, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files.Items) != 2 || files.Items[0].Status != "WRITING" || files.Items[1].Status != "DELETED" {
+		t.Fatalf("unexpected files: %#v", files)
+	}
+	if _, err := store.Events(t.Context(), admin, id, 0, 10, files.Items[1].ID); !errors.Is(err, ErrEvidenceUnavailable) {
+		t.Fatalf("deleted part error: %v", err)
+	}
+	if _, err := store.Events(t.Context(), admin, id, 0, 10, files.Items[0].ID+100); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign part error: %v", err)
+	}
+	if err := writer.Write(time.Now(), "CONTINUE", json.RawMessage(`{"cmd":"CONTINUE"}`)); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.Events(t.Context(), admin, id, 0, 10, files.Items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].CMD != "CONTINUE" {
+		t.Fatalf("active writer did not continue: %#v", page)
+	}
+	session, err := store.GetSession(t.Context(), admin, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Status != "STARTING" || session.RawStatus != "WRITING" {
+		t.Fatalf("rotation changed live session: %#v", session)
 	}
 }

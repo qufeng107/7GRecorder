@@ -27,7 +27,7 @@ func TestMigrateCleanDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	for _, table := range []string{"song_settings", "song_analysis_runs", "song_analysis_chunks", "song_recognition_matches", "song_artifacts", "media_cache_entries", "storage_reservations", "live_analytics_configs", "live_capture_sessions", "live_capture_minutes"} {
+	for _, table := range []string{"song_settings", "song_analysis_runs", "song_analysis_chunks", "song_recognition_matches", "song_artifacts", "media_cache_entries", "storage_reservations", "live_analytics_configs", "live_capture_sessions", "live_capture_minutes", "live_capture_raw_files"} {
 		var count int
 		if err := database.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -74,5 +74,48 @@ func TestSongsMigrationRefusesToDiscardLegacyRows(t *testing.T) {
 	}
 	if title != "legacy song" {
 		t.Fatalf("legacy row changed: %q", title)
+	}
+}
+
+func TestRawFileMigrationImportsExistingEvidence(t *testing.T) {
+	database, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "existing.db")+"?_foreign_keys=on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.ExecContext(t.Context(), "PRAGMA journal_mode=WAL;"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpToContext(t.Context(), database, ".", 13); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(t.Context(), `
+        INSERT INTO users(id,username,password_hash,role) VALUES(1,'admin','hash','SUPER_ADMIN');
+        INSERT INTO recording_profiles(id,owner_user_id,name,room_id,streamer_name) VALUES(1,1,'test','1','test');
+        INSERT INTO live_capture_sessions(id,recording_profile_id,status,raw_relative_path,raw_status,raw_size_bytes)
+        VALUES(1,1,'ENDED','live-analytics/old.jsonl','AVAILABLE',123),(2,1,'CONNECTED','live-analytics/current.jsonl','WRITING',45);
+    `); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpToContext(t.Context(), database, ".", 14); err != nil {
+		t.Fatal(err)
+	}
+	var count, total int64
+	if err := database.QueryRowContext(t.Context(), `SELECT COUNT(*),SUM(size_bytes) FROM live_capture_raw_files`).Scan(&count, &total); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 || total != 168 {
+		t.Fatalf("evidence metadata lost: count=%d total=%d", count, total)
+	}
+	var status string
+	if err := database.QueryRowContext(t.Context(), `SELECT status FROM live_capture_raw_files WHERE session_id = 2`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "WRITING" {
+		t.Fatalf("active part lost protection: %s", status)
 	}
 }

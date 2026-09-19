@@ -272,6 +272,20 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 					continue
 				}
 				now := time.Now().UTC()
+				if raw.NeedsRotation() {
+					if err := raw.Sync(); err != nil {
+						return err
+					}
+					if err := m.store.refreshRawSize(ctx, sessionID); err != nil {
+						return err
+					}
+					if err := raw.Rotate(now); err != nil {
+						return err
+					}
+					if err := m.store.SetRawPath(ctx, sessionID, raw.RelativePath()); err != nil {
+						return err
+					}
+				}
 				if err := raw.Write(now, envelope.CMD, packet.Body); err != nil {
 					return err
 				}

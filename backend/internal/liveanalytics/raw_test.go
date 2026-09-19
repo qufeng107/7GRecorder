@@ -57,3 +57,41 @@ func TestRawPathsRejectSymlinkedParent(t *testing.T) {
 		t.Fatal("outside directory modified")
 	}
 }
+
+func TestRawRotationKeepsClosedEvidenceAndContinuesWriting(t *testing.T) {
+	root := t.TempDir()
+	writer, err := NewRawWriter(root, 1, 1, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := writer.RelativePath()
+	if err := writer.Write(time.Now(), "FIRST", json.RawMessage(`{"cmd":"FIRST"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Rotate(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	after := writer.RelativePath()
+	if before == after {
+		t.Fatal("rotation reused a file")
+	}
+	if err := writer.Write(time.Now(), "SECOND", json.RawMessage(`{"cmd":"SECOND"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for path, cmd := range map[string]string{before: "FIRST", after: "SECOND"} {
+		data, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var record rawRecord
+		if err := json.Unmarshal(data, &record); err != nil {
+			t.Fatal(err)
+		}
+		if record.CMD != cmd {
+			t.Fatalf("wrong part content %s", data)
+		}
+	}
+}

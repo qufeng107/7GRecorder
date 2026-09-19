@@ -3,6 +3,7 @@ package liveanalytics
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,20 +25,37 @@ type EventPage struct {
 }
 
 // Events reads one bounded page. Cursors are byte positions, never filesystem paths.
-func (s Store) Events(ctx context.Context, actor account.User, id, offset int64, limit int) (EventPage, error) {
-	session, err := s.GetSession(ctx, actor, id)
+func (s Store) Events(ctx context.Context, actor account.User, id, offset int64, limit int, fileIDs ...int64) (EventPage, error) {
+	_, err := s.GetSession(ctx, actor, id)
 	if err != nil {
 		return EventPage{}, err
 	}
 	if offset < 0 || limit < 1 || limit > 100 {
 		return EventPage{}, ErrValidation
 	}
-	if session.RawStatus != "WRITING" && session.RawStatus != "AVAILABLE" {
-		return EventPage{}, ErrEvidenceUnavailable
+	fileID := int64(0)
+	if len(fileIDs) > 0 {
+		fileID = fileIDs[0]
 	}
-	var relative string
-	if err := s.db.QueryRowContext(ctx, "SELECT raw_relative_path FROM live_capture_sessions WHERE id = ?", id).Scan(&relative); err != nil {
+	if fileID < 0 {
+		return EventPage{}, ErrValidation
+	}
+	var relative, rawStatus string
+	query := `SELECT relative_path,status FROM live_capture_raw_files WHERE session_id = ?`
+	args := []any{id}
+	if fileID > 0 {
+		query += " AND id = ?"
+		args = append(args, fileID)
+	}
+	query += " ORDER BY id DESC LIMIT 1"
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&relative, &rawStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return EventPage{}, ErrNotFound
+		}
 		return EventPage{}, err
+	}
+	if rawStatus != "WRITING" && rawStatus != "AVAILABLE" {
+		return EventPage{}, ErrEvidenceUnavailable
 	}
 	if _, err := s.resolveRawPath(relative); err != nil {
 		return EventPage{}, err
@@ -79,7 +97,7 @@ func (s Store) Events(ctx context.Context, actor account.User, id, offset int64,
 		}
 		line, err := reader.ReadSlice('\n')
 		if errors.Is(err, io.EOF) {
-			if len(line) > 0 && session.RawStatus != "WRITING" {
+			if len(line) > 0 && rawStatus != "WRITING" {
 				return EventPage{}, fmt.Errorf("incomplete closed evidence record")
 			}
 			break

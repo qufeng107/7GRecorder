@@ -788,3 +788,7 @@ This explicit authenticated evidence endpoint returns retained platform event bo
 `GET /api/v1/live-analytics/sessions/{id}/timeline` 返回 `items[{minute,cmd,event_count}]`，
 按 UTC 分钟、CMD 排序，受 Profile ownership 保护。时间使用本地接收时间，计数是观测到的消息包，
 不等于消息去重后互动次数。返回最新 1440 分钟；响应 `truncated` 提示更早数据省略。
+
+`GET /api/v1/live-analytics/sessions/{id}/raw-files` 返回 `{items:[{id,status,size_bytes,created_at,closed_at,deleted_at}]}`，
+按 id 倒序，最近 500 个分片，附 `truncated`。不暴露磁盘路径。events 接口新增可选 `file_id`；
+省略时读取当前/最后分片，offset 只在所选分片内有效。跨会话 file_id 返回 404，清理分片返回 410。

@@ -211,7 +211,7 @@ song processing FAILED
 - 房间号与 Profile 不一致时拒绝采集并调用 end；
 - 原始 writer 保存已知与未知 CMD，路径不能逃逸 `live-analytics` root；
 - 会话计数、最后事件时间、未知事件和缺口批量落库；重复启动不能为同一 Profile 创建两个活动会话；
-- 原始数据超过 2 GiB 子配额时只按时间删除已结束会话；活动会话受保护，删除后大小与 metadata 仍可解释；
+- 原始数据超过 2 GiB 子配额时只按时间删除已关闭分片；当前写入分片受保护，删除后大小与 metadata 仍可解释；
 - 重启把遗留活动会话标为 `INTERRUPTED`，禁用/正常停止形成 `ENDED`；
 - 采集失败不得创建或修改 Recording、Publication、COS、Song 或 Job 状态；
 - API 覆盖 SUPER_ADMIN 写入、Manager ownership 读取和凭证明文不回显。
@@ -492,3 +492,6 @@ OpenLive evidence browser regression: ownership before filesystem access, cursor
 bounded record reads, deleted evidence 410, malformed/partial JSONL reported without exposing host paths.
 
 Rolling cleanup regression cases include failed/pending/disabled/absent upload modules, queued versus running jobs, recording/file job references, protected/writing inputs, and review gates. Reclaimed upload inputs must report `SOURCE_MISSING` before invoking external upload adapters.
+
+原文分片测试：同一会话轮换保持事件顺序；活动会话的已关闭分片可清理，当前分片不删除；
+原文件迁移、清理中断恢复、分片越权/跨会话读取、前端切换分片时重置分页游标。

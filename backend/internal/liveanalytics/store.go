@@ -283,9 +283,22 @@ func (s Store) CreateSession(ctx context.Context, req CaptureRequest, start Star
 }
 
 func (s Store) SetRawPath(ctx context.Context, id int64, path string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_relative_path = ?, raw_status = 'WRITING',
-		updated_at = CURRENT_TIMESTAMP WHERE id = ?`, path, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE live_capture_raw_files SET status = 'AVAILABLE', closed_at = CURRENT_TIMESTAMP
+        WHERE session_id = ? AND status = 'WRITING'`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO live_capture_raw_files(session_id,relative_path,status) VALUES(?,?,'WRITING')`, id, path); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_relative_path = ?, raw_status = 'WRITING', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, path, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s Store) MarkConnected(ctx context.Context, id int64) error {
