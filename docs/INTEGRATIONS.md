@@ -28,7 +28,7 @@ Adapter 负责把外部世界映射成 7GRecorder 内部稳定语义。
 分段
 ```
 
-OpenLive 上线后，BililiveRecorder 的新弹幕 XML 写入固定关闭。历史 XML 文件继续保留索引；不删除旧资产。
+OpenLive 上线后，BililiveRecorder 的新弹幕 XML 写入固定关闭。历史 XML 文件继续保留索引；不删除旧资产。新 reconcile 不创建 XML 上传任务，发布前已入队任务继续兼容处理。
 
 7GRecorder 不重写这些能力。
 

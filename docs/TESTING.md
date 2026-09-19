@@ -498,3 +498,5 @@ Rolling cleanup regression cases include failed/pending/disabled/absent upload m
 
 历史录播关联采集会话必须先按场次时间筛选，再限量；不同 Profile 的源不能用于筛选。低流量停止发言后，
 已缓冲的分钟计数应在下次 WebSocket 心跳响应时落库，不等待下一条弹幕。
+
+旧 XML 迁移兼容：reconcile 不创建新 XML 上传任务；发布前已入队的 `UPLOAD_COS_RECORDING_FILE` 任务仍需完成并保留远端状态。

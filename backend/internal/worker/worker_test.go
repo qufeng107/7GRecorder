@@ -794,7 +794,7 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	}
 }
 
-func TestRunOnceUploadsCOSRecordingFile(t *testing.T) {
+func TestRunOnceCompletesLegacyCOSRecordingFileJob(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDBWithConfig(t, ctx)
 	actor := bootstrapTestAdmin(t, ctx, database)
@@ -858,8 +858,18 @@ func TestRunOnceUploadsCOSRecordingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile returned error: %v", err)
 	}
-	if result.COSFileObjectsCreated != 1 || result.COSFileJobsCreated != 1 {
+	if result.COSFileObjectsCreated != 0 || result.COSFileJobsCreated != 0 {
 		t.Fatalf("unexpected reconcile result: %#v", result)
+	}
+
+	// Model an already queued pre-OpenLive job. New reconciliation must not create XML jobs.
+	if _, err := database.ExecContext(ctx, `
+        INSERT INTO cos_objects(id,cos_storage_profile_id,recording_profile_id,recording_id,recording_file_id,object_key,size_bytes,status)
+        VALUES(1,1,?,1,1,'7grecorder/test/raw/recordings/1741048619-7G/record-1741048619-20260905-224258-164-title.xml',7,'PENDING');
+        INSERT INTO jobs(recording_profile_id,recording_id,recording_file_id,cos_object_id,type,resource_class,business_key,payload_json,status,priority,max_attempts)
+        VALUES(?,1,1,1,'UPLOAD_COS_RECORDING_FILE','NETWORK','recording-file:1:cos:1','{"cos_object_id":1,"recording_file_id":1}','PENDING',90,5);
+    `, created.ID, created.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	cosUploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "etag"}}
