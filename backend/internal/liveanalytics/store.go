@@ -133,16 +133,33 @@ func (s Store) UpsertConfig(ctx context.Context, actor account.User, profileID i
 	return s.GetConfig(ctx, actor, profileID)
 }
 
-func (s Store) ListSessions(ctx context.Context, actor account.User, profileID int64) ([]Session, error) {
+func (s Store) ListSessions(ctx context.Context, actor account.User, profileID int64, sourceIDs ...int64) ([]Session, error) {
 	if err := s.ensureProfileVisible(ctx, actor, profileID); err != nil {
 		return nil, err
+	}
+	where := ""
+	args := []any{profileID}
+	if len(sourceIDs) > 0 && sourceIDs[0] != 0 {
+		if sourceIDs[0] < 0 {
+			return nil, ErrValidation
+		}
+		var started, ended string
+		err := s.db.QueryRowContext(ctx, `SELECT started_at,completed_at FROM upload_sources WHERE id = ? AND recording_profile_id = ?`, sourceIDs[0], profileID).Scan(&started, &ended)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		where = " AND julianday(started_at) <= julianday(?) AND julianday(COALESCE(ended_at,CURRENT_TIMESTAMP)) >= julianday(?)"
+		args = append(args, ended, started)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, recording_profile_id, source, status, COALESCE(room_id, ''),
 		COALESCE(anchor_uid, 0), COALESCE(anchor_open_id, ''), COALESCE(anchor_union_id, ''), COALESCE(anchor_name, ''), COALESCE(anchor_face_url, ''),
 		raw_status, raw_size_bytes, COALESCE(raw_deleted_at, ''), started_at, COALESCE(connected_at, ''),
 		COALESCE(ended_at, ''), COALESCE(last_event_at, ''), COALESCE(last_heartbeat_at, ''), event_count,
 		unknown_event_count, gap_count, event_counts_json, COALESCE(last_error, '')
-		FROM live_capture_sessions WHERE recording_profile_id = ? ORDER BY started_at DESC, id DESC LIMIT 100`, profileID)
+		FROM live_capture_sessions WHERE recording_profile_id = ?`+where+` ORDER BY started_at DESC, id DESC LIMIT 100`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list live capture sessions: %w", err)
 	}

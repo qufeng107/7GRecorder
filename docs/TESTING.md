@@ -495,3 +495,6 @@ Rolling cleanup regression cases include failed/pending/disabled/absent upload m
 
 原文分片测试：同一会话轮换保持事件顺序；活动会话的已关闭分片可清理，当前分片不删除；
 原文件迁移、清理中断恢复、分片越权/跨会话读取、前端切换分片时重置分页游标。
+
+历史录播关联采集会话必须先按场次时间筛选，再限量；不同 Profile 的源不能用于筛选。低流量停止发言后，
+已缓冲的分钟计数应在下次 WebSocket 心跳响应时落库，不等待下一条弹幕。

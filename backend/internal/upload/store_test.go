@@ -396,6 +396,20 @@ func TestCOSDownloadURLRequestRequiresAvailableOutputObject(t *testing.T) {
 	if _, err := store.COSDownloadURLRequest(ctx, actor, 1, 1); !errors.Is(err, ErrNotReady) {
 		t.Fatalf("expected ErrNotReady before upload, got %v", err)
 	}
+
+	for _, status := range []string{"DELETING", "DELETED", "FAILED"} {
+		if _, err := database.ExecContext(ctx, "UPDATE upload_sources SET local_cleanup_status = ? WHERE id = 1", status); err != nil {
+			t.Fatal(err)
+		}
+		_, err := store.COSUploadRequest(ctx, COSJobPayload{COSObjectID: 1, UploadSourceID: 1})
+		var classified interface{ ErrorClass() string }
+		if !errors.As(err, &classified) || classified.ErrorClass() != "SOURCE_MISSING" {
+			t.Fatalf("COS cleanup=%s error=%v", status, err)
+		}
+	}
+	if _, err := database.ExecContext(ctx, "UPDATE upload_sources SET local_cleanup_status = 'AVAILABLE' WHERE id = 1"); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.MarkCOSObjectUploaded(ctx, 1, COSUploadResult{ETag: "etag"}); err != nil {
 		t.Fatalf("MarkCOSObjectUploaded returned error: %v", err)
 	}

@@ -98,12 +98,12 @@ func bindLiveAnalyticsHandlers(cfg config.Config, s *ghttp.Server) {
 			return
 		}
 		withLiveAnalyticsStore(r, cfg, func(actor account.User, store liveanalytics.Store) {
-			items, err := store.ListSessions(r.Context(), actor, profileID)
+			items, err := store.ListSessions(r.Context(), actor, profileID, r.Get("upload_source_id", 0).Int64())
 			if err != nil {
 				writeLiveAnalyticsError(r, err)
 				return
 			}
-			r.Response.WriteJson(g.Map{"items": items, "page": 1, "page_size": len(items), "total": len(items)})
+			r.Response.WriteJson(g.Map{"items": items, "page": 1, "page_size": len(items), "total": len(items), "truncated": len(items) == 100})
 		})
 	})
 

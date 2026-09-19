@@ -135,6 +135,29 @@ func TestConfigUsesEncryptedOpenLiveCredentialAndOwnership(t *testing.T) {
 	if session.Status != "INTERRUPTED" || session.EventCount != 3 || session.EventCounts["LIVE_OPEN_PLATFORM_DM"] != 3 || session.GapCount != 3 || session.LastEventAt == "" {
 		t.Fatalf("unexpected interrupted capture session %#v", session)
 	}
+	t.Run("historical source is matched before recent limit", func(t *testing.T) {
+		if _, err := database.ExecContext(t.Context(), `
+            UPDATE live_capture_sessions SET started_at='2026-09-01 00:00:00',ended_at='2026-09-01 01:00:00' WHERE id = ?;
+            INSERT INTO upload_sources(id,recording_profile_id,source_key,source_room_id,streamer_name_snapshot,started_at,completed_at,status)
+            VALUES(1,?,'old-source','1741048619','test','2026-09-01T00:00:00Z','2026-09-01T01:00:00Z','READY_TO_UPLOAD');
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x < 101)
+            INSERT INTO live_capture_sessions(recording_profile_id,status,started_at,ended_at)
+            SELECT ?,'ENDED','2026-09-18 00:00:00','2026-09-18 01:00:00' FROM n;
+        `, sessionID, createdProfile.ID, createdProfile.ID); err != nil {
+			t.Fatal(err)
+		}
+		items, err := store.ListSessions(t.Context(), admin, createdProfile.ID, 1)
+		if err != nil || len(items) != 1 || items[0].ID != sessionID {
+			t.Fatalf("historical match lost: %#v %v", items, err)
+		}
+		if _, err := store.ListSessions(t.Context(), manager, createdProfile.ID, 1); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("ownership error: %v", err)
+		}
+		if _, err := store.ListSessions(t.Context(), admin, createdProfile.ID, 999); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("unknown source error: %v", err)
+		}
+	})
+
 }
 
 func TestRawQuotaDeletesOldestEndedSessionAndProtectsActiveSession(t *testing.T) {

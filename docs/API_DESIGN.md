@@ -795,3 +795,6 @@ This explicit authenticated evidence endpoint returns retained platform event bo
 
 本地存储状态新增 `derived_local_bytes`（`upload-sources/`）与 `songs_local_bytes`（`songs/`），
 `managed_local_bytes` 为已索引原视频、派生文件、歌曲文件和 OpenLive 原文占用之和；不重复加总派生文件的数据库索引。
+
+采集会话列表支持可选 `upload_source_id`：先校验源属于指定的可见 Profile，再按源的起止时间在服务端筛选重叠会话，
+最后应用最近 100 条上限，避免历史场次被近期采集挤出列表。响应 `truncated` 在达到 100 条时保守标示可能截断。

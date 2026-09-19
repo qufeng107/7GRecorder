@@ -252,6 +252,13 @@ func (m *CollectorManager) captureOnce(ctx context.Context, req CaptureRequest) 
 		}
 		for _, packet := range packets {
 			switch packet.Operation {
+			case OpHeartbeatReply:
+				if len(minutes) > 0 {
+					if err := flush(ctx); err != nil {
+						return err
+					}
+					lastStatsWrite = time.Now().UTC()
+				}
 			case OpAuthReply:
 				var reply struct {
 					Code int `json:"code"`

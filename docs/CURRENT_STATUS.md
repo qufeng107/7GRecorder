@@ -11,6 +11,18 @@ Recommended first-read order:
 2. `docs/AI_DEVELOPMENT_WORKFLOW.md`
 3. `docs/ARCHITECTURE.md`, `docs/REQUIREMENTS.md`, and the task-specific docs listed in `AGENTS.md`
 
+## Local analytics release candidate (not deployed)
+
+The capture/storage/basic-trend phase is ready for staged deployment testing after the normal CI gate. Local changes
+include encrypted OpenLive configuration, raw known/unknown event capture, 32 MiB file rotation under a 2 GiB rolling
+target, minute received-message totals, evidence browsing, and historical recording association. Total storage counts
+video, derived upload files, song files and analytics; cleanup does not depend on remote delivery success.
+
+Only local commits are authorized at present: no push or deployment. Do not treat received-message counts as unique
+viewers, precise online population, gift revenue or settled income. Real event-family acceptance (especially gifts,
+SC and guards), deduplication and semantic analysis remain the next phase. Full backend environment testing was not run,
+per operator request; focused package tests and frontend local checks were used.
+
 ## Production
 
 - Current deployed production commit: `bbe19a349f10bfde5f4cf9695c3cf565126eca26`.
@@ -256,3 +268,11 @@ Raw evidence now rotates locally at approximately 32 MiB without breaking the Op
 Chunk rotation validation: frontend lint/typecheck/build and browser regression passed, including resetting the cursor on file selection. Focused persistence tests cover active-session closed-chunk reclamation and continued writes, and migration 14 preserves legacy evidence metadata. No deployment performed.
 
 Managed storage accounting now includes indexed video, `upload-sources/`, `songs/` and OpenLive raw evidence. System UI shows these components separately. Focused recording/upload/analytics/db/HTTP tests and frontend lint/typecheck/build plus 22 component tests passed for this correction.
+
+Historical source association now filters by source time on the server before applying the 100-connection limit. Buffered
+minute counts are also flushed on heartbeat replies, avoiding an indefinitely stale trailing batch in quiet rooms.
+
+Final local gate: frontend lint/typecheck/build, 22 component tests, and all 9 console/analytics Chromium tests passed.
+Focused Go package checks passed for recording, upload, liveanalytics, db and HTTP handlers; COS/Bilibili missing-input
+classification is covered. Release script syntax and git whitespace checks passed. No full backend environment,
+live-platform traffic, push or deployment was started in this batch.
