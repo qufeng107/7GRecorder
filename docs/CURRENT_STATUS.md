@@ -18,7 +18,7 @@ include encrypted OpenLive configuration, raw known/unknown event capture, 32 Mi
 target, minute received-message totals, evidence browsing, and historical recording association. Total storage counts
 video, derived upload files, song files and analytics; cleanup does not depend on remote delivery success.
 
-Only local commits are authorized at present: no push or deployment. Do not treat received-message counts as unique
+The operator authorized deployment testing on 2026-09-19; proceed through dev CI and the main release gate. Do not treat received-message counts as unique
 viewers, precise online population, gift revenue or settled income. Real event-family acceptance (especially gifts,
 SC and guards), deduplication and semantic analysis remain the next phase. Full backend environment testing was not run,
 per operator request; focused package tests and frontend local checks were used.
@@ -276,3 +276,5 @@ Final local gate: frontend lint/typecheck/build, 22 component tests, and all 9 c
 Focused Go package checks passed for recording, upload, liveanalytics, db and HTTP handlers; COS/Bilibili missing-input
 classification is covered. Release script syntax and git whitespace checks passed. No full backend environment,
 live-platform traffic, push or deployment was started in this batch.
+
+Release preflight replaced Root.MkdirAll with Go 1.24-compatible Root.Mkdir traversal, preserving root-confined file creation. The pinned Go version remains unchanged.

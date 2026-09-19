@@ -3,9 +3,11 @@ package liveanalytics
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,8 +58,12 @@ func newRawPart(dataRoot string, profileID, sessionID int64, now time.Time, part
 		return nil, err
 	}
 	defer safeRoot.Close()
-	if err := safeRoot.MkdirAll(filepath.Dir(filepath.FromSlash(relative)), 0o750); err != nil {
-		return nil, fmt.Errorf("create live analytics directory: %w", err)
+	directory := ""
+	for _, part := range strings.Split(filepath.Dir(filepath.FromSlash(relative)), string(filepath.Separator)) {
+		directory = filepath.Join(directory, part)
+		if err := safeRoot.Mkdir(directory, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create live analytics directory: %w", err)
+		}
 	}
 	file, err := safeRoot.OpenFile(filepath.FromSlash(relative), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
