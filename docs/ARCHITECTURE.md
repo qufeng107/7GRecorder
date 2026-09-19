@@ -326,6 +326,10 @@ Profile 维护至多一个长连接采集循环。HTTP 项目心跳和 WebSocket
 凭证解密、场次状态和计数。Raw Writer 只允许写入 `DATA_ROOT/live-analytics/` 下的相对路径。所有可解码 CMD
 完整保存，分析器以后从原始文件幂等重算，不依赖录像、投稿或 COS 成功。
 
+Raw Storage Reconciler 每分钟核对 `DATA_ROOT/live-analytics/`。该目录计入全局 managed local usage，并具有固定
+2 GiB 子上限；超过子上限时只删除最旧的已结束会话 JSONL，绝不删除活动会话文件。删除后保留 Session 汇总、
+事件类型计数和采集缺口，并明确标记原始证据已删除。
+
 BililiveRecorder XML 不再作为新运营分析的数据源。Recorder 同步固定关闭其弹幕写入；历史 XML 文件保持可见，
 但新文件不再进入 COS raw archive reconciliation。切换发布必须先具备至少一个可工作的 OpenLive 配置。
 

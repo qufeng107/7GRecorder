@@ -234,7 +234,10 @@ live samples. Local focused backend tests and migration smoke passed. Frontend l
 build, the existing 24-browser-test suite, and 8 focused console browser tests passed. No production deployment was
 performed.
 
-Before production rollout, include `live-analytics/` raw JSONL in managed local-storage accounting or establish a
-separate retention ceiling. The current collector preserves evidence indefinitely and therefore must not be enabled
-as an unbounded production writer. Deployment also requires saving and validating the production Profile's OpenLive
-credential before relying on the migration that disables new BililiveRecorder XML capture.
+`live-analytics/` raw JSONL is now included in managed local-storage accounting with a fixed 2 GiB rolling subquota.
+The collector checks it every minute, protects active-session files, and deletes the oldest ended-session evidence
+until usage returns below the cap. Session totals, the last observed raw size, deletion timestamp, event counts, and
+capture gaps remain in SQLite. The System page shows raw/subquota and combined managed usage; session/detail pages
+show raw evidence state. Focused backend tests, backend build, frontend lint/typecheck, 22 component tests, frontend
+build, and 26 mock browser tests pass. Deployment still requires saving and validating the production Profile's
+OpenLive credential before relying on the migration that disables new BililiveRecorder XML capture.

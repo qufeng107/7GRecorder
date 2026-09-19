@@ -55,6 +55,9 @@ type Session struct {
 	AnchorUnionID      string         `json:"anchor_union_id,omitempty"`
 	AnchorName         string         `json:"anchor_name,omitempty"`
 	AnchorFaceURL      string         `json:"anchor_face_url,omitempty"`
+	RawStatus          string         `json:"raw_status"`
+	RawSizeBytes       int64          `json:"raw_size_bytes"`
+	RawDeletedAt       string         `json:"raw_deleted_at,omitempty"`
 	StartedAt          string         `json:"started_at"`
 	ConnectedAt        string         `json:"connected_at,omitempty"`
 	EndedAt            string         `json:"ended_at,omitempty"`
@@ -135,7 +138,8 @@ func (s Store) ListSessions(ctx context.Context, actor account.User, profileID i
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, recording_profile_id, source, status, COALESCE(room_id, ''),
-		COALESCE(anchor_uid, 0), COALESCE(anchor_open_id, ''), COALESCE(anchor_union_id, ''), COALESCE(anchor_name, ''), COALESCE(anchor_face_url, ''), started_at, COALESCE(connected_at, ''),
+		COALESCE(anchor_uid, 0), COALESCE(anchor_open_id, ''), COALESCE(anchor_union_id, ''), COALESCE(anchor_name, ''), COALESCE(anchor_face_url, ''),
+		raw_status, raw_size_bytes, COALESCE(raw_deleted_at, ''), started_at, COALESCE(connected_at, ''),
 		COALESCE(ended_at, ''), COALESCE(last_event_at, ''), COALESCE(last_heartbeat_at, ''), event_count,
 		unknown_event_count, gap_count, event_counts_json, COALESCE(last_error, '')
 		FROM live_capture_sessions WHERE recording_profile_id = ? ORDER BY started_at DESC, id DESC LIMIT 100`, profileID)
@@ -156,7 +160,8 @@ func (s Store) ListSessions(ctx context.Context, actor account.User, profileID i
 
 func (s Store) GetSession(ctx context.Context, actor account.User, id int64) (Session, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id, recording_profile_id, source, status, COALESCE(room_id, ''),
-		COALESCE(anchor_uid, 0), COALESCE(anchor_open_id, ''), COALESCE(anchor_union_id, ''), COALESCE(anchor_name, ''), COALESCE(anchor_face_url, ''), started_at, COALESCE(connected_at, ''),
+		COALESCE(anchor_uid, 0), COALESCE(anchor_open_id, ''), COALESCE(anchor_union_id, ''), COALESCE(anchor_name, ''), COALESCE(anchor_face_url, ''),
+		raw_status, raw_size_bytes, COALESCE(raw_deleted_at, ''), started_at, COALESCE(connected_at, ''),
 		COALESCE(ended_at, ''), COALESCE(last_event_at, ''), COALESCE(last_heartbeat_at, ''), event_count,
 		unknown_event_count, gap_count, event_counts_json, COALESCE(last_error, '')
 		FROM live_capture_sessions WHERE id = ?`, id)
@@ -179,7 +184,8 @@ func scanSession(row scanner) (Session, error) {
 	var item Session
 	var counts string
 	if err := row.Scan(&item.ID, &item.RecordingProfileID, &item.Source, &item.Status, &item.RoomID,
-		&item.AnchorUID, &item.AnchorOpenID, &item.AnchorUnionID, &item.AnchorName, &item.AnchorFaceURL, &item.StartedAt, &item.ConnectedAt, &item.EndedAt,
+		&item.AnchorUID, &item.AnchorOpenID, &item.AnchorUnionID, &item.AnchorName, &item.AnchorFaceURL,
+		&item.RawStatus, &item.RawSizeBytes, &item.RawDeletedAt, &item.StartedAt, &item.ConnectedAt, &item.EndedAt,
 		&item.LastEventAt, &item.LastHeartbeatAt, &item.EventCount, &item.UnknownEventCount,
 		&item.GapCount, &counts, &item.LastError); err != nil {
 		return Session{}, err
@@ -231,9 +237,33 @@ func (s Store) EnabledRequests(ctx context.Context) ([]CaptureRequest, error) {
 
 func (s Store) InterruptActive(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET status = 'INTERRUPTED', ended_at = CURRENT_TIMESTAMP,
-		gap_count = gap_count + 1, last_error = 'collector process stopped before closing the session', updated_at = CURRENT_TIMESTAMP
+		gap_count = gap_count + 1, raw_status = CASE WHEN raw_relative_path IS NULL THEN 'PENDING' ELSE 'AVAILABLE' END,
+		last_error = 'collector process stopped before closing the session', updated_at = CURRENT_TIMESTAMP
 		WHERE status IN ('STARTING', 'CONNECTED', 'RECONNECTING')`)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM live_capture_sessions
+		WHERE status = 'INTERRUPTED' AND raw_status = 'AVAILABLE' AND raw_relative_path IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		_ = s.refreshRawMetadata(ctx, id)
+	}
+	return nil
 }
 
 func (s Store) CreateSession(ctx context.Context, req CaptureRequest, start StartResult) (int64, error) {
@@ -253,7 +283,8 @@ func (s Store) CreateSession(ctx context.Context, req CaptureRequest, start Star
 }
 
 func (s Store) SetRawPath(ctx context.Context, id int64, path string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_relative_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, path, id)
+	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET raw_relative_path = ?, raw_status = 'WRITING',
+		updated_at = CURRENT_TIMESTAMP WHERE id = ?`, path, id)
 	return err
 }
 
@@ -266,7 +297,11 @@ func (s Store) MarkConnected(ctx context.Context, id int64) error {
 func (s Store) MarkHeartbeat(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET last_heartbeat_at = CURRENT_TIMESTAMP,
 		updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id)
-	return err
+	if err != nil {
+		return err
+	}
+	_ = s.refreshRawSize(ctx, id)
+	return nil
 }
 
 func (s Store) UpdateStats(ctx context.Context, id int64, counts map[string]int, total, unknown, gaps int64, lastEvent time.Time) error {
@@ -285,7 +320,11 @@ func (s Store) UpdateStats(ctx context.Context, id int64, counts map[string]int,
 func (s Store) FinishSession(ctx context.Context, id int64, status, message string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE live_capture_sessions SET status = ?, ended_at = CURRENT_TIMESTAMP,
 		last_error = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP WHERE id = ?`, status, message, id)
-	return err
+	if err != nil {
+		return err
+	}
+	_ = s.refreshRawMetadata(ctx, id)
+	return nil
 }
 
 func (s Store) RecordConfigError(ctx context.Context, profileID int64, message string) {

@@ -19,6 +19,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/media"
+	"github.com/7grecorder/7grecorder/backend/internal/storagepolicy"
 )
 
 var (
@@ -254,6 +255,10 @@ type LocalStorageStatus struct {
 	DiskAvailableBytes  int64                `json:"disk_available_bytes"`
 	IndexedVideoBytes   int64                `json:"indexed_video_bytes"`
 	IndexedVideoFiles   int64                `json:"indexed_video_files"`
+	LiveAnalyticsBytes  int64                `json:"live_analytics_bytes"`
+	LiveAnalyticsFiles  int64                `json:"live_analytics_files"`
+	LiveAnalyticsMax    int64                `json:"live_analytics_max_bytes"`
+	ManagedLocalBytes   int64                `json:"managed_local_bytes"`
 	ProtectedRecordings int64                `json:"protected_recordings"`
 	CompletedRecordings int64                `json:"completed_recordings"`
 	SettingsConfigured  bool                 `json:"settings_configured"`
@@ -2887,6 +2892,13 @@ func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (Loca
 	`).Scan(&status.IndexedVideoBytes, &status.IndexedVideoFiles); err != nil {
 		return LocalStorageStatus{}, fmt.Errorf("summarize recording files: %w", err)
 	}
+	analyticsBytes, analyticsFiles, analyticsErr := storagepolicy.DirectoryUsage(filepath.Join(s.cfg.DataRoot, "live-analytics"))
+	if analyticsErr != nil {
+		return LocalStorageStatus{}, fmt.Errorf("summarize live analytics files: %w", analyticsErr)
+	}
+	status.LiveAnalyticsBytes, status.LiveAnalyticsFiles = analyticsBytes, analyticsFiles
+	status.LiveAnalyticsMax = storagepolicy.LiveAnalyticsRawBytes
+	status.ManagedLocalBytes = status.IndexedVideoBytes + status.LiveAnalyticsBytes
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM recordings
@@ -3331,9 +3343,10 @@ func validateLocalStorageSettings(req LocalStorageSettingsUpsert) error {
 }
 
 func storagePolicyPreview(status LocalStorageStatus, settings LocalStorageSettings) (string, int64, int64) {
-	targetVideoBytes := int64(float64(settings.MaxRecordingBytes) * settings.CleanupTargetRatio)
-	recordingNeed := status.IndexedVideoBytes - targetVideoBytes
-	if status.IndexedVideoBytes <= settings.MaxRecordingBytes {
+	targetManagedBytes := int64(float64(settings.MaxRecordingBytes) * settings.CleanupTargetRatio)
+	targetVideoBytes := maxInt64(targetManagedBytes-status.LiveAnalyticsBytes, 0)
+	recordingNeed := status.ManagedLocalBytes - targetManagedBytes
+	if status.ManagedLocalBytes <= settings.MaxRecordingBytes {
 		recordingNeed = 0
 	}
 	freeNeed := settings.MinSystemFreeBytes - status.DiskAvailableBytes

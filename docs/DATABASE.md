@@ -969,6 +969,9 @@ source TEXT = BILIBILI_OPEN_LIVE
 status STARTING | CONNECTED | RECONNECTING | ENDED | FAILED | INTERRUPTED
 room_id / anchor_uid / anchor_open_id / anchor_union_id / anchor_name / anchor_face_url snapshot
 raw_relative_path TEXT nullable UNIQUE
+raw_status PENDING | WRITING | AVAILABLE | DELETING | DELETED | MISSING
+raw_size_bytes INTEGER NOT NULL DEFAULT 0
+raw_deleted_at DATETIME nullable
 started_at / connected_at / ended_at / last_event_at / last_heartbeat_at
 event_count / unknown_event_count / gap_count
 event_counts_json
@@ -979,6 +982,10 @@ created_at / updated_at
 原始 JSONL 文件属于会话的权威采集证据。每行保存本地接收时间、CMD 和平台原始 JSON；未知 CMD 也保存。
 进程启动时把遗留的活动状态改为 `INTERRUPTED` 并增加缺口计数。每个 Profile 只允许一个
 `STARTING/CONNECTED/RECONNECTING` 会话的部分唯一索引。
+
+`raw_size_bytes` 保留最后一次观测大小；滚动清理后不归零，以便解释历史数据量。`raw_status=DELETED` 表示
+因 2 GiB OpenLive 子配额正常清理，`MISSING` 表示数据库仍引用原文但磁盘文件意外缺失。
+`DELETING` 是文件删除前的持久化 claim；进程中断后根据文件是否仍存在恢复为 `AVAILABLE` 或 `DELETED`。
 # 2026-09-11 upload review gate
 
 - `recordings.upload_review_status` stores the early operator decision for an active or recently completed recording. Values: `NONE`, `REQUIRED`.

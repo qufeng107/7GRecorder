@@ -265,7 +265,7 @@ export function StoragePanel(props: {
         />
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <Metric
           label={props.labels.indexedVideos}
           value={
@@ -277,6 +277,14 @@ export function StoragePanel(props: {
         <Metric
           label={props.labels.indexedSize}
           value={formatBytes(props.status?.indexed_video_bytes ?? 0)}
+        />
+        <Metric
+          label={props.labels.liveAnalyticsSize}
+          value={`${formatBytes(props.status?.live_analytics_bytes ?? 0)} / ${formatBytes(props.status?.live_analytics_max_bytes ?? 0)}`}
+        />
+        <Metric
+          label={props.labels.managedSize}
+          value={formatBytes(props.status?.managed_local_bytes ?? 0)}
         />
         <Metric
           label={props.labels.diskAvailable}

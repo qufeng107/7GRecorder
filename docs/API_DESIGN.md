@@ -454,7 +454,10 @@ GET /api/v1/live-analytics/sessions/{id}
 WebSocket auth body、原始宿主机路径或原始事件正文。
 
 Session DTO 返回状态、房间/主播快照、开始/连接/结束/最后事件/心跳时间、总事件数、按 CMD 计数、未知事件数、
-缺口数和最近错误。后台使用 polling 展示采集健康度。
+缺口数、原始证据状态/大小/清理时间和最近错误。后台使用 polling 展示采集健康度。
+
+`GET /api/v1/storage/local` 的 managed local usage 包含 OpenLive JSONL，并单独返回其当前文件数、占用与固定
+2 GiB 子配额；宿主机原始路径仍不返回。
 
 ### Jobs
 

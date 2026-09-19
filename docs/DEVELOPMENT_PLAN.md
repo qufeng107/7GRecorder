@@ -305,6 +305,7 @@ V1 一次只分析一个 COS output，不自动扫描 Recording，不跨 output 
 1. OpenLive 签名客户端、项目生命周期和 Proto/WebSocket parser；
 2. Profile 级加密配置、采集会话 schema、受控 JSONL 原始事件 writer；
 3. Backend 内独立 Collector Manager，保存所有 CMD、重要 CMD 计数、连接状态与采集缺口；
+3.1. JSONL 纳入 managed local usage，以固定 2 GiB 子配额滚动清理已结束会话；
 4. 配置/会话 Admin API 与最小采集状态页面；
 5. 使用获授权测试房间保存脱敏事件 fixture，验证开关播、弹幕、进场、点赞、礼物、SC、上舰；
 6. 基于真实样本冻结口径，再实现单场分钟曲线、互动人数、热点和礼物分析。

@@ -29,6 +29,9 @@ CREATE TABLE live_capture_sessions (
     anchor_name TEXT,
     anchor_face_url TEXT,
     raw_relative_path TEXT UNIQUE,
+    raw_status TEXT NOT NULL DEFAULT 'PENDING',
+    raw_size_bytes INTEGER NOT NULL DEFAULT 0,
+    raw_deleted_at DATETIME,
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     connected_at DATETIME,
     ended_at DATETIME,
@@ -44,6 +47,8 @@ CREATE TABLE live_capture_sessions (
     FOREIGN KEY (recording_profile_id) REFERENCES recording_profiles(id) ON DELETE RESTRICT,
     CHECK (source = 'BILIBILI_OPEN_LIVE'),
     CHECK (status IN ('STARTING', 'CONNECTED', 'RECONNECTING', 'ENDED', 'FAILED', 'INTERRUPTED')),
+    CHECK (raw_status IN ('PENDING', 'WRITING', 'AVAILABLE', 'DELETING', 'DELETED', 'MISSING')),
+    CHECK (raw_size_bytes >= 0),
     CHECK (event_count >= 0 AND unknown_event_count >= 0 AND gap_count >= 0)
 );
 

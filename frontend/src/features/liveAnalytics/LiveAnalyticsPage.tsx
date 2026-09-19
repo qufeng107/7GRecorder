@@ -10,6 +10,7 @@ import type {
 } from "../../shared/api/contracts.generated";
 import { Button } from "../../shared/ui/Button";
 import { PageStatus } from "../../shared/ui/PageStatus";
+import { formatBytes } from "../../shared/console/format";
 
 type List<T> = { items: T[]; total: number };
 
@@ -93,7 +94,7 @@ export default function LiveAnalyticsPage() {
       {createCredential.isError ? <p role="alert" className="text-sm text-red-700">{en ? "Could not save credential." : "凭证保存失败。"}</p> : null}
     </section>
     <section className="console-card p-5"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">{en ? "Capture sessions" : "采集场次"}</h2><Button onClick={() => void sessions.refetch()}>{en ? "Refresh" : "刷新"}</Button></div>
-      <div className="mt-4 overflow-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="text-xs uppercase text-muted"><tr><th className="p-2">{en ? "Status" : "状态"}</th><th className="p-2">{en ? "Started" : "开始"}</th><th className="p-2">{en ? "Last event" : "最后事件"}</th><th className="p-2">{en ? "Events" : "事件数"}</th><th className="p-2">{en ? "Types" : "事件类型"}</th><th className="p-2">{en ? "Gaps" : "缺口"}</th></tr></thead><tbody>{(sessions.data?.items ?? []).map((item) => <tr key={item.id} className="border-t border-border"><td className="p-2 font-medium">{item.status}</td><td className="p-2">{item.started_at}</td><td className="p-2">{item.last_event_at || "—"}</td><td className="p-2">{item.event_count}</td><td className="p-2 text-xs">{Object.entries(item.event_counts ?? {}).map(([cmd, count]) => `${cmd}: ${count}`).join(" · ") || "—"}</td><td className="p-2">{item.gap_count}</td></tr>)}</tbody></table></div>
+      <div className="mt-4 overflow-auto"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="text-xs uppercase text-muted"><tr><th className="p-2">{en ? "Status" : "状态"}</th><th className="p-2">{en ? "Started" : "开始"}</th><th className="p-2">{en ? "Last event" : "最后事件"}</th><th className="p-2">{en ? "Events" : "事件数"}</th><th className="p-2">{en ? "Types" : "事件类型"}</th><th className="p-2">{en ? "Raw evidence" : "原始证据"}</th><th className="p-2">{en ? "Gaps" : "缺口"}</th></tr></thead><tbody>{(sessions.data?.items ?? []).map((item) => <tr key={item.id} className="border-t border-border"><td className="p-2 font-medium">{item.status}</td><td className="p-2">{item.started_at}</td><td className="p-2">{item.last_event_at || "—"}</td><td className="p-2">{item.event_count}</td><td className="p-2 text-xs">{Object.entries(item.event_counts ?? {}).map(([cmd, count]) => `${cmd}: ${count}`).join(" · ") || "—"}</td><td className="p-2">{item.raw_status} · {formatBytes(item.raw_size_bytes)}</td><td className="p-2">{item.gap_count}</td></tr>)}</tbody></table></div>
       {!sessions.data?.items.length ? <p className="mt-4 text-sm text-muted">{en ? "No capture session yet." : "暂无采集场次。"}</p> : null}
     </section>
   </div>;

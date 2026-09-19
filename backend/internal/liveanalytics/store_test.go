@@ -11,6 +11,7 @@ import (
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	databasepkg "github.com/7grecorder/7grecorder/backend/internal/db"
 	"github.com/7grecorder/7grecorder/backend/internal/profile"
+	"github.com/7grecorder/7grecorder/backend/internal/storagepolicy"
 	"github.com/7grecorder/7grecorder/backend/internal/upload"
 )
 
@@ -89,5 +90,107 @@ func TestConfigUsesEncryptedOpenLiveCredentialAndOwnership(t *testing.T) {
 	}
 	if session.Status != "INTERRUPTED" || session.EventCount != 3 || session.EventCounts["LIVE_OPEN_PLATFORM_DM"] != 3 || session.GapCount != 3 || session.LastEventAt == "" {
 		t.Fatalf("unexpected interrupted capture session %#v", session)
+	}
+}
+
+func TestRawQuotaDeletesOldestEndedSessionAndProtectsActiveSession(t *testing.T) {
+	root := t.TempDir()
+	masterKey := filepath.Join(root, "master.key")
+	if err := os.WriteFile(masterKey, []byte("test-master-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DataRoot: root, SQLitePath: filepath.Join(root, "db.sqlite"), TempRoot: filepath.Join(root, "temp"), MasterKeyPath: masterKey}
+	if err := databasepkg.Migrate(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	database, err := databasepkg.Open(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	admin, err := account.NewStore(database).BootstrapSuperAdmin(t.Context(), "admin", "long-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdProfile, err := profile.NewStore(database).Create(t.Context(), admin, profile.CreateRequest{Name: "room", RoomID: "1741048619", StreamerName: "Streamer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database, cfg)
+	request := CaptureRequest{RecordingProfileID: createdProfile.ID, ExpectedRoomID: createdProfile.RoomID}
+	oldID, err := store.CreateSession(t.Context(), request, StartResult{GameID: "old", RoomID: 1741048619})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldWriter, err := NewRawWriter(root, createdProfile.ID, oldID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPath := oldWriter.RelativePath()
+	if err := oldWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRawPath(t.Context(), oldID, oldPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishSession(t.Context(), oldID, "ENDED", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	activeID, err := store.CreateSession(t.Context(), request, StartResult{GameID: "active", RoomID: 1741048619})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeWriter, err := NewRawWriter(root, createdProfile.ID, activeID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	activePath := activeWriter.RelativePath()
+	if err := activeWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRawPath(t.Context(), activeID, activePath); err != nil {
+		t.Fatal(err)
+	}
+
+	fileSize := storagepolicy.LiveAnalyticsRawBytes*3/5 + 1
+	if err := os.Truncate(filepath.Join(root, filepath.FromSlash(oldPath)), fileSize); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(filepath.Join(root, filepath.FromSlash(activePath)), fileSize); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.EnforceRawQuota(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DeletedFiles != 1 || result.DeletedBytes != fileSize || result.AfterBytes != fileSize {
+		t.Fatalf("unexpected raw cleanup result %#v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(oldPath))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected oldest ended raw file deleted, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(activePath))); err != nil {
+		t.Fatalf("active raw file was not protected: %v", err)
+	}
+	oldSession, err := store.GetSession(t.Context(), admin, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldSession.RawStatus != "DELETED" || oldSession.RawSizeBytes != fileSize || oldSession.RawDeletedAt == "" {
+		t.Fatalf("unexpected cleaned session metadata %#v", oldSession)
+	}
+	if _, err := database.ExecContext(t.Context(), `UPDATE live_capture_sessions SET raw_status = 'DELETING', raw_deleted_at = NULL WHERE id = ?`, oldID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EnforceRawQuota(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := store.GetSession(t.Context(), admin, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.RawStatus != "DELETED" || recovered.RawDeletedAt == "" {
+		t.Fatalf("interrupted cleanup claim was not recovered: %#v", recovered)
 	}
 }

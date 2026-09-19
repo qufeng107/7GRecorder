@@ -17,6 +17,7 @@ import (
 
 const (
 	reconcileInterval = 5 * time.Second
+	quotaInterval     = time.Minute
 	heartbeatInterval = 20 * time.Second
 	reconnectDelay    = 5 * time.Second
 )
@@ -44,8 +45,11 @@ func (m *CollectorManager) Run(ctx context.Context) {
 		return
 	}
 	m.reconcile(ctx)
+	_, _ = m.store.EnforceRawQuota(ctx)
 	ticker := time.NewTicker(reconcileInterval)
 	defer ticker.Stop()
+	quotaTicker := time.NewTicker(quotaInterval)
+	defer quotaTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -53,6 +57,8 @@ func (m *CollectorManager) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.reconcile(ctx)
+		case <-quotaTicker.C:
+			_, _ = m.store.EnforceRawQuota(ctx)
 		}
 	}
 }

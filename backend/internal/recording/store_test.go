@@ -619,12 +619,22 @@ func TestLocalStorageStatusSummarizesIndexedVideos(t *testing.T) {
 	if _, err := store.ReconcileLocal(ctx, actor); err != nil {
 		t.Fatalf("ReconcileLocal returned error: %v", err)
 	}
+	analyticsDir := filepath.Join(cfg.DataRoot, "live-analytics")
+	if err := os.MkdirAll(analyticsDir, 0o750); err != nil {
+		t.Fatalf("create analytics directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(analyticsDir, "session-1.jsonl"), []byte("evidence"), 0o600); err != nil {
+		t.Fatalf("write analytics evidence: %v", err)
+	}
 	status, err := store.LocalStorageStatus(ctx, actor)
 	if err != nil {
 		t.Fatalf("LocalStorageStatus returned error: %v", err)
 	}
 	if status.IndexedVideoFiles != 1 || status.IndexedVideoBytes != 5 || status.CompletedRecordings != 1 {
 		t.Fatalf("unexpected storage status: %#v", status)
+	}
+	if status.LiveAnalyticsFiles != 1 || status.LiveAnalyticsBytes != 8 || status.ManagedLocalBytes != 13 || status.LiveAnalyticsMax <= 0 {
+		t.Fatalf("unexpected managed analytics usage: %#v", status)
 	}
 	if status.DiskTotalBytes <= 0 || status.DiskAvailableBytes <= 0 {
 		t.Fatalf("expected disk stats, got %#v", status)

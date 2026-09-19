@@ -271,6 +271,10 @@ export type LocalStorageStatus = {
   disk_available_bytes: number;
   indexed_video_bytes: number;
   indexed_video_files: number;
+  live_analytics_bytes: number;
+  live_analytics_files: number;
+  live_analytics_max_bytes: number;
+  managed_local_bytes: number;
   protected_recordings: number;
   completed_recordings: number;
   settings_configured: boolean;
@@ -438,6 +442,9 @@ export type LiveCaptureSession = {
   anchor_union_id?: string;
   anchor_name?: string;
   anchor_face_url?: string;
+  raw_status: string;
+  raw_size_bytes: number;
+  raw_deleted_at?: string;
   started_at: string;
   connected_at?: string;
   ended_at?: string;
