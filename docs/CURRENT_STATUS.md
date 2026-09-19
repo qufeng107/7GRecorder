@@ -11,21 +11,30 @@ Recommended first-read order:
 2. `docs/AI_DEVELOPMENT_WORKFLOW.md`
 3. `docs/ARCHITECTURE.md`, `docs/REQUIREMENTS.md`, and the task-specific docs listed in `AGENTS.md`
 
-## Local analytics release candidate (not deployed)
+## Analytics deployment — 2026-09-19
 
-The capture/storage/basic-trend phase is ready for staged deployment testing after the normal CI gate. Local changes
+The capture/storage/basic-trend phase was deployed after passing the normal CI gate. Changes
 include encrypted OpenLive configuration, raw known/unknown event capture, 32 MiB file rotation under a 2 GiB rolling
 target, minute received-message totals, evidence browsing, and historical recording association. Total storage counts
 video, derived upload files, song files and analytics; cleanup does not depend on remote delivery success.
 
-The operator authorized deployment testing on 2026-09-19; proceed through dev CI and the main release gate. Do not treat received-message counts as unique
+Dev CI `35471440040`, main CI `35471676333`, and Production Deploy `35471676410` passed. Do not treat received-message counts as unique
 viewers, precise online population, gift revenue or settled income. Real event-family acceptance (especially gifts,
 SC and guards), deduplication and semantic analysis remain the next phase. Full backend environment testing was not run,
 per operator request; focused package tests and frontend local checks were used.
 
 ## Production
 
-- Current deployed production commit: `bbe19a349f10bfde5f4cf9695c3cf565126eca26`.
+- Current deployed production commit: `1dcab83bdbf45531ecd1a73280be5ce64f662c39`.
+- Deployed at 2026-09-19 21:58 UTC; migrations 12–14 succeeded, schema version 14. The normal running-job guard passed;
+  deployment recreated only the application container and did not stop BililiveRecorder.
+- Read-only Chromium production smoke passed: readiness reported the release SHA; recordings, analytics and capture
+  deep links rendered the login guard without browser errors; all three new module assets were served as JavaScript;
+  unauthenticated session/event/raw-file/timeline endpoints returned 401. Authenticated production collection and real
+  Bilibili event ingestion were not exercised; configure and enable the appropriate authorized room in the console.
+- Release used an authorized direct fast-forward main push. GitHub reported that the authenticated actor bypassed the
+  PR-only branch rule; the Production Deploy workflow's mandatory CI job still passed before release. Prefer a PR for
+  future promotions so that this branch rule is also honored.
 - The previously blocking job `108 / UPLOAD_BILIBILI` completed before deployment; the running-job guard was not
   bypassed. Dev CI `35287008538`, main CI `35287392831`, and Production Deploy `35287393082` passed. Public readiness
   reported the deployed SHA, `/admin/jobs` returned the new frontend entry and main asset, and unauthenticated
@@ -35,7 +44,7 @@ per operator request; focused package tests and frontend local checks were used.
   lint/typecheck/tests/build, Compose validation, and production deployment.
 - CI runs `35161716643` (dev) and `35161858719` (main) passed the complete repository gate. Production Deploy run
   `35161859027` completed successfully, and `https://7g.chat/health/ready` reported the deployed SHA.
-- Production includes safe delivered-source cleanup, review/module resume guards, Bilibili/COS progress reporting,
+- Production includes independent rolling local cleanup, OpenLive capture, review/module resume guards, Bilibili/COS progress reporting,
   direct original-part COS upload, safe interrupted-job recovery, and verified BililiveRecorder room-config sync.
 - Normal backend deployment recreates only `7grecorder`. It must not use `docker compose down` or restart the
   independently recording `bililiverecorder` container.
@@ -121,7 +130,7 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - Closed raw danmaku assets are archived byte-for-byte to COS under the controlled `raw/` prefix.
 - Parsing, merging, and aligning danmaku to edited/split video timelines remains out of scope pending real samples.
 
-The next local development batch replaces this production behavior with authorized OpenLive capture. The target
+The OpenLive deployment replaces new XML capture with authorized OpenLive capture. The target
 disables new Recorder XML writing and new raw-XML COS reconciliation while retaining historical XML metadata/files.
 Production still has the behavior above until this batch is explicitly deployed and configured.
 
@@ -231,7 +240,7 @@ verification: one focused Worker heartbeat unit test, frontend lint/typecheck/bu
 synthetic browser tests. Per user instruction, no full backend suite or real-backend local environment was run. This
 fix is deployed in `bbe19a349f10bfde5f4cf9695c3cf565126eca26`.
 
-## Local development after the current production release
+## Development history leading to the OpenLive release
 
 Live operations analytics capture is under local development and is not deployed. The current implementation adds
 OpenLive signed start/heartbeat/end calls, WebSocket auth/heartbeat and version 0/zlib packet parsing, encrypted
@@ -278,3 +287,5 @@ classification is covered. Release script syntax and git whitespace checks passe
 live-platform traffic, push or deployment was started in this batch.
 
 Release preflight replaced Root.MkdirAll with Go 1.24-compatible Root.Mkdir traversal, preserving root-confined file creation. The pinned Go version remains unchanged.
+
+The deployment record is committed on dev only; no additional production rollout is needed for this documentation update.
