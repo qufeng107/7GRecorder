@@ -626,6 +626,14 @@ func TestLocalStorageStatusSummarizesIndexedVideos(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(analyticsDir, "session-1.jsonl"), []byte("evidence"), 0o600); err != nil {
 		t.Fatalf("write analytics evidence: %v", err)
 	}
+	for _, directory := range []string{"upload-sources", "songs"} {
+		if err := os.MkdirAll(filepath.Join(cfg.DataRoot, directory), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfg.DataRoot, directory, "fixture"), []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	status, err := store.LocalStorageStatus(ctx, actor)
 	if err != nil {
 		t.Fatalf("LocalStorageStatus returned error: %v", err)
@@ -633,7 +641,7 @@ func TestLocalStorageStatusSummarizesIndexedVideos(t *testing.T) {
 	if status.IndexedVideoFiles != 1 || status.IndexedVideoBytes != 5 || status.CompletedRecordings != 1 {
 		t.Fatalf("unexpected storage status: %#v", status)
 	}
-	if status.LiveAnalyticsFiles != 1 || status.LiveAnalyticsBytes != 8 || status.ManagedLocalBytes != 13 || status.LiveAnalyticsMax <= 0 {
+	if status.LiveAnalyticsFiles != 1 || status.LiveAnalyticsBytes != 8 || status.ManagedLocalBytes != 21 || status.DerivedLocalBytes != 4 || status.SongsLocalBytes != 4 || status.LiveAnalyticsMax <= 0 {
 		t.Fatalf("unexpected managed analytics usage: %#v", status)
 	}
 	if status.DiskTotalBytes <= 0 || status.DiskAvailableBytes <= 0 {

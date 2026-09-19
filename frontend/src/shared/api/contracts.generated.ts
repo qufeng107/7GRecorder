@@ -265,6 +265,8 @@ export type UploadSourceOutput = {
   cos_compression_preset?: string;
 };
 export type LocalStorageStatus = {
+  derived_local_bytes: number;
+  songs_local_bytes: number;
   data_root: string;
   disk_total_bytes: number;
   disk_free_bytes: number;

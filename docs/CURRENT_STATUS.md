@@ -254,3 +254,5 @@ Validation for this local batch: focused Go tests for recording/upload/liveanaly
 Raw evidence now rotates locally at approximately 32 MiB without breaking the OpenLive connection. Closed chunks in active sessions are reclaimable, current writing chunks remain protected, and the evidence browser exposes individual chunk availability. Migration 14 imports existing raw paths. Minute counters count received messages, not deduplicated viewers or settled revenue.
 
 Chunk rotation validation: frontend lint/typecheck/build and browser regression passed, including resetting the cursor on file selection. Focused persistence tests cover active-session closed-chunk reclamation and continued writes, and migration 14 preserves legacy evidence metadata. No deployment performed.
+
+Managed storage accounting now includes indexed video, `upload-sources/`, `songs/` and OpenLive raw evidence. System UI shows these components separately. Focused recording/upload/analytics/db/HTTP tests and frontend lint/typecheck/build plus 22 component tests passed for this correction.

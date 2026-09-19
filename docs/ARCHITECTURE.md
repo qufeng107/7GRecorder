@@ -660,7 +660,7 @@ cleanup_target_ratio = 0.85
 ### 11.2 计入配额
 
 `max_recording_bytes` 是兼容字段名，Domain/UI 语义为 `max_managed_local_bytes`。统计 7GRecorder 管理的原始
-Recording、Upload Source 派生文件、Songs 缓存和 Songs 工作文件。SQLite、日志和未知文件不纳入可删除资产。
+Recording、Upload Source 派生文件、Songs 缓存、Songs 工作文件和 OpenLive 原文。SQLite、日志和未知文件不纳入可删除资产。
 
 Songs 工作文件由事务性 reservation 控制并在阶段完成后即时清理；音频播放缓存另受总预算 5% 子上限，视频
 导出缓存另受 5GB 子上限。所有子上限仍受全局预算和系统最小空闲空间约束。

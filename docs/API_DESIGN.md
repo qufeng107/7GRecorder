@@ -792,3 +792,6 @@ This explicit authenticated evidence endpoint returns retained platform event bo
 `GET /api/v1/live-analytics/sessions/{id}/raw-files` 返回 `{items:[{id,status,size_bytes,created_at,closed_at,deleted_at}]}`，
 按 id 倒序，最近 500 个分片，附 `truncated`。不暴露磁盘路径。events 接口新增可选 `file_id`；
 省略时读取当前/最后分片，offset 只在所选分片内有效。跨会话 file_id 返回 404，清理分片返回 410。
+
+本地存储状态新增 `derived_local_bytes`（`upload-sources/`）与 `songs_local_bytes`（`songs/`），
+`managed_local_bytes` 为已索引原视频、派生文件、歌曲文件和 OpenLive 原文占用之和；不重复加总派生文件的数据库索引。

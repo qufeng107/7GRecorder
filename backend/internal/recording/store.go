@@ -249,6 +249,8 @@ type ReconcileResult struct {
 }
 
 type LocalStorageStatus struct {
+	DerivedLocalBytes   int64                `json:"derived_local_bytes"`
+	SongsLocalBytes     int64                `json:"songs_local_bytes"`
 	DataRoot            string               `json:"data_root"`
 	DiskTotalBytes      int64                `json:"disk_total_bytes"`
 	DiskFreeBytes       int64                `json:"disk_free_bytes"`
@@ -2877,7 +2879,19 @@ func (s Store) LocalStorageStatus(ctx context.Context, actor account.User) (Loca
 	}
 	status.LiveAnalyticsBytes, status.LiveAnalyticsFiles = analyticsBytes, analyticsFiles
 	status.LiveAnalyticsMax = storagepolicy.LiveAnalyticsRawBytes
-	status.ManagedLocalBytes = status.IndexedVideoBytes + status.LiveAnalyticsBytes
+	for _, item := range []struct {
+		directory string
+		bytes     *int64
+	}{
+		{"upload-sources", &status.DerivedLocalBytes}, {"songs", &status.SongsLocalBytes},
+	} {
+		used, _, err := storagepolicy.DirectoryUsage(filepath.Join(s.cfg.DataRoot, item.directory))
+		if err != nil {
+			return LocalStorageStatus{}, fmt.Errorf("summarize %s storage: %w", item.directory, err)
+		}
+		*item.bytes = used
+	}
+	status.ManagedLocalBytes = status.IndexedVideoBytes + status.LiveAnalyticsBytes + status.DerivedLocalBytes + status.SongsLocalBytes
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM recordings
@@ -3323,7 +3337,7 @@ func validateLocalStorageSettings(req LocalStorageSettingsUpsert) error {
 
 func storagePolicyPreview(status LocalStorageStatus, settings LocalStorageSettings) (string, int64, int64) {
 	targetManagedBytes := int64(float64(settings.MaxRecordingBytes) * settings.CleanupTargetRatio)
-	targetVideoBytes := maxInt64(targetManagedBytes-status.LiveAnalyticsBytes, 0)
+	targetVideoBytes := maxInt64(targetManagedBytes-status.LiveAnalyticsBytes-status.DerivedLocalBytes-status.SongsLocalBytes, 0)
 	recordingNeed := status.ManagedLocalBytes - targetManagedBytes
 	if status.ManagedLocalBytes <= settings.MaxRecordingBytes {
 		recordingNeed = 0

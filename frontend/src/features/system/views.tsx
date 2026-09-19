@@ -282,6 +282,8 @@ export function StoragePanel(props: {
           label={props.labels.liveAnalyticsSize}
           value={`${formatBytes(props.status?.live_analytics_bytes ?? 0)} / ${formatBytes(props.status?.live_analytics_max_bytes ?? 0)}`}
         />
+        <Metric label={props.labels.derivedSize} value={formatBytes(props.status?.derived_local_bytes ?? 0)} />
+        <Metric label={props.labels.songsSize} value={formatBytes(props.status?.songs_local_bytes ?? 0)} />
         <Metric
           label={props.labels.managedSize}
           value={formatBytes(props.status?.managed_local_bytes ?? 0)}
