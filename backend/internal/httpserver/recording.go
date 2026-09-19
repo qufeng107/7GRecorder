@@ -122,6 +122,20 @@ func bindRecordingHandlers(cfg config.Config, s *ghttp.Server) {
 		})
 	})
 
+	s.BindHandler("/api/v1/upload-sources/{id}", func(r *ghttp.Request) {
+		if !requireMethod(r, http.MethodGet) {
+			return
+		}
+		withRecordingStore(r, cfg, func(actor account.User, store recording.Store) {
+			item, err := store.GetUploadSource(r.Context(), actor, r.Get("id").Int64())
+			if err != nil {
+				writeRecordingError(r, err)
+				return
+			}
+			r.Response.WriteJson(item)
+		})
+	})
+
 	s.BindHandler("/api/v1/upload-sources/actions/discover", func(r *ghttp.Request) {
 		if !requireMethod(r, http.MethodPost) {
 			return

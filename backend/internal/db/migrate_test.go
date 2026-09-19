@@ -27,7 +27,7 @@ func TestMigrateCleanDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	for _, table := range []string{"song_settings", "song_analysis_runs", "song_analysis_chunks", "song_recognition_matches", "song_artifacts", "media_cache_entries", "storage_reservations"} {
+	for _, table := range []string{"song_settings", "song_analysis_runs", "song_analysis_chunks", "song_recognition_matches", "song_artifacts", "media_cache_entries", "storage_reservations", "live_analytics_configs", "live_capture_sessions"} {
 		var count int
 		if err := database.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
 			t.Fatal(err)

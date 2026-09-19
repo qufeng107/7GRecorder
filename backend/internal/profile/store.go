@@ -595,7 +595,7 @@ func recorderSyncPayload(profileID int64, roomID string, enabled bool, archivedA
 		Enabled:                shouldRecord,
 		AutoRecord:             shouldRecord && settings.AutoRecord,
 		Quality:                settings.Quality,
-		RecordDanmaku:          settings.RecordDanmaku,
+		RecordDanmaku:          false,
 		SegmentDurationSec:     settings.SegmentDurationSec,
 		FinalizeGracePeriodSec: settings.FinalizeGracePeriodSec,
 		OutputRelativeDir:      fmt.Sprintf("recordings/%d", profileID),
@@ -640,7 +640,7 @@ func defaultSettings() RecordingSettings {
 	return RecordingSettings{
 		AutoRecord:             true,
 		Quality:                "original",
-		RecordDanmaku:          true,
+		RecordDanmaku:          false,
 		SegmentDurationSec:     1800,
 		FinalizeGracePeriodSec: 300,
 	}
@@ -653,9 +653,7 @@ func mergeSettings(settings RecordingSettings, req SettingsUpsert) RecordingSett
 	if req.Quality != nil {
 		settings.Quality = strings.TrimSpace(*req.Quality)
 	}
-	if req.RecordDanmaku != nil {
-		settings.RecordDanmaku = *req.RecordDanmaku
-	}
+	settings.RecordDanmaku = false
 	if req.SegmentDurationSec != nil {
 		settings.SegmentDurationSec = *req.SegmentDurationSec
 	}
@@ -677,9 +675,6 @@ func coreSettingsChanging(current RecordingSettings, req SettingsUpsert) bool {
 		return true
 	}
 	if req.Quality != nil && strings.TrimSpace(*req.Quality) != current.Quality {
-		return true
-	}
-	if req.RecordDanmaku != nil && *req.RecordDanmaku != current.RecordDanmaku {
 		return true
 	}
 	if req.SegmentDurationSec != nil && *req.SegmentDurationSec != current.SegmentDurationSec {

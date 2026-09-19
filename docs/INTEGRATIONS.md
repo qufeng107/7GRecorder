@@ -26,8 +26,9 @@ Adapter 负责把外部世界映射成 7GRecorder 内部稳定语义。
 直播检测/抓流
 录制
 分段
-弹幕落盘
 ```
+
+OpenLive 上线后，BililiveRecorder 的新弹幕 XML 写入固定关闭。历史 XML 文件继续保留索引；不删除旧资产。
 
 7GRecorder 不重写这些能力。
 
@@ -198,6 +199,20 @@ cap requires an explicit external shaper/proxy design. COS upload progress is me
 request body and is displayed by the same Jobs progress component once network upload begins.
 
 ---
+
+## 3.1 Bilibili OpenLive analytics
+
+固定使用归档官方协议：`https://live-open.biliapi.com/v2/app/start`、`heartbeat`、`end`，请求采用
+HMAC-SHA256 公共头签名。Start 返回的 `auth_body` 和 WSS 地址只保存在进程内，不持久化、不记录日志。
+
+WebSocket 使用 16 字节大端包头，处理 OP_AUTH、OP_AUTH_REPLY、OP_HEARTBEAT、OP_HEARTBEAT_REPLY 和
+OP_SEND_SMS_REPLY。Version 0 直接读取 JSON；Version 2 用 zlib 解压并递归解析多个 Proto 包。无法解析或
+未支持的协议版本记录采集缺口，不能伪装为“本场没有互动”。所有成功解码的 CMD 原文落 JSONL；首批已知
+重要 CMD 只影响计数和后续分析，不限制原始保存范围。
+
+项目 HTTP 心跳和 WebSocket 心跳均为 20 秒。关闭、禁用或进程正常退出时尽力调用 end。房间号与 Profile
+不匹配时立即 end 并拒绝采集，防止身份码误配。生产实现不得把测试身份码、Access Key、auth body 或事件
+正文写入普通应用日志和 fixture。
 
 ## 4. FFmpeg / ffprobe
 

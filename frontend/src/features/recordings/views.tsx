@@ -322,12 +322,23 @@ export function RecordingsPanel(props: {
         return (
           <div className="flex flex-col items-start gap-2">
             {recording.upload_source_id ? (
+              <a
+                className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
+                href={`/admin/recordings/source/${recording.upload_source_id}`}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {props.labels.details}
+              </a>
+            ) : null}
+            {recording.upload_source_id ? (
               <button
+                aria-label={props.labels.details}
                 className="inline-flex h-8 w-28 items-center justify-center whitespace-nowrap rounded-md border border-border px-3 text-xs font-medium text-ink hover:border-accent hover:text-accent"
                 type="button"
                 onClick={() => toggleSource(recording.upload_source_id)}
               >
-                {props.labels.details}
+                {props.labels.file}
               </button>
             ) : null}
             {reviewStatus === "REQUIRED" && recording.upload_source_id ? (

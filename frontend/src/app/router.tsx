@@ -10,9 +10,11 @@ const PublicStreamer = lazy(() =>
 const Overview = lazy(() => import("../features/overview/OverviewPage"));
 const Profiles = lazy(() => import("../features/profiles/ProfilesPage"));
 const Recordings = lazy(() => import("../features/recordings/RecordingsPage"));
+const RecordingDetail = lazy(() => import("../features/recordings/RecordingDetailPage"));
 const Uploads = lazy(() => import("../features/uploads/UploadsPage"));
 const Songs = lazy(() => import("../features/songs/SongsPage"));
 const Jobs = lazy(() => import("../features/jobs/JobsPage"));
+const LiveAnalytics = lazy(() => import("../features/liveAnalytics/LiveAnalyticsPage"));
 const System = lazy(() => import("../features/system/SystemPage"));
 const Accounts = lazy(() => import("../features/accounts/AccountsPage"));
 const Me = lazy(() => import("../features/accounts/MePage"));
@@ -62,6 +64,10 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "recordings/source/:sourceId",
+        element: <FeatureGate><Suspense fallback={pending}><RecordingDetail /></Suspense></FeatureGate>,
+      },
+      {
         path: "uploads",
         element: (
           <FeatureGate access="uploads">
@@ -78,6 +84,14 @@ export const router = createBrowserRouter([
             <Suspense fallback={pending}>
               <Songs />
             </Suspense>
+          </FeatureGate>
+        ),
+      },
+      {
+        path: "live-analytics",
+        element: (
+          <FeatureGate access="admin">
+            <Suspense fallback={pending}><LiveAnalytics /></Suspense>
           </FeatureGate>
         ),
       },

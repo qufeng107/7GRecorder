@@ -4,9 +4,11 @@ go 1.24.6
 
 require (
 	github.com/gogf/gf/v2 v2.9.4
+	github.com/gorilla/websocket v1.5.3
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/pressly/goose/v3 v3.25.0
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.75
+	golang.org/x/sys v0.35.0
 )
 
 require (
@@ -20,7 +22,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grokify/html-strip-tags-go v0.1.0 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -42,7 +43,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

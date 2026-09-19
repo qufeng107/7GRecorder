@@ -439,6 +439,23 @@ local playback cache. Cache-miss preparation, editing/confirmation, and MP4 expo
 This paragraph describes the deployed legacy checkpoint. The next implementation replaces ACRCloud submission and
 polling for newly created Runs with local windowed detection while preserving the public API shape.
 
+### Live operations analytics
+
+```text
+GET /api/v1/recording-profiles/{id}/live-analytics
+PUT /api/v1/recording-profiles/{id}/live-analytics
+GET /api/v1/live-analytics/sessions?profile_id={id}
+GET /api/v1/live-analytics/sessions/{id}
+```
+
+配置写入首批限定 SUPER_ADMIN；会话读取遵循 Profile ownership。PUT 接受 `enabled`、`app_id` 和
+`credential_id`，不接受 Access Secret 或身份码明文。凭证仍通过通用 Credential API 创建，并使用
+`platform=bilibili_open_live`、`purpose=LIVE_ANALYTICS`。响应返回配置与采集状态，但不返回 Credential secret、
+WebSocket auth body、原始宿主机路径或原始事件正文。
+
+Session DTO 返回状态、房间/主播快照、开始/连接/结束/最后事件/心跳时间、总事件数、按 CMD 计数、未知事件数、
+缺口数和最近错误。后台使用 polling 展示采集健康度。
+
 ### Jobs
 
 ```text

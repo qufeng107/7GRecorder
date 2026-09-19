@@ -178,6 +178,9 @@ segment_duration
 finalize_grace_period
 ```
 
+`record_danmaku` 是旧版兼容字段。直播运营数据启用 OpenLive 后，BililiveRecorder 不再负责新弹幕采集；
+前端不再提供该开关，Recorder desired state 固定关闭。已有 XML 继续作为历史文件索引保留，不自动删除。
+
 正在录制/Finalizing 时第一版禁止修改 Room ID 和录制核心参数；下一场再修改。
 
 `enabled=false` 表示不再开始新的自动录制，不等同于强制停止正在进行的 Recording。
@@ -762,10 +765,31 @@ Kubernetes
 Workflow Engine / Job DAG
 实时视频转码
 自研 Bilibili 抓流
-实时弹幕二次采集
-WebSocket 基础设施
+面向未授权主播房间的实时弹幕二次采集
+通用 WebSocket 基础设施
 跨模块强依赖流水线
 ```
+
+## 19. Live Operations Analytics
+
+直播运营分析是独立可选模块，只处理主播通过 Bilibili OpenLive 身份码明确授权的直播间。启用或采集失败
+不得改变 Recording、Bilibili 投稿、COS 或 Songs 的状态。
+
+首个交付先保存可重算的采集证据，再提供分析结果：
+
+- 使用项目 Access Key、Secret、App ID 和主播身份码启动官方 OpenLive 会话；凭证加密保存且不回显；
+- 保存所有成功解码的 CMD 原始 JSON，包括当前未知 CMD，不因当前分析器不识别而丢弃；
+- 优先验证并计数开关播、弹幕、跨房弹幕、进场、点赞、礼物、SC 和上舰事件；
+- 保存连接、鉴权、心跳、重连、关闭和解析失败等采集状态，使“无事件”和“未采集”可区分；
+- 原始事件按场次写入受控 JSONL 文件，SQLite 保存配置、场次索引、连接状态、事件计数和缺口；
+- 采集文件使用相对路径，禁止通过普通管理 API 返回原始宿主机路径或凭证明文；
+- 统计必须使用“已观测”口径。OpenLive 事件不能被解释为完整观看人数、实时在线、停留时长、流量来源或主播结算收入。
+
+一个 Profile 同时最多运行一个采集会话。Backend 正常退出时调用 OpenLive end；异常中断在下次启动时标为
+`INTERRUPTED`，随后以新会话恢复。采集循环是 Backend 内的独立轻量模块，不占用 Durable Job Worker slot。
+
+录像管理的详情使用独立路由并可在新标签页打开。详情页按场次组织概览、视频与文件、互动趋势、弹幕热点、
+礼物/SC/上舰和采集质量；分析结果必须能回到原始事件时间和对应录像时间轴。
 # 2026-09-11 active recording visibility and review gate
 
 - The admin recording list must show active recordings before an upload source exists, so operators can see today's recording as soon as recorder sync imports it.

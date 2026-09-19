@@ -401,7 +401,7 @@ func TestCOSDownloadURLRequestRequiresAvailableOutputObject(t *testing.T) {
 	}
 }
 
-func TestReconcileCreatesCOSJobsForClosedDanmakuFiles(t *testing.T) {
+func TestReconcileDoesNotArchiveLegacyDanmakuXML(t *testing.T) {
 	ctx := context.Background()
 	cfg, database := openTestDB(t, ctx)
 	actor := bootstrapTestAdmin(t, ctx, database)
@@ -454,30 +454,18 @@ func TestReconcileCreatesCOSJobsForClosedDanmakuFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile returned error: %v", err)
 	}
-	if result.COSFileObjectsCreated != 1 || result.COSFileJobsCreated != 1 {
+	if result.COSFileObjectsCreated != 0 || result.COSFileJobsCreated != 0 {
 		t.Fatalf("unexpected reconcile result: %#v", result)
 	}
-	assertJobExists(t, ctx, database, "recording-file:1:cos:1")
-	var objectKey string
-	if err := database.QueryRowContext(ctx, `SELECT object_key FROM cos_objects WHERE recording_file_id = 1`).Scan(&objectKey); err != nil {
-		t.Fatalf("query cos file object returned error: %v", err)
+	var objectCount, jobCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM cos_objects WHERE recording_file_id = 1`).Scan(&objectCount); err != nil {
+		t.Fatal(err)
 	}
-	if objectKey != "7grecorder/test/raw/recordings/1741048619-Streamer/danmaku.xml" {
-		t.Fatalf("unexpected raw cos object key: %q", objectKey)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE business_key = 'recording-file:1:cos:1'`).Scan(&jobCount); err != nil {
+		t.Fatal(err)
 	}
-
-	if _, err := store.COSRecordingFileDownloadURLRequest(ctx, actor, 1); !errors.Is(err, ErrNotReady) {
-		t.Fatalf("expected ErrNotReady before raw file upload, got %v", err)
-	}
-	if err := store.MarkCOSRecordingFileUploaded(ctx, 1, COSUploadResult{ETag: "etag"}); err != nil {
-		t.Fatalf("MarkCOSRecordingFileUploaded returned error: %v", err)
-	}
-	request, err := store.COSRecordingFileDownloadURLRequest(ctx, actor, 1)
-	if err != nil {
-		t.Fatalf("COSRecordingFileDownloadURLRequest returned error: %v", err)
-	}
-	if request.ObjectKey != "7grecorder/test/raw/recordings/1741048619-Streamer/danmaku.xml" {
-		t.Fatalf("unexpected raw download object key: %q", request.ObjectKey)
+	if objectCount != 0 || jobCount != 0 {
+		t.Fatalf("legacy XML archive work was created: objects=%d jobs=%d", objectCount, jobCount)
 	}
 }
 

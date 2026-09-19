@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/7grecorder/7grecorder/backend/internal/account"
 	"github.com/7grecorder/7grecorder/backend/internal/job"
+	"github.com/7grecorder/7grecorder/backend/internal/liveanalytics"
 	"github.com/7grecorder/7grecorder/backend/internal/profile"
 	"github.com/7grecorder/7grecorder/backend/internal/recording"
 	"github.com/7grecorder/7grecorder/backend/internal/sitetls"
@@ -78,6 +79,7 @@ func main() {
 		{"Credential", upload.Credential{}}, {"BilibiliPublishingConfig", upload.PublishingConfig{}}, {"COSStorageConfig", upload.COSConfig{}},
 		{"SiteTLSSettings", sitetls.Settings{}}, {"SongSettings", songs.Settings{}}, {"SongAnalysisSource", songs.AnalysisSource{}},
 		{"SongAnalysisRun", songs.AnalysisRun{}}, {"RecognizedSong", songs.Song{}},
+		{"LiveAnalyticsConfig", liveanalytics.Config{}}, {"LiveCaptureSession", liveanalytics.Session{}},
 	}
 	for _, resource := range resources {
 		fmt.Printf("export type %s = %s;\n", resource.name, shape(reflect.TypeOf(resource.value)))

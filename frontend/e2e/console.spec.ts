@@ -14,6 +14,7 @@ test("every module renders without fetching unrelated account or settings data",
     "recordings",
     "uploads",
     "songs",
+    "live-analytics",
     "system",
     "accounts",
     "me",
@@ -69,6 +70,30 @@ test("profile create/edit preserves draft across background refresh", async ({
   await expect(
     page.getByRole("row").filter({ hasText: "未保存草稿" }),
   ).toBeVisible();
+});
+
+test("OpenLive credentials stay write-only and collector config is saved", async ({ page }) => {
+  await page.goto("/admin/live-analytics");
+  await page.getByLabel("名称", { exact: true }).fill("测试 OpenLive 项目");
+  await page.getByLabel("Access Key ID", { exact: true }).fill("test-access-key");
+  await page.getByLabel("Access Key Secret", { exact: true }).fill("test-secret");
+  await page.getByLabel("主播身份码", { exact: true }).fill("test-room-code");
+  await page.getByRole("button", { name: "保存凭证", exact: true }).click();
+  await expect(page.getByLabel("Access Key Secret", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("主播身份码", { exact: true })).toHaveValue("");
+  await page.getByLabel("App ID", { exact: true }).fill("1793018783146");
+  await page.getByLabel("持续运行服务器采集器", { exact: true }).check();
+  await page.getByRole("button", { name: "保存采集配置", exact: true }).click();
+  await expect(page.getByText("暂无采集场次。")).toBeVisible();
+});
+
+test("recording session details use a dedicated analytics page", async ({ page }) => {
+  await page.goto("/admin/recordings/source/20");
+  await expect(page.getByRole("heading", { name: "秋日晚风 · 聊天与音乐" })).toBeVisible();
+  for (const heading of ["场次概览", "视频与文件", "互动趋势", "弹幕热点", "礼物、SC 与上舰", "采集质量"]) {
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  await expect(page.getByText(/缺少采集不会按零互动处理/)).toBeVisible();
 });
 
 test("review downloads live inside details; editing never approves a source", async ({
@@ -136,7 +161,7 @@ test("manager deep links cannot mount restricted modules", async ({
   page.on("request", (req) => {
     if (new URL(req.url()).pathname.startsWith("/api/")) calls.push(req.url());
   });
-  for (const route of ["accounts", "system", "songs", "uploads"]) {
+  for (const route of ["accounts", "system", "songs", "uploads", "live-analytics"]) {
     await page.goto("/admin/" + route);
     await expect(page.getByRole("alert")).toContainText(
       "你没有访问此页面的权限",

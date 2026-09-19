@@ -170,11 +170,6 @@ export function ProfileEditorDialog(props: {
               onChange={(value) => update("auto_record", value)}
             />
             <ToggleField
-              label={props.labels.recordDanmaku}
-              checked={props.form.record_danmaku}
-              onChange={(value) => update("record_danmaku", value)}
-            />
-            <ToggleField
               label={props.labels.publicPage}
               checked={props.form.public_enabled}
               onChange={(value) => update("public_enabled", value)}

@@ -418,3 +418,34 @@ export type RecognizedSong = {
   audio_url?: string;
   created_at: string;
 };
+export type LiveAnalyticsConfig = {
+  recording_profile_id: number;
+  credential_id?: number;
+  app_id: number;
+  enabled: boolean;
+  last_started_at?: string;
+  last_error?: string;
+  updated_at?: string;
+};
+export type LiveCaptureSession = {
+  id: number;
+  recording_profile_id: number;
+  source: string;
+  status: string;
+  room_id?: string;
+  anchor_uid?: number;
+  anchor_open_id?: string;
+  anchor_union_id?: string;
+  anchor_name?: string;
+  anchor_face_url?: string;
+  started_at: string;
+  connected_at?: string;
+  ended_at?: string;
+  last_event_at?: string;
+  last_heartbeat_at?: string;
+  event_count: number;
+  unknown_event_count: number;
+  gap_count: number;
+  event_counts: Record<string, number> | null;
+  last_error?: string;
+};

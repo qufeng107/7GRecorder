@@ -176,6 +176,7 @@ Admin API 只写不读。
 │   └── 7grecorder.db
 ├── recordings/
 ├── songs/
+├── live-analytics/       # OpenLive raw JSONL evidence, mode 0600 files
 ├── temp/
 └── backups/
     └── db/

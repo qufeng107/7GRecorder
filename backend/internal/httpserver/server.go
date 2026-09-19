@@ -10,6 +10,7 @@ import (
 
 	"github.com/7grecorder/7grecorder/backend/internal/config"
 	"github.com/7grecorder/7grecorder/backend/internal/db"
+	"github.com/7grecorder/7grecorder/backend/internal/liveanalytics"
 	"github.com/7grecorder/7grecorder/backend/internal/recorder"
 	"github.com/7grecorder/7grecorder/backend/internal/version"
 	"github.com/7grecorder/7grecorder/backend/internal/worker"
@@ -35,7 +36,9 @@ func Run(ctx context.Context, cfg config.Config) {
 	bindUploadHandlers(cfg, s)
 	bindSiteTLSHandlers(cfg, s)
 	bindSongHandlers(cfg, s)
+	bindLiveAnalyticsHandlers(cfg, s)
 	startWorker(ctx, cfg)
+	startLiveAnalytics(ctx, cfg)
 
 	s.BindHandler("/health/live", func(r *ghttp.Request) {
 		r.Response.WriteJson(healthResponse{
@@ -82,6 +85,18 @@ func Run(ctx context.Context, cfg config.Config) {
 	})
 
 	s.Run()
+}
+
+func startLiveAnalytics(ctx context.Context, cfg config.Config) {
+	database, err := db.Open(ctx, cfg)
+	if err != nil {
+		g.Log().Warningf(ctx, "live analytics collector disabled: %v", err)
+		return
+	}
+	go func() {
+		liveanalytics.NewCollectorManager(database, cfg).Run(ctx)
+		_ = database.Close()
+	}()
 }
 
 func startWorker(ctx context.Context, cfg config.Config) {

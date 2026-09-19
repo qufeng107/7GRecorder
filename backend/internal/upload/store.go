@@ -353,16 +353,6 @@ func (s Store) Reconcile(ctx context.Context, actor account.User) (ReconcileResu
 		return ReconcileResult{}, err
 	}
 	result.COSJobsCreated = cosJobs
-	fileObjects, err := s.createCOSRecordingFileObjects(ctx)
-	if err != nil {
-		return ReconcileResult{}, err
-	}
-	result.COSFileObjectsCreated = fileObjects
-	fileJobs, err := s.createCOSRecordingFileJobs(ctx)
-	if err != nil {
-		return ReconcileResult{}, err
-	}
-	result.COSFileJobsCreated = fileJobs
 	return result, nil
 }
 

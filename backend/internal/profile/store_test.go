@@ -35,8 +35,8 @@ func TestCreateProfileCreatesDefaults(t *testing.T) {
 	if created.Platform != "bilibili" {
 		t.Fatalf("expected bilibili platform, got %q", created.Platform)
 	}
-	if !created.Settings.AutoRecord || !created.Settings.RecordDanmaku {
-		t.Fatal("expected default recording settings to be enabled")
+	if !created.Settings.AutoRecord || created.Settings.RecordDanmaku {
+		t.Fatal("expected recording enabled with legacy XML danmaku disabled")
 	}
 	if created.Settings.SegmentDurationSec != 1800 {
 		t.Fatalf("expected default segment duration, got %d", created.Settings.SegmentDurationSec)

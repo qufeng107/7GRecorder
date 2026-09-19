@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
+  BarChart3,
   ArrowLeft,
   ChevronRight,
   ListTodo,
@@ -110,6 +111,12 @@ export default function ConsoleLayout() {
       path: "/admin/songs",
       label: en ? "Songs" : "歌曲分析",
       icon: Music2,
+      visible: admin,
+    },
+    {
+      path: "/admin/live-analytics",
+      label: en ? "Live analytics" : "直播分析",
+      icon: BarChart3,
       visible: admin,
     },
     {

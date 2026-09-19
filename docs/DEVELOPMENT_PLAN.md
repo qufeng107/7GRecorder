@@ -244,8 +244,8 @@ Current implementation note:
 - 当前修正：COS 直接上传每个 output part，不再生成 MP4 转码或 ZIP 派生文件；
 - 当前修正：新 COS 视频对象使用 `videos/YYYY-MM-DD/session-NN/pNN.<source-format>`，历史对象不迁移；
 - 已实现：COS 对象保留原始大小、上传对象大小及兼容历史对象所需的压缩 metadata；
-- 当前开发：原始弹幕文件按 `recording_files.kind = 'danmaku'` 扫描入库，使用 `UPLOAD_COS_RECORDING_FILE`
-  任务上传到 COS `raw/` 前缀；先归档原文，不解析、不对齐时间轴；
+- 历史兼容：已有原始弹幕 XML 仍可按 `recording_files.kind = 'danmaku'` 索引；OpenLive 采集启用后不再创建
+  新 XML 或新的 `UPLOAD_COS_RECORDING_FILE` 归档任务；
 - object metadata；
 - per-profile managed usage；
 - oldest Recording COS rolling deletion；
@@ -297,6 +297,20 @@ V1 一次只分析一个 COS output，不自动扫描 Recording，不跨 output 
 在独立 `AI` worker slot，不占用录播合并的 `MEDIA` slot，直播期间不启动新任务。
 
 ---
+
+## 9.1 Current Priority — Live Operations Analytics Capture
+
+首批按证据优先实施：
+
+1. OpenLive 签名客户端、项目生命周期和 Proto/WebSocket parser；
+2. Profile 级加密配置、采集会话 schema、受控 JSONL 原始事件 writer；
+3. Backend 内独立 Collector Manager，保存所有 CMD、重要 CMD 计数、连接状态与采集缺口；
+4. 配置/会话 Admin API 与最小采集状态页面；
+5. 使用获授权测试房间保存脱敏事件 fixture，验证开关播、弹幕、进场、点赞、礼物、SC、上舰；
+6. 基于真实样本冻结口径，再实现单场分钟曲线、互动人数、热点和礼物分析。
+
+首批不承诺实时在线、完整观看 UV/PV、停留时长、流量来源、关注转化或主播结算收入。Collector 不使用
+Durable Job slot，不改变 Recording Core 或其他可选模块状态。
 
 ## 10. Phase 7 — Operations & Recovery
 

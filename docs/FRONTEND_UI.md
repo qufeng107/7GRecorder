@@ -23,6 +23,10 @@
 - Displayed recording timestamps use `Asia/Shanghai`.
 - Each recording row can open a details dialog with profile, streamer, China-time timestamps, duration, local status,
   all indexed files, per-file paths, protect action, and per-file download actions.
+- The details dialog is replaced by an independent `/admin/recordings/:recordingId` page opened in a new browser tab.
+  The page groups session overview, video/files, interaction trends, danmaku hotspots, gifts/SC/guards, and capture
+  quality. Empty analytics sections explain that data is still collecting or unavailable; they never display missing
+  collection as zero engagement.
 - Completed source segments shorter than three minutes count toward the short-segment summary. Upload-source rows do
   not show a per-row short-segment badge.
 - The recordings page uses upload sources as the primary rows. Each row represents one upload-facing video. Expanding a

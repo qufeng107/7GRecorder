@@ -1,6 +1,6 @@
 # 7GRecorder Current Status
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 This file is the handoff entry point for a new coding chat. Read it before reconstructing context from screenshots or
 server commands.
@@ -109,6 +109,10 @@ Use the admin actions so cancellation, edit decisions, and downstream reset happ
 - Closed raw danmaku assets are archived byte-for-byte to COS under the controlled `raw/` prefix.
 - Parsing, merging, and aligning danmaku to edited/split video timelines remains out of scope pending real samples.
 
+The next local development batch replaces this production behavior with authorized OpenLive capture. The target
+disables new Recorder XML writing and new raw-XML COS reconciliation while retaining historical XML metadata/files.
+Production still has the behavior above until this batch is explicitly deployed and configured.
+
 ## Known Limitations And Next Work
 
 - FFmpeg review edits currently use stream copy. Cut boundaries follow media keyframes and should be visually checked;
@@ -214,3 +218,23 @@ shows both timestamps and distinguishes a live Job with quiet/unparseable biliup
 verification: one focused Worker heartbeat unit test, frontend lint/typecheck/build, 22 unit/component tests, and 24
 synthetic browser tests. Per user instruction, no full backend suite or real-backend local environment was run. This
 fix is deployed in `bbe19a349f10bfde5f4cf9695c3cf565126eca26`.
+
+## Local development after the current production release
+
+Live operations analytics capture is under local development and is not deployed. The current implementation adds
+OpenLive signed start/heartbeat/end calls, WebSocket auth/heartbeat and version 0/zlib packet parsing, encrypted
+Profile configuration, capture-session metadata and gap counts, and loss-minimizing JSONL storage for every decoded
+CMD including unknown future commands. A real authorized test-room smoke completed start, WebSocket authentication
+and end using local environment credentials without logging secrets or payloads.
+
+The console now has a Live Analytics configuration/status page. Recording rows link to a new-tab session detail page
+organized into overview, files, interaction trends, danmaku hotspots, gift/SC/guard, and capture-quality sections.
+Only capture health and retained-event totals are populated in this checkpoint; metric aggregation waits for real
+live samples. Local focused backend tests and migration smoke passed. Frontend lint, typecheck, 22 component tests,
+build, the existing 24-browser-test suite, and 8 focused console browser tests passed. No production deployment was
+performed.
+
+Before production rollout, include `live-analytics/` raw JSONL in managed local-storage accounting or establish a
+separate retention ceiling. The current collector preserves evidence indefinitely and therefore must not be enabled
+as an unbounded production writer. Deployment also requires saving and validating the production Profile's OpenLive
+credential before relying on the migration that disables new BililiveRecorder XML capture.

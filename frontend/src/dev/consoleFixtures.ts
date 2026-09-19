@@ -18,7 +18,7 @@ export function createConsoleFixtures() {
       recording_settings: {
         auto_record: false,
         quality: "original",
-        record_danmaku: true,
+        record_danmaku: false,
         segment_duration_sec: 1800,
         finalize_grace_period_sec: 300,
       },
@@ -135,6 +135,7 @@ export function createConsoleFixtures() {
   };
   const publishing = new Map<number, typeof bilibili>();
   const storage = new Map<number, typeof cos>();
+  const liveAnalytics = new Map<number, { recording_profile_id: number; credential_id: number; app_id: number; enabled: boolean; updated_at: string }>();
   let songSettings = {
     enabled: false,
     region: "",
@@ -226,6 +227,13 @@ export function createConsoleFixtures() {
       storage.set(id, config);
       return ok(config);
     }
+    if (path.endsWith("/live-analytics")) {
+      const id = Number(path.split("/")[4]);
+      const config = liveAnalytics.get(id) ?? { recording_profile_id: id, credential_id: 0, app_id: 0, enabled: false, updated_at: stamp };
+      if (method !== "GET") Object.assign(config, payload);
+      liveAnalytics.set(id, config);
+      return ok(config);
+    }
     if (path === "/api/v1/credentials") {
       if (method === "POST") {
         const item = {
@@ -263,6 +271,8 @@ export function createConsoleFixtures() {
     }
     if (path.endsWith("/policy")) return ok({ ...payload, updated_at: stamp });
     if (path === "/api/v1/upload-sources") return ok(list([source], empty));
+    if (path === "/api/v1/upload-sources/20") return ok(source);
+    if (path.startsWith("/api/v1/live-analytics/sessions")) return ok(list([], empty));
     if (path === "/api/v1/recordings") return ok(list([], empty));
     if (path === "/api/v1/upload-sources/20/actions/require-review") {
       source.review_status = "REQUIRED";

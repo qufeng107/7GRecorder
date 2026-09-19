@@ -17,7 +17,7 @@ export const emptyProfileForm: ProfileForm = {
   public_slug: "",
   auto_record: true,
   quality: "original",
-  record_danmaku: true,
+  record_danmaku: false,
   segment_duration_sec: 1800,
   finalize_grace_period_sec: 300,
 };
@@ -36,7 +36,7 @@ export function profilePayload(form: ProfileForm) {
     recording_settings: {
       auto_record: form.auto_record,
       quality: form.quality,
-      record_danmaku: form.record_danmaku,
+      record_danmaku: false,
       segment_duration_sec: form.segment_duration_sec,
       finalize_grace_period_sec: form.finalize_grace_period_sec,
     },

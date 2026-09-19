@@ -203,6 +203,20 @@ song processing FAILED
 
 ---
 
+## 7.1 Live operations analytics
+
+- 签名测试固定请求体、时间和 nonce，验证 MD5、规范化头和 HMAC 结果；
+- Proto 测试覆盖 Version 0、多包 Version 2 zlib、截断包、未知版本和鉴权回复；
+- Start/heartbeat/end 使用脱敏 HTTP fixture，业务 `code != 0` 即使 HTTP 200 也必须失败；
+- 房间号与 Profile 不一致时拒绝采集并调用 end；
+- 原始 writer 保存已知与未知 CMD，路径不能逃逸 `live-analytics` root；
+- 会话计数、最后事件时间、未知事件和缺口批量落库；重复启动不能为同一 Profile 创建两个活动会话；
+- 重启把遗留活动会话标为 `INTERRUPTED`，禁用/正常停止形成 `ENDED`；
+- 采集失败不得创建或修改 Recording、Publication、COS、Song 或 Job 状态；
+- API 覆盖 SUPER_ADMIN 写入、Manager ownership 读取和凭证明文不回显。
+
+真实平台验收只使用用户授权测试房间并人工触发事件；fixture 必须脱敏，CI 不访问 Bilibili。
+
 ## 8. COS 高优先级场景
 
 - closed segment 创建唯一上传任务；

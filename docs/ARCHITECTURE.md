@@ -175,6 +175,8 @@ Integration Adapters
 │   ├── COS Reconciler                                          │
 │   └── Songs Reconciler                                        │
 │                                                               │
+│ OpenLive Analytics Collector ── raw JSONL + capture metadata  │
+│                                                               │
 │ SQLite Durable Job Queue ── Workers                           │
 │                               ├── biliup                       │
 │                               ├── FFmpeg                       │
@@ -313,6 +315,19 @@ Bilibili 或源 COS 的成功状态。
 ### 6.6 External Publisher Module
 
 网易云等 Publisher 只处理已存在的 Song/Publication Item；平台失败不影响 Recording、Bilibili 或 COS。
+
+### 6.7 Live Operations Analytics Module
+
+该模块通过 Bilibili OpenLive 官方 API 连接获授权 Profile。`CollectorManager` 定期读取启用配置，并为每个
+Profile 维护至多一个长连接采集循环。HTTP 项目心跳和 WebSocket 心跳都按官方固定协议执行；连接失败以
+有上限的退避恢复，恢复会创建新的采集会话并留下缺口证据。
+
+协议 Adapter 只负责签名、项目 start/heartbeat/end、WebSocket 帧和压缩包解析。采集 Store 负责配置权限、
+凭证解密、场次状态和计数。Raw Writer 只允许写入 `DATA_ROOT/live-analytics/` 下的相对路径。所有可解码 CMD
+完整保存，分析器以后从原始文件幂等重算，不依赖录像、投稿或 COS 成功。
+
+BililiveRecorder XML 不再作为新运营分析的数据源。Recorder 同步固定关闭其弹幕写入；历史 XML 文件保持可见，
+但新文件不再进入 COS raw archive reconciliation。切换发布必须先具备至少一个可工作的 OpenLive 配置。
 
 ---
 

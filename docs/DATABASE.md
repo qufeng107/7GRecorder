@@ -5,6 +5,7 @@
 `DATABASE.md` 是当前目标数据库结构的权威说明。
 
 SQLite 只保存管理网站、状态和业务元数据，不保存视频、音频、弹幕全文或完整应用日志。
+OpenLive 原始事件正文写入受控 JSONL 文件；SQLite 只保存配置、场次索引、计数和采集完整性状态。
 
 生产数据库：
 
@@ -939,6 +940,45 @@ upload status remains isolated in `upload_source_cos_objects`.
 使用 SQLite 安全备份方式；默认保留 7–30 份。
 
 数据库备份本身不包含媒体文件。
+
+## Live operations analytics
+
+### `live_analytics_configs`
+
+```text
+recording_profile_id PK/FK
+credential_id FK nullable
+app_id INTEGER NOT NULL
+enabled INTEGER NOT NULL DEFAULT 0
+last_started_at DATETIME nullable
+last_error TEXT nullable
+created_at / updated_at
+```
+
+Credential 必须属于可见账号（或为系统级）、`platform=bilibili_open_live`、
+`purpose=LIVE_ANALYTICS`。其加密 JSON 包含 `access_key_id`、`access_key_secret` 和 `identity_code`；API 永不返回
+这些字段。启用配置必须同时具有正数 App ID 和有效 Credential。
+
+### `live_capture_sessions`
+
+```text
+id PK
+recording_profile_id FK
+external_game_id TEXT nullable
+source TEXT = BILIBILI_OPEN_LIVE
+status STARTING | CONNECTED | RECONNECTING | ENDED | FAILED | INTERRUPTED
+room_id / anchor_uid / anchor_open_id / anchor_union_id / anchor_name / anchor_face_url snapshot
+raw_relative_path TEXT nullable UNIQUE
+started_at / connected_at / ended_at / last_event_at / last_heartbeat_at
+event_count / unknown_event_count / gap_count
+event_counts_json
+last_error
+created_at / updated_at
+```
+
+原始 JSONL 文件属于会话的权威采集证据。每行保存本地接收时间、CMD 和平台原始 JSON；未知 CMD 也保存。
+进程启动时把遗留的活动状态改为 `INTERRUPTED` 并增加缺口计数。每个 Profile 只允许一个
+`STARTING/CONNECTED/RECONNECTING` 会话的部分唯一索引。
 # 2026-09-11 upload review gate
 
 - `recordings.upload_review_status` stores the early operator decision for an active or recently completed recording. Values: `NONE`, `REQUIRED`.
