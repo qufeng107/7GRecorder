@@ -1083,3 +1083,16 @@ only after FFmpeg succeeds. This remains an adapter concern and adds no cross-mo
 OpenLive 原文按约 32 MiB 分片（单条事件不跨文件，允许超出一个事件大小），轮换仅更换本地文件，
 不重连平台会话。关闭并 fsync 后，旧分片可被 2 GiB 配额按创建顺序回收，包括仍在直播的会话。
 WRITING 分片永不删除。2 GiB 为滚动目标，维护间隔和各 Profile 当前分片会造成暂时超额；磁盘不可写时报告采集缺口。
+
+### COS quota admission and recovery
+
+Before either video or legacy raw-file upload, reserve the actual local file size against the storage profile quota.
+Count both COS object tables, in-flight uploads/deletions, and retained Songs artifacts. If the incoming object alone
+exceeds the quota, reject it without deleting anything. Reclaim oldest eligible completed source objects, excluding the
+incoming source, protected/active recordings, review-gated sources and sources leased by nonterminal Songs runs.
+Persist `DELETING` before calling the pinned SDK Delete API, then persist `DELETED` only on success (missing object is
+idempotent success). Resume deletion intents on subsequent admission; failures block admission. Network calls never
+hold SQLite transactions. No bucket listing or unknown-object deletion is permitted. A quota is per storage profile,
+not an account resource-package limit. Quota checks run at Worker startup and every 24 hours independently of recording discovery, as well as before every upload.
+A reduced quota takes effect at the next check. Reclaim registered objects in oldest-recording/source order until
+sufficient space is available; no requirement to delete the remaining objects of a recording once the target is met.

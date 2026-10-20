@@ -500,3 +500,8 @@ Rolling cleanup regression cases include failed/pending/disabled/absent upload m
 已缓冲的分钟计数应在下次 WebSocket 心跳响应时落库，不等待下一条弹幕。
 
 旧 XML 迁移兼容：reconcile 不创建新 XML 上传任务；发布前已入队的 `UPLOAD_COS_RECORDING_FILE` 任务仍需完成并保留远端状态。
+
+COS quota regression: admission must use actual file bytes and combined video/raw/in-flight usage; exact fit succeeds;
+oversized input fails without deletion; oldest eligible registered objects are reclaimed only within the prefix;
+protected/active/reviewed/current sources and Songs leases cannot be reclaimed. Delete failure retains charged usage,
+retry resumes durable deletion, and DELETED tombstones do not requeue. Worker paths must enforce admission before PUT.

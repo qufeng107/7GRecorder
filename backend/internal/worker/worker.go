@@ -165,6 +165,7 @@ func (w Worker) Run(ctx context.Context) {
 		log.Printf("worker reconcile failed: %v", err)
 	}
 	go w.runDiscoveryLoop(ctx)
+	go w.runCOSQuotaLoop(ctx)
 	go w.runResourceLoop(ctx, "LIGHT", 1)
 	go w.runResourceLoop(ctx, "MEDIA", 1)
 	go w.runResourceLoop(ctx, "AI", 1)
@@ -711,6 +712,12 @@ func (w Worker) runProcessSongAnalysisJob(ctx context.Context, job workerJob) er
 			return w.failJob(ctx, job, "PERMANENT", err)
 		}
 		artifact.COSRequest.SourceSizeBytes = size
+		deleter, _ := w.cos.(upload.COSDeleter)
+		if err := upload.NewStore(w.db, w.cfg).AdmitCOSArtifact(ctx, artifact.COSRequest, artifact.COSStorageProfileID, deleter); err != nil {
+			class := classifyUploadError(err)
+			_ = store.MarkProcessFailed(ctx, payload.AnalysisRunID, class, truncateError(err))
+			return w.failJob(ctx, job, class, err)
+		}
 		uploadResult, err := w.cos.Upload(ctx, artifact.COSRequest, w.progressReporter(job))
 		if err != nil {
 			class := classifyUploadError(err)
@@ -993,8 +1000,9 @@ func (w Worker) runCOSUploadJob(ctx context.Context, job workerJob) error {
 	if err != nil {
 		return w.failUploadJob(ctx, job, payload.COSObjectID, classifyUploadError(err), err)
 	}
-	if err := store.MarkCOSObjectUploading(ctx, request.ObjectID); err != nil {
-		return w.failJob(ctx, job, "PERMANENT", err)
+	deleter, _ := w.cos.(upload.COSDeleter)
+	if err := store.AdmitCOSUpload(ctx, request, false, deleter); err != nil {
+		return w.failUploadJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
 	}
 	result, err := w.cos.Upload(ctx, request, w.progressReporter(job))
 	if err != nil {
@@ -1016,8 +1024,9 @@ func (w Worker) runCOSRecordingFileUploadJob(ctx context.Context, job workerJob)
 	if err != nil {
 		return w.failCOSRecordingFileJob(ctx, job, payload.COSObjectID, classifyUploadError(err), err)
 	}
-	if err := store.MarkCOSRecordingFileUploading(ctx, request.ObjectID); err != nil {
-		return w.failJob(ctx, job, "PERMANENT", err)
+	deleter, _ := w.cos.(upload.COSDeleter)
+	if err := store.AdmitCOSUpload(ctx, request, true, deleter); err != nil {
+		return w.failCOSRecordingFileJob(ctx, job, request.ObjectID, classifyUploadError(err), err)
 	}
 	result, err := w.cos.Upload(ctx, request, w.progressReporter(job))
 	if err != nil {
@@ -1378,5 +1387,22 @@ func retryDelaySeconds(attempts int) int {
 		return 300
 	default:
 		return 900
+	}
+}
+
+// Run immediately on startup, then every 24 hours, independently of recording discovery.
+func (w Worker) runCOSQuotaLoop(ctx context.Context) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		deleter, _ := w.cos.(upload.COSDeleter)
+		if err := upload.NewStore(w.db, w.cfg).ReconcileCOSQuota(ctx, deleter); err != nil {
+			log.Printf("COS daily quota check failed: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }

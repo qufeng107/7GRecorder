@@ -289,3 +289,14 @@ live-platform traffic, push or deployment was started in this batch.
 Release preflight replaced Root.MkdirAll with Go 1.24-compatible Root.Mkdir traversal, preserving root-confined file creation. The pinned Go version remains unchanged.
 
 The deployment record is committed on dev only; no additional production rollout is needed for this documentation update.
+
+## Local COS quota correction (not deployed)
+
+The saved `max_managed_bytes` previously had no enforcement in the upload workers. The local fix admits every
+video/raw/Songs PUT against actual file bytes and shared per-profile usage, with persistent reservations and
+controlled oldest-object deletion. Startup and independent 24-hour checks reclaim over-budget profiles even when
+there are no new uploads. Deletion intents survive restart; failures block further over-budget admission. Active,
+writing, protected, reviewed and Songs-leased sources remain protected; local files and Bilibili state are unchanged.
+Migration 15 preserves uncertain remote bytes from failed/in-flight uploads. Destination region/bucket/prefix become
+immutable once objects are registered. This is a managed per-profile budget, not an account-wide resource-package
+ceiling; unknown bucket objects are never listed or deleted. No production inspection, cleanup or deployment occurred.

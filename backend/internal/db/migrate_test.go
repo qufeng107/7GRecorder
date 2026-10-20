@@ -119,3 +119,50 @@ func TestRawFileMigrationImportsExistingEvidence(t *testing.T) {
 		t.Fatalf("active part lost protection: %s", status)
 	}
 }
+
+func TestCOSQuotaMigrationPreservesUncertainRemoteBytes(t *testing.T) {
+	database, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "quota.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err = database.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations.FS)
+	if err = goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err = goose.UpToContext(t.Context(), database, ".", 14); err != nil {
+		t.Fatal(err)
+	}
+	// Seed valid pre-migration rows to exercise the upgrade with foreign keys enabled.
+	if _, err = database.Exec(`
+ INSERT INTO users(id,username,password_hash,role) VALUES(1,'admin','hash','SUPER_ADMIN');
+ INSERT INTO recording_profiles(id,owner_user_id,name,room_id,streamer_name) VALUES(1,1,'test','1','test');
+ INSERT INTO credentials(id,owner_user_id,scope,platform,purpose,account_label,encrypted_secret,status)
+ VALUES(1,1,'USER','tencent_cos','STORAGE','test',X'00','UNVERIFIED');
+ INSERT INTO cos_storage_profiles(id,recording_profile_id,credential_id,enabled,region,bucket,prefix,max_managed_bytes)
+ VALUES(1,1,1,1,'test','test','archive/',100);
+ INSERT INTO recordings(id,recording_profile_id,started_at,recording_status,source_room_id,streamer_name_snapshot)
+ VALUES(1,1,'2026-01-01','COMPLETED','1','test');
+ INSERT INTO recording_files(id,recording_id,relative_path,original_name,kind,file_status)
+ VALUES(1,1,'test.xml','test.xml','danmaku','CLOSED');
+ INSERT INTO upload_sources(id,recording_profile_id,source_key,source_room_id,streamer_name_snapshot,started_at,completed_at,status)
+ VALUES(1,1,'test','1','test','2026-01-01','2026-01-02','READY_TO_UPLOAD');
+ INSERT INTO cos_objects(id,cos_storage_profile_id,recording_profile_id,recording_id,recording_file_id,object_key,size_bytes,status)
+ VALUES(1,1,1,1,1,'archive/raw',70,'FAILED');
+ INSERT INTO upload_source_cos_objects(id,cos_storage_profile_id,recording_profile_id,upload_source_id,object_key,size_bytes,status)
+ VALUES(1,1,1,1,'archive/video',30,'UPLOADING');`); err != nil {
+		t.Fatal(err)
+	}
+	if err = goose.UpToContext(t.Context(), database, ".", 15); err != nil {
+		t.Fatal(err)
+	}
+	for table, want := range map[string]int64{"cos_objects": 70, "upload_source_cos_objects": 30} {
+		var got int64
+		if err = database.QueryRow(`SELECT quota_reserved_bytes FROM ` + table + ` WHERE id=1`).Scan(&got); err != nil || got != want {
+			t.Fatalf("%s reserved=%d err=%v", table, got, err)
+		}
+	}
+}

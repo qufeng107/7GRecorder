@@ -330,6 +330,10 @@ metadata transformation remain out of scope until real raw samples are reviewed.
 - SOURCE_MISSING；
 - retry。
 
+DeleteObject uses the pinned `cos-go-sdk-v5 v0.7.75` `Object.Delete` API. Only a database-selected key inside the
+configured prefix is accepted. Success or `NoSuchKey` confirms deletion; other errors retain the durable intent and
+charged bytes. Adapter tests use synthetic HTTP responses and fake credentials, without bucket listing.
+
 ### Prefix
 
 每个 COS Storage Profile 使用受控 Prefix，例如：

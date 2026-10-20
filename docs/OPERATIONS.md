@@ -282,13 +282,10 @@ COS 使用 7GRecorder 自己的逻辑预算：
 max_managed_bytes
 ```
 
-只统计数据库中：
-
-```text
-status=AVAILABLE
-```
-
-且属于该 COS Storage Profile 的对象。
+统计属于该 COS Storage Profile 的已登记对象：两张 COS 对象表的 AVAILABLE / DELETING 大小，
+以及所有非 DELETED 行的持久预留（同一对象取较大值，不重复计数），另计不可滚动删除的 Songs artifacts。
+上传前按实际文件大小预留容量；PUT/HEAD 失败、任务中断或删除失败不释放可能已占用的额度。
+这是每个 Profile 的逻辑配额，不是腾讯云账号资源包的总量限制。多个 Profile 应分别分配预算；未知对象不纳入自动清理。
 
 超过预算：
 
@@ -828,3 +825,7 @@ The existing backend starts its worker even for `serve`; isolation relies on the
 add real service credentials to this test instance. This is configuration/data isolation, not network egress isolation.
 Ctrl+C stops its children; data/logs remain for inspection. Cookies are host-scoped, so separate local runs should use
 new browser contexts; they do not share the production hostname.
+
+COS 配额检查在 Worker 启动时运行一次，此后每 24 小时运行一次；独立于录制发现循环。
+每次视频、历史 XML 和 Songs artifact 上传前仍必须检查并预留空间。未启用 Profile 不清理；
+定时清理失败记录日志，并继续检查其他 Profile。缩小配额后最迟在下次定时检查回收，或在下次上传前回收。

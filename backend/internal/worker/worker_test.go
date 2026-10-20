@@ -688,6 +688,14 @@ func TestRunOnceAppliesUploadSourceEdit(t *testing.T) {
 }
 
 func TestRunOnceUploadsCOSObject(t *testing.T) {
+	runRunOnceUploadsCOSObjectWithQuota(t, 1000000000, false)
+}
+func TestRunOnceUploadsCOSObjectRejectsQuota(t *testing.T) {
+	runRunOnceUploadsCOSObjectWithQuota(t, 1, true)
+}
+
+func runRunOnceUploadsCOSObjectWithQuota(t *testing.T, limit int64, denied bool) {
+	t.Helper()
 	ctx := context.Background()
 	cfg, database := openTestDBWithConfig(t, ctx)
 	actor := bootstrapTestAdmin(t, ctx, database)
@@ -727,7 +735,7 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 		Region:          "ap-shanghai",
 		Bucket:          "bucket-1250000000",
 		Prefix:          "7grecorder/test/",
-		MaxManagedBytes: 1000000000,
+		MaxManagedBytes: limit,
 	}); err != nil {
 		t.Fatalf("UpsertCOSConfig returned error: %v", err)
 	}
@@ -762,6 +770,19 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 	if err := NewWithCOSUploader(database, &fakeRecorder{}, cfg, cosUploader).RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce returned error: %v", err)
 	}
+	if denied {
+		if cosUploader.request.ObjectID != 0 {
+			t.Fatal("quota rejection still called COS PUT")
+		}
+		var status string
+		if err := database.QueryRowContext(ctx, `SELECT status FROM upload_source_cos_objects WHERE id=1`).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "FAILED" {
+			t.Fatalf("expected failed quota admission, got %s", status)
+		}
+		return
+	}
 	if cosUploader.request.ObjectID != 1 || cosUploader.request.ObjectKey != "7grecorder/test/videos/2026-09-05/session-01/p01.flv" {
 		t.Fatalf("unexpected cos upload request: %#v", cosUploader.request)
 	}
@@ -795,6 +816,14 @@ func TestRunOnceUploadsCOSObject(t *testing.T) {
 }
 
 func TestRunOnceCompletesLegacyCOSRecordingFileJob(t *testing.T) {
+	runRunOnceCompletesLegacyCOSRecordingFileJobWithQuota(t, 1000000000, false)
+}
+func TestRunOnceCompletesLegacyCOSRecordingFileJobRejectsQuota(t *testing.T) {
+	runRunOnceCompletesLegacyCOSRecordingFileJobWithQuota(t, 1, true)
+}
+
+func runRunOnceCompletesLegacyCOSRecordingFileJobWithQuota(t *testing.T, limit int64, denied bool) {
+	t.Helper()
 	ctx := context.Background()
 	cfg, database := openTestDBWithConfig(t, ctx)
 	actor := bootstrapTestAdmin(t, ctx, database)
@@ -834,7 +863,7 @@ func TestRunOnceCompletesLegacyCOSRecordingFileJob(t *testing.T) {
 		Region:          "ap-shanghai",
 		Bucket:          "bucket-1250000000",
 		Prefix:          "7grecorder/test/",
-		MaxManagedBytes: 1000000000,
+		MaxManagedBytes: limit,
 	}); err != nil {
 		t.Fatalf("UpsertCOSConfig returned error: %v", err)
 	}
@@ -875,6 +904,19 @@ func TestRunOnceCompletesLegacyCOSRecordingFileJob(t *testing.T) {
 	cosUploader := &fakeCOSUploader{result: upload.COSUploadResult{ETag: "etag"}}
 	if err := NewWithCOSUploader(database, &fakeRecorder{}, cfg, cosUploader).RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce returned error: %v", err)
+	}
+	if denied {
+		if cosUploader.request.ObjectID != 0 {
+			t.Fatal("quota rejection still called COS PUT")
+		}
+		var status string
+		if err := database.QueryRowContext(ctx, `SELECT status FROM cos_objects WHERE id=1`).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "FAILED" {
+			t.Fatalf("expected failed quota admission, got %s", status)
+		}
+		return
 	}
 	if cosUploader.request.ObjectKey != "7grecorder/test/raw/recordings/1741048619-7G/record-1741048619-20260905-224258-164-title.xml" {
 		t.Fatalf("unexpected raw cos request: %#v", cosUploader.request)

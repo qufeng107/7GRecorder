@@ -254,3 +254,28 @@ func classifyCOSSDKError(err error) error {
 	}
 	return NewClassifiedError("TRANSIENT", err.Error())
 }
+
+// Delete uses the repository-pinned SDK. Only quota-selected managed keys are accepted.
+func (TencentCOSUploader) Delete(ctx context.Context, request COSUploadRequest) error {
+	if request.Region == "" || request.Bucket == "" || !managedKey(request.Prefix, request.ObjectKey) {
+		return NewClassifiedError("PERMANENT", "invalid managed COS delete request")
+	}
+	if request.Secret.SecretID == "" || request.Secret.SecretKey == "" {
+		return NewClassifiedError("AUTH", "cos credential is incomplete")
+	}
+	endpoint, err := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com", request.Bucket, request.Region))
+	if err != nil {
+		return err
+	}
+	client := cos.NewClient(&cos.BaseURL{BucketURL: endpoint}, &http.Client{Timeout: 30 * time.Second, Transport: &cos.AuthorizationTransport{
+		SecretID: request.Secret.SecretID, SecretKey: request.Secret.SecretKey, SessionToken: request.Secret.SessionToken,
+	}})
+	response, err := client.Object.Delete(ctx, request.ObjectKey)
+	if response != nil && response.Body != nil {
+		response.Body.Close()
+	}
+	if ce, ok := cos.IsCOSError(err); ok && ce != nil && ce.Code == "NoSuchKey" {
+		return nil
+	}
+	return classifyCOSSDKError(err)
+}
