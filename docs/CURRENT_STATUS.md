@@ -1,6 +1,6 @@
 # 7GRecorder Current Status
 
-Last updated: 2026-09-19
+Last updated: 2026-10-20
 
 This file is the handoff entry point for a new coding chat. Read it before reconstructing context from screenshots or
 server commands.
@@ -25,7 +25,8 @@ per operator request; focused package tests and frontend local checks were used.
 
 ## Production
 
-- Current deployed production commit: `1dcab83bdbf45531ecd1a73280be5ce64f662c39`.
+- Current deployed production commit: `54162ce8a10f6e31dc17324f0e24329f3cf92aa0` (COS quota release, 2026-10-20 09:24 UTC).
+- Previous analytics release: `1dcab83bdbf45531ecd1a73280be5ce64f662c39`.
 - Deployed at 2026-09-19 21:58 UTC; migrations 12–14 succeeded, schema version 14. The normal running-job guard passed;
   deployment recreated only the application container and did not stop BililiveRecorder.
 - Read-only Chromium production smoke passed: readiness reported the release SHA; recordings, analytics and capture
@@ -290,13 +291,17 @@ Release preflight replaced Root.MkdirAll with Go 1.24-compatible Root.Mkdir trav
 
 The deployment record is committed on dev only; no additional production rollout is needed for this documentation update.
 
-## Local COS quota correction (not deployed)
+## COS quota release — 2026-10-20
 
-The saved `max_managed_bytes` previously had no enforcement in the upload workers. The local fix admits every
+The saved `max_managed_bytes` previously had no enforcement in the upload workers. The deployed fix admits every
 video/raw/Songs PUT against actual file bytes and shared per-profile usage, with persistent reservations and
 controlled oldest-object deletion. Startup and independent 24-hour checks reclaim over-budget profiles even when
 there are no new uploads. Deletion intents survive restart; failures block further over-budget admission. Active,
 writing, protected, reviewed and Songs-leased sources remain protected; local files and Bilibili state are unchanged.
 Migration 15 preserves uncertain remote bytes from failed/in-flight uploads. Destination region/bucket/prefix become
 immutable once objects are registered. This is a managed per-profile budget, not an account-wide resource-package
-ceiling; unknown bucket objects are never listed or deleted. No production inspection, cleanup or deployment occurred.
+ceiling; unknown bucket objects are never listed or deleted. The release was merged through PR #16. Dev CI `39396260113`, PR CI `39396926503`, and the mandatory CI in
+Production Deploy `39398517288` passed. Migration 15 succeeded at 09:24:45 UTC and only the application container
+was recreated. Public live/readiness endpoints returned the release SHA and unauthenticated `/api/v1/me` returned
+401. Deployment used the existing online-backup and running-job guards. Direct SSH inspection was unavailable to
+the local identity, so per-profile usage and individual COS cleanup outcomes were not independently inspected.
