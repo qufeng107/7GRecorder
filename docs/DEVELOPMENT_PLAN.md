@@ -493,3 +493,6 @@ DNS mutation, certificate purchasing, and replacing Tencent Cloud's renewal life
 
 当前运营增量：先提供接收事件分钟趋势、可保留的 CMD 汇总和授权事件浏览器。
 用户去重、礼物/盲盒金额、SC 撤回后的净额仍需要真实场景样本验收，不能把包计数直接当业务指标。
+
+Phase 5 quota correction: wire the previously configuration-only `max_managed_bytes` into both upload worker paths,
+with atomic admission, durable controlled deletion and regression tests. This does not deploy or clean production data.

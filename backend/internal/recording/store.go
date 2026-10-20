@@ -656,6 +656,9 @@ func (s Store) uploadSourcesByID(ctx context.Context, id int64, actor *account.U
 				WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso WHERE uso.upload_source_id = us.id AND uso.status = 'READY_TO_UPLOAD' AND NOT EXISTS (
 						SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id
 					)) THEN 'PENDING'
+                WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id=uso.id WHERE uso.upload_source_id=us.id AND uso.status='READY_TO_UPLOAD' AND co.status='DELETING') THEN 'DELETING'
+                WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id=uso.id WHERE uso.upload_source_id=us.id AND uso.status='READY_TO_UPLOAD' AND co.status='AVAILABLE') THEN 'PARTIAL'
+                WHEN EXISTS (SELECT 1 FROM upload_source_outputs uso JOIN upload_source_cos_objects co ON co.upload_source_output_id=uso.id WHERE uso.upload_source_id=us.id AND uso.status='READY_TO_UPLOAD' AND co.status='DELETED') THEN 'DELETED'
 				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp WHERE csp.recording_profile_id = us.recording_profile_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
 				ELSE 'DISABLED'
 			END,
@@ -2455,7 +2458,8 @@ func (s Store) MarkUploadSourceEditSucceeded(ctx context.Context, id int64, outp
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE upload_source_cos_objects
-		SET size_bytes = (
+		SET quota_reserved_bytes = MAX(quota_reserved_bytes, CASE WHEN status = 'AVAILABLE' THEN size_bytes ELSE 0 END),
+            size_bytes = (
 				SELECT uso.size_bytes
 				FROM upload_source_outputs uso
 				WHERE uso.id = upload_source_cos_objects.upload_source_output_id
@@ -2474,7 +2478,7 @@ func (s Store) MarkUploadSourceEditSucceeded(ctx context.Context, id int64, outp
 			status = 'PENDING',
 			last_error = NULL,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE upload_source_id = ?
+		WHERE upload_source_id = ? AND status NOT IN ('DELETING', 'DELETED')
 			AND upload_source_output_id IS NOT NULL
 			AND upload_source_output_id IN (
 				SELECT id FROM upload_source_outputs WHERE upload_source_id = ? AND status = 'READY_TO_UPLOAD'
@@ -2746,6 +2750,8 @@ func (s Store) uploadSourceOutputs(ctx context.Context, uploadSourceID int64) ([
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'UPLOADING') THEN 'UPLOADING'
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status = 'PENDING') THEN 'PENDING'
 				WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id = uso.id AND co.status IN ('FAILED', 'SOURCE_MISSING')) THEN 'FAILED'
+                WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id=uso.id AND co.status='DELETING') THEN 'DELETING'
+                WHEN EXISTS (SELECT 1 FROM upload_source_cos_objects co WHERE co.upload_source_output_id=uso.id AND co.status='DELETED') THEN 'DELETED'
 				WHEN EXISTS (SELECT 1 FROM cos_storage_profiles csp JOIN upload_sources us ON us.recording_profile_id = csp.recording_profile_id WHERE us.id = uso.upload_source_id AND csp.enabled = 1) THEN 'WAITING_SOURCE'
 				ELSE 'DISABLED'
 			END,

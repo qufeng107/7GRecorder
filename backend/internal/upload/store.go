@@ -309,7 +309,7 @@ func (s Store) UpsertCOSConfig(ctx context.Context, actor account.User, profileI
 	if err := s.ensureCredentialVisible(ctx, actor, req.CredentialID, "tencent_cos", "STORAGE"); err != nil {
 		return COSConfig{}, err
 	}
-	_, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO cos_storage_profiles
 			(recording_profile_id, credential_id, enabled, region, bucket, prefix, max_managed_bytes)
 		VALUES (?, ?, 1, ?, ?, ?, ?)
@@ -321,9 +321,20 @@ func (s Store) UpsertCOSConfig(ctx context.Context, actor account.User, profileI
 			prefix = excluded.prefix,
 			max_managed_bytes = excluded.max_managed_bytes,
 			updated_at = CURRENT_TIMESTAMP
+        WHERE (cos_storage_profiles.region=excluded.region AND cos_storage_profiles.bucket=excluded.bucket AND cos_storage_profiles.prefix=excluded.prefix)
+        OR (NOT EXISTS (SELECT 1 FROM cos_objects WHERE cos_storage_profile_id=cos_storage_profiles.id)
+        AND NOT EXISTS (SELECT 1 FROM upload_source_cos_objects WHERE cos_storage_profile_id=cos_storage_profiles.id)
+        AND NOT EXISTS (SELECT 1 FROM song_artifacts WHERE cos_storage_profile_id=cos_storage_profiles.id))
 	`, profileID, req.CredentialID, region, bucket, prefix, req.MaxManagedBytes)
 	if err != nil {
 		return COSConfig{}, fmt.Errorf("upsert cos config: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return COSConfig{}, err
+	}
+	if changed != 1 {
+		return COSConfig{}, fmt.Errorf("%w: COS destination cannot change while registered objects exist", ErrValidation)
 	}
 	return s.GetCOSConfig(ctx, actor, profileID)
 }
@@ -505,7 +516,7 @@ func (s Store) createCOSObjects(ctx context.Context) (int, error) {
 		WHERE us.status = 'READY_TO_UPLOAD'
 			AND `+uploadSourceStableCondition+`
 			AND `+uploadSourceReviewReadyCondition+`
-			AND (co.id IS NULL OR co.status IN ('PENDING', 'FAILED', 'SOURCE_MISSING'))
+			AND (co.id IS NULL OR (co.status IN ('PENDING', 'FAILED', 'SOURCE_MISSING') AND co.quota_reserved_bytes = 0))
 		ORDER BY us.started_at ASC, us.id ASC, uso.sort_order ASC, uso.id ASC
 	`)
 	if err != nil {
@@ -906,6 +917,7 @@ func (s Store) MarkCOSObjectUploaded(ctx context.Context, objectID int64, result
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE upload_source_cos_objects
 		SET status = 'AVAILABLE',
+            quota_reserved_bytes = 0,
 			etag = NULLIF(?, ''),
 			size_bytes = CASE WHEN ? > 0 THEN ? ELSE size_bytes END,
 			last_error = NULL,
@@ -932,7 +944,7 @@ func (s Store) MarkCOSObjectUploadFailed(ctx context.Context, objectID int64, er
 		SET status = ?,
 			last_error = ?,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		WHERE id = ? AND status NOT IN ('DELETING', 'DELETED', 'AVAILABLE')
 	`, status, message, objectID)
 	if err != nil {
 		return fmt.Errorf("mark cos object failed: %w", err)
@@ -964,6 +976,7 @@ func (s Store) MarkCOSRecordingFileUploaded(ctx context.Context, objectID int64,
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE cos_objects
 		SET status = 'AVAILABLE',
+            quota_reserved_bytes = 0,
 			etag = NULLIF(?, ''),
 			size_bytes = CASE WHEN ? > 0 THEN ? ELSE size_bytes END,
 			last_error = NULL,
@@ -990,7 +1003,7 @@ func (s Store) MarkCOSRecordingFileUploadFailed(ctx context.Context, objectID in
 		SET status = ?,
 			last_error = ?,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		WHERE id = ? AND status NOT IN ('DELETING', 'DELETED', 'AVAILABLE')
 	`, status, message, objectID)
 	if err != nil {
 		return fmt.Errorf("mark cos recording file failed: %w", err)

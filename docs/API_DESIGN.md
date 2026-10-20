@@ -257,7 +257,7 @@ Early upload-module bootstrap implements credential metadata creation and module
   `start_time`, `end_time`, `started_at_china`, `completed_at_china`, `live_ordinal`, and `part_count`.
   `source` is used for Bilibili repost submissions. When `copyright` is `2` and `source` is omitted, the backend
   defaults it to the room URL template `https://live.bilibili.com/{{room_id}}`.
-- `GET/PUT /api/v1/recording-profiles/{id}/storage/cos` reads or saves the COS storage profile.
+- `GET/PUT /api/v1/recording-profiles/{id}/storage/cos` reads or saves the COS storage profile. Once objects are registered, changing region/bucket/prefix returns validation error; enable, credentials and quota remain editable. COS object status may be `DELETING` while a durable cleanup intent is pending; download is unavailable in that state.
 - `POST /api/v1/upload-modules/actions/reconcile` is SUPER_ADMIN-only and creates idempotent Bilibili/COS upload jobs
   for `READY_TO_UPLOAD` upload sources. Bilibili jobs render title/description templates and store the request snapshot
   before invoking the uploader adapter. The production biliup adapter remains disabled until pinned biliup fixtures are

@@ -445,9 +445,10 @@ recording_id
 recording_file_id
 object_key
 size_bytes
+quota_reserved_bytes not null default 0
 checksum nullable
 etag nullable
-status               PENDING | UPLOADING | AVAILABLE | FAILED | DELETED | SOURCE_MISSING
+status               PENDING | UPLOADING | AVAILABLE | FAILED | DELETING | DELETED | SOURCE_MISSING
 last_error nullable
 uploaded_at nullable
 deleted_at nullable
@@ -462,10 +463,10 @@ updated_at
 object_key UNIQUE within managed profile/prefix
 ```
 
-COS Rolling Usage 只统计：
+COS Rolling Usage 统计两张对象表的 AVAILABLE / DELETING 对象与所有非 DELETED 行的 quota_reserved_bytes（同一行不重复计费），并计入 Songs artifacts。
 
 ```text
-status = AVAILABLE
+charged_bytes = max(available_or_deleting_size, quota_reserved_bytes)
 ```
 
 且只删除数据库登记、属于该 Storage Profile Prefix 的对象。
@@ -482,6 +483,7 @@ upload_source_id
 upload_source_output_id
 object_key
 size_bytes
+quota_reserved_bytes not null default 0
 checksum nullable
 etag nullable
 source_size_bytes not null default 0
@@ -489,7 +491,7 @@ compression_status         DISABLED | PENDING | COMPRESSING | COMPRESSED | SKIPP
 compression_preset nullable
 compression_settings_json nullable
 compressed_from_relative_path nullable
-status               PENDING | UPLOADING | AVAILABLE | FAILED | DELETED | SOURCE_MISSING
+status               PENDING | UPLOADING | AVAILABLE | FAILED | DELETING | DELETED | SOURCE_MISSING
 last_error nullable
 uploaded_at nullable
 deleted_at nullable
@@ -1065,3 +1067,21 @@ Migration `00009_upload_source_local_cleanup.sql` introduces these fields and an
 会话原路径保留为当前/最后分片指针；会话大小为所有分片最后观测大小之和（含已删除历史）。
 会话 raw_status 为 WRITING（有活动分片）、AVAILABLE（仍有可读分片）、DELETED（全部正常清理）或 MISSING。
 部分清理通过分片清单明确展示，AVAILABLE 不保证整场原文完整。分钟计数独立保留。
+
+### COS quota enforcement
+
+Both COS object tables additionally use `DELETING` for a durable remote-delete intent. Quota accounting includes
+`AVAILABLE`, `UPLOADING` (reserved actual source bytes), and `DELETING` until remote deletion succeeds. The reservation columns described below preserve uncertain remote usage. Deleted rows remain tombstones and must not be automatically uploaded again. A short SQLite transaction
+serializes capacity admission and persists `UPLOADING` before network I/O; remote deletion runs outside transactions.
+Songs artifacts are counted as non-reclaimable usage. Nonterminal Songs runs protect their source objects.
+Songs artifact uploads also reserve their actual bytes before PUT in the existing artifact row (`UPLOADING`).
+Retries replace that row's prior reservation instead of double-counting it. Storage destination region/bucket/prefix
+cannot change once registered objects exist; this prevents cleanup from addressing an old key in a new bucket.
+
+`00015_cos_quota_reservations.sql` adds `quota_reserved_bytes NOT NULL DEFAULT 0` to both COS object tables.
+Admission persists the reservation separately from delivery status: failed PUT/HEAD, cancellation, review freezes and
+worker restart must not silently release bytes that may already exist remotely. AVAILABLE/DELETING charge the larger
+of object size and reservation; other non-DELETED states charge the reservation. Retrying the same key replaces its
+own reservation; successful upload or confirmed deletion clears it. Migration conservatively reserves existing
+UPLOADING/FAILED objects. Uncertain failed objects are not automatically deleted; they can be retried against the same
+key without double reservation. Reconciliation must preserve their key while reserved.
